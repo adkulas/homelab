@@ -108,6 +108,9 @@ logic; shell scripts do not duplicate it.
 
 The CLI invokes official docker compose, SOPS, and age tooling rather than reimplementing them.
 
+The proposed command contracts, safety artifacts, and Declared Configuration schema are specified in
+[`media-stack-cli.md`](media-stack-cli.md).
+
 ## Configuration ownership
 
  Owner                       Responsibility
@@ -180,8 +183,10 @@ material at runtime without persisting plaintext where possible, using Compose s
 credentials and tightly controlled generated environment files where they do not.
 
 The wizard handles environment selection, data and backup roots, project and port allocation, age identity checks, secret
-capture, NordVPN credentials, directory and volume creation, Compose launch, API bootstrap, reconciliation, health checks, and
-the manual Profilarr connection step. It confirms before pruning, restoring, replacing state, or destroying resources.
+capture, NordVPN OpenVPN service credentials, directory and volume creation, Compose launch, API bootstrap, reconciliation,
+health checks, and the manual Profilarr connection step. It confirms before pruning, restoring, replacing state, or destroying
+resources. Gluetun owns NordVPN endpoint discovery from semantic server filters; the CLI does not require a Nord access token
+or query Nord's API.
 
 ## Backups and recovery
 
