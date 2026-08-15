@@ -48,6 +48,10 @@ Exclude Bazarr, Usenet, FlareSolverr, Recyclarr, a public reverse proxy, SSO, an
 
 Every UI is available on the LAN with authentication. Nothing is intentionally exposed to the internet.
 
+Every long-running service uses `restart: unless-stopped` and a bounded per-service `json-file` logging policy with
+`max-size: 10m` and `max-file: 3`. These lifecycle defaults are rendered and verified rather than left to mutable daemon
+defaults.
+
 ## Environment isolation
 
 Production and Staging are complete, independent Compose projects. Each has its own Gluetun, qBittorrent, application
@@ -57,15 +61,27 @@ containers, Compose project name, ports, secrets, API keys, config volumes, and 
 <data-root>/
   production/
     torrents/
+      movies/
+      series/
     media/
+      movies/
+      series/
   staging/
     torrents/
+      movies/
+      series/
     media/
+      movies/
+      series/
 ```
 
-Each environment maps only its root to /data. qBittorrent receives /data/torrents; Sonarr and Radarr receive /data; Jellyfin
-receives /data/media. Staging is allowed to perform real acquisition but must never share state or integrations with
-Production.
+Each environment maps only its root to `/data`. qBittorrent receives `/data/torrents`; Sonarr and Radarr receive `/data`;
+Jellyfin receives `/data/media` read-only. Staging is allowed to perform real acquisition but must never share state or
+integrations with Production.
+
+Application containers run with declared numeric runtime UID and GID values rather than assuming `1000:1000`. `doctor` proves
+that the selected identity can create, rename, hardlink, and remove files through the actual container-visible mounts before
+the environment starts managing data.
 
 ## Supported hosts and storage
 
@@ -173,6 +189,10 @@ approval for requests.
 qBittorrent shares Gluetun's network namespace and has no independent network path. Acquisition fails closed when the tunnel
 is unhealthy. Verification proves qBittorrent's observed public IP differs from the host's.
 
+Do not render fixed `container_name` values. Compose project scoping supplies environment-specific identities. Gluetun joins
+the environment's application network with the `qbittorrent` network alias and publishes qBittorrent's Web UI port, so peer
+services use `http://qbittorrent:8080` while qBittorrent retains no independent network attachment or published port.
+
 NordVPN does not provide inbound port forwarding; reduced connectability and possible seeding impact are accepted initially.
 Keep the provider configuration replaceable.
 
@@ -182,11 +202,11 @@ Commit secrets only as SOPS-encrypted values using age recipients. Age private i
 material at runtime without persisting plaintext where possible, using Compose secrets for applications that support file
 credentials and tightly controlled generated environment files where they do not.
 
-The wizard handles environment selection, data and backup roots, project and port allocation, age identity checks, secret
-capture, NordVPN OpenVPN service credentials, directory and volume creation, Compose launch, API bootstrap, reconciliation,
-health checks, and the manual Profilarr connection step. It confirms before pruning, restoring, replacing state, or destroying
-resources. Gluetun owns NordVPN endpoint discovery from semantic server filters; the CLI does not require a Nord access token
-or query Nord's API.
+The wizard handles environment selection, data and backup roots, declared runtime UID and GID, project and port allocation,
+age identity checks, secret capture, NordVPN OpenVPN service credentials, directory and volume creation, Compose launch, API
+bootstrap, reconciliation, health checks, and the manual Profilarr connection step. It confirms before pruning, restoring,
+replacing state, or destroying resources. Gluetun owns NordVPN endpoint discovery from semantic server filters; the CLI does
+not require a Nord access token or query Nord's API.
 
 ## Backups and recovery
 
@@ -231,7 +251,8 @@ Automated verification covers:
 - API contract fixtures for supported service versions;
 - an empty plan after a second apply;
 - container health and LAN reachability;
-- /data device, hardlink, rename, and permission behavior;
+- `/data` device, hardlink, rename, and application-runtime permission behavior through the actual container mounts;
+- internal service-name resolution, including Gluetun's `qbittorrent` network alias;
 - qBittorrent VPN egress and fail-closed behavior;
 - a test import with verified inode equality;
 - backup manifests and checksums; and

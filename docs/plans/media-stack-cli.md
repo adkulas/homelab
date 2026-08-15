@@ -101,9 +101,11 @@ media-stack init --environment staging
 media-stack init --environment production --non-interactive --answers answers.yaml
 ```
 
-`init` locates the repository, collects roots, project identity, LAN ports, timezone, hardware preference, age recipient, and
-secret values or references. It validates cross-environment isolation, previews changes, atomically writes configuration and
-the SOPS-encrypted secret document, and creates selected-environment directories with safe permissions.
+`init` locates the repository, collects roots, project identity, LAN ports, timezone, numeric `runtimeUID` and `runtimeGID`,
+hardware preference, age recipient, and secret values or references. It may suggest `1000` only when that value matches the
+selected host user's actual numeric identity; it never silently hard-codes `1000:1000`. It validates cross-environment
+isolation, previews changes, atomically writes configuration and the SOPS-encrypted secret document, and creates
+selected-environment directories with safe permissions.
 
 It never starts containers. Re-running preserves choices and prompts only for missing values. It reports invalid existing
 values without overwriting them. Non-interactive use fails when an answer is missing.
@@ -116,7 +118,9 @@ media-stack doctor --environment staging [--output json]
 
 `doctor` checks configuration, secret references, isolation, supported Ubuntu or WSL 2 execution, Docker, Compose, SOPS,
 age, ports, writable roots, free space, same-device layout, hardlink inode preservation, atomic rename, permissions,
-filesystem events, and optional transcoding hardware.
+filesystem events, and optional transcoding hardware. Storage permission probes run through disposable containers using the
+declared runtime identity and the same container-visible mounts as the applications; they prove create, rename, hardlink,
+inode preservation, and removal rather than relying only on host-user access.
 
 Storage checks use uniquely named disposable files under the selected data root and remove only those files. Native
 Windows/NTFS storage remains unsupported unless all required container-observable probes pass; passing remains a warning.
@@ -216,8 +220,10 @@ media-stack verify --environment staging [--suite smoke|full|promotion|restore-d
 media-stack verify --environment staging --suite promotion --legal-fixture fixtures/legal-movie.yaml
 ```
 
-- `smoke`: rendered schema, isolation, health, interface readiness, and LAN reachability.
-- `full`: smoke plus storage semantics, convergence, backup sampling, VPN egress, and fail-closed behavior.
+- `smoke`: rendered schema, isolation, health, interface readiness, LAN reachability, and internal service-name resolution,
+  including Gluetun's `qbittorrent` alias.
+- `full`: smoke plus storage semantics through the declared application runtime identity, convergence, backup sampling, VPN
+  egress, and fail-closed behavior.
 - `promotion`: full plus required legal acquisition, hardlink import, discovery, and playback checks.
 - `restore-drill`: recovered state, isolation, rotated credentials, disabled acquisition, and gated integrations.
 
@@ -262,6 +268,8 @@ metadata:
 spec:
   defaults:
     timezone: America/Toronto
+    runtimeUID: 1000
+    runtimeGID: 1000
     lanBindAddress: 0.0.0.0
 
   environments:
@@ -334,10 +342,17 @@ spec:
 
 Deliberately derive instead of configure:
 
-- `/data/torrents`, `/data/media/movies`, and `/data/media/series`;
+- `/data/torrents/movies`, `/data/torrents/series`, `/data/media/movies`, and `/data/media/series`;
 - qBittorrent categories and Automatic Torrent Management;
 - required storage capabilities;
-- Arr root folders and Prowlarr application URLs;
+- environment-scoped network and volume names, with no fixed `container_name` values;
+- Gluetun's `qbittorrent` network alias and qBittorrent Web UI publication, with peer services using
+  `http://qbittorrent:8080` and no independent qBittorrent network attachment;
+- Arr root folders and internal service URLs such as `http://prowlarr:9696`, `http://radarr:7878`, and
+  `http://sonarr:8989`;
+- runtime identity settings for storage-owning application images, using supported `PUID`/`PGID` variables or Compose `user`
+  as appropriate;
+- `restart: unless-stopped` and per-service `json-file` logging bounded by `max-size: 10m` and `max-file: 3`;
 - mandatory first-milestone services; and
 - Profilarr's owned quality, naming, upgrade, and media-management domains.
 
@@ -397,6 +412,9 @@ deferred until a supported way to acquire its required private key is proven.
 - Environment roots cannot be equal, nested, or escape through normalized `..`.
 - Backup roots are not inside data roots; warn when they appear to share physical storage.
 - Host roots become absolute after supported local-path expansion. Arbitrary environment interpolation is forbidden.
+- `runtimeUID` and `runtimeGID` are non-root numeric IDs. Rendering must map them to each pinned storage-owning application
+  image's supported `PUID`/`PGID` inputs or Compose `user`; an applicable image that cannot honor the declared identity is a
+  configuration error.
 - Public Torrent Sources use semantic IDs from a checked-in approved catalog.
 - The first milestone accepts OpenVPN UDP or TCP; UDP is the default. Server filters must match the pinned Gluetun image's
   `format-servers -nordvpn` output.
