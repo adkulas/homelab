@@ -1,0 +1,10 @@
+apiVersion: homelab.media-stack/v1alpha1
+kind: MediaStack
+spec:
+  defaults:
+    timezone: America/Toronto
+    runtimeUID: 1000
+    runtimeGID: 1000
+  environments:
+    production: {}
+    staging: {}
