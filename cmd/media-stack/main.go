@@ -1,24 +1,24 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 
-	"github.com/adkulas/homelab/internal/config"
-	"github.com/adkulas/homelab/internal/topology"
+	"github.com/adkulas/homelab/internal/engine"
 )
 
-const usage = "usage: media-stack plan --environment production|staging [--config path] [--versions path]"
+const usage = "usage: media-stack plan --environment production|staging [--config path]"
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	if err := run(context.Background(), os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(64)
 	}
 }
 
-func run(arguments []string) error {
+func run(ctx context.Context, arguments []string) error {
 	if len(arguments) == 0 || arguments[0] != "plan" {
 		return fmt.Errorf("%s", usage)
 	}
@@ -26,8 +26,7 @@ func run(arguments []string) error {
 	flags := flag.NewFlagSet("plan", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	environmentName := flags.String("environment", "", "Production or Staging Environment")
-	configPath := flags.String("config", "stacks/media/media-stack.yaml", "Declared Configuration path")
-	versionsPath := flags.String("versions", "stacks/media/versions.yaml", "checked-in versions path")
+	configPath := flags.String("config", "", "Declared Configuration path")
 	if err := flags.Parse(arguments[1:]); err != nil {
 		return err
 	}
@@ -35,22 +34,18 @@ func run(arguments []string) error {
 		return fmt.Errorf("environment is required\n%s", usage)
 	}
 
-	declared, err := config.Load(*configPath)
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("locate working directory: %w", err)
+	}
+	request, err := engine.NewPlanRequest(workingDirectory, *environmentName, *configPath)
 	if err != nil {
 		return err
 	}
-	if err := declared.SelectEnvironment(*environmentName); err != nil {
-		return err
-	}
-	versions, err := config.LoadVersions(*versionsPath)
+	plan, err := engine.New().Plan(ctx, request)
 	if err != nil {
 		return err
 	}
-
-	compose, err := topology.Render(declared.Spec.Defaults, versions.Images)
-	if err != nil {
-		return err
-	}
-	_, err = os.Stdout.Write(compose)
+	_, err = os.Stdout.Write(plan.Compose())
 	return err
 }

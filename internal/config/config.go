@@ -48,7 +48,7 @@ func Load(path string) (MediaStack, error) {
 	return declared, nil
 }
 
-func (declared MediaStack) SelectEnvironment(name string) error {
+func (declared MediaStack) ValidateEnvironment(name string) error {
 	if name != "production" && name != "staging" {
 		return fmt.Errorf("environment %q is not production or staging", name)
 	}

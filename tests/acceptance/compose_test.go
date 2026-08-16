@@ -11,15 +11,7 @@ import (
 )
 
 func TestPlanRendersSchemaValidPortableServiceDefaults(t *testing.T) {
-	repositoryRoot := repositoryRoot(t)
-	plan := exec.Command(
-		"go", "run", "./cmd/media-stack",
-		"plan",
-		"--environment", "staging",
-		"--config", "stacks/media/media-stack.yaml",
-		"--versions", "stacks/media/versions.yaml",
-	)
-	plan.Dir = repositoryRoot
+	plan := planCommand(t, "--environment", "staging")
 	rendered, err := plan.CombinedOutput()
 	if err != nil {
 		t.Fatalf("media-stack plan failed: %v\n%s", err, rendered)
@@ -32,7 +24,7 @@ func TestPlanRendersSchemaValidPortableServiceDefaults(t *testing.T) {
 		"config",
 		"--format", "json",
 	)
-	validation.Dir = repositoryRoot
+	validation.Dir = repositoryRoot(t)
 	validation.Stdin = bytes.NewReader(rendered)
 	merged, err := validation.CombinedOutput()
 	if err != nil {
@@ -44,15 +36,15 @@ func TestPlanRendersSchemaValidPortableServiceDefaults(t *testing.T) {
 		t.Fatalf("decode merged Compose project: %v\n%s", err, merged)
 	}
 
-	identity := map[string]string{
-		"gluetun":     "",
-		"jellyfin":    "user",
-		"profilarr":   "puid",
-		"prowlarr":    "puid",
-		"qbittorrent": "puid",
-		"radarr":      "puid",
-		"seerr":       "user",
-		"sonarr":      "puid",
+	identity := map[string]identityContract{
+		"gluetun":     inheritedIdentity,
+		"jellyfin":    composeUserIdentity,
+		"profilarr":   puidIdentity,
+		"prowlarr":    puidIdentity,
+		"qbittorrent": puidIdentity,
+		"radarr":      puidIdentity,
+		"seerr":       composeUserIdentity,
+		"sonarr":      puidIdentity,
 	}
 	var problems []string
 	for name, identityContract := range identity {
@@ -76,11 +68,11 @@ func TestPlanRendersSchemaValidPortableServiceDefaults(t *testing.T) {
 			problems = append(problems, fmt.Sprintf("%s TZ = %q", name, service.Environment["TZ"]))
 		}
 		switch identityContract {
-		case "puid":
+		case puidIdentity:
 			if service.Environment["PUID"] != "1000" || service.Environment["PGID"] != "1000" {
 				problems = append(problems, fmt.Sprintf("%s PUID:PGID = %q:%q", name, service.Environment["PUID"], service.Environment["PGID"]))
 			}
-		case "user":
+		case composeUserIdentity:
 			if service.User != "1000:1000" {
 				problems = append(problems, fmt.Sprintf("%s user = %q", name, service.User))
 			}
@@ -96,6 +88,14 @@ func TestPlanRendersSchemaValidPortableServiceDefaults(t *testing.T) {
 		t.Fatalf("merged Compose project violates portable defaults:\n%s\nrendered Compose:\n%s", strings.Join(problems, "\n"), rendered)
 	}
 }
+
+type identityContract uint8
+
+const (
+	inheritedIdentity identityContract = iota
+	puidIdentity
+	composeUserIdentity
+)
 
 type composeProject struct {
 	Services map[string]composeService `json:"services"`

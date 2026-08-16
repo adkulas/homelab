@@ -11,16 +11,7 @@ import (
 )
 
 func TestPlanRendersCheckedInImagesForSelectedEnvironment(t *testing.T) {
-	repositoryRoot := repositoryRoot(t)
-	command := exec.Command(
-		"go", "run", "./cmd/media-stack",
-		"plan",
-		"--environment", "staging",
-		"--config", "stacks/media/media-stack.yaml",
-		"--versions", "stacks/media/versions.yaml",
-	)
-	command.Dir = repositoryRoot
-
+	command := planCommand(t, "--environment", "staging")
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("media-stack plan failed: %v\n%s", err, output)
@@ -39,6 +30,14 @@ func TestPlanRendersCheckedInImagesForSelectedEnvironment(t *testing.T) {
 	if got := renderedImages(output); !reflect.DeepEqual(got, want) {
 		t.Fatalf("rendered images = %#v, want %#v\nrendered Compose:\n%s", got, want, output)
 	}
+}
+
+func planCommand(t *testing.T, arguments ...string) *exec.Cmd {
+	t.Helper()
+	goArguments := append([]string{"run", "../../cmd/media-stack", "plan"}, arguments...)
+	command := exec.Command("go", goArguments...)
+	command.Dir = filepath.Join(repositoryRoot(t), "stacks", "media")
+	return command
 }
 
 func renderedImages(compose []byte) map[string]string {

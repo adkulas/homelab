@@ -8,28 +8,29 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var mandatoryServices = []string{
-	"gluetun",
-	"qbittorrent",
-	"prowlarr",
-	"sonarr",
-	"radarr",
-	"profilarr",
-	"jellyfin",
-	"seerr",
+type runtimeIdentity uint8
+
+const (
+	inheritedIdentity runtimeIdentity = iota
+	puidIdentity
+	composeUserIdentity
+)
+
+type serviceDefinition struct {
+	name         string
+	identity     runtimeIdentity
+	configTarget string
 }
 
-var puidServices = map[string]bool{
-	"qbittorrent": true,
-	"prowlarr":    true,
-	"sonarr":      true,
-	"radarr":      true,
-	"profilarr":   true,
-}
-
-var composeUserServices = map[string]bool{
-	"jellyfin": true,
-	"seerr":    true,
+var mandatoryServices = []serviceDefinition{
+	{name: "gluetun", identity: inheritedIdentity, configTarget: "/gluetun"},
+	{name: "qbittorrent", identity: puidIdentity, configTarget: "/config"},
+	{name: "prowlarr", identity: puidIdentity, configTarget: "/config"},
+	{name: "sonarr", identity: puidIdentity, configTarget: "/config"},
+	{name: "radarr", identity: puidIdentity, configTarget: "/config"},
+	{name: "profilarr", identity: puidIdentity, configTarget: "/config"},
+	{name: "jellyfin", identity: composeUserIdentity, configTarget: "/config"},
+	{name: "seerr", identity: composeUserIdentity, configTarget: "/app/config"},
 }
 
 type composeProject struct {
@@ -65,33 +66,26 @@ func Render(defaults config.Defaults, images map[string]string) ([]byte, error) 
 		Services: make(map[string]composeService, len(mandatoryServices)),
 		Volumes:  make(map[string]composeVolume, len(mandatoryServices)),
 	}
-	for _, name := range mandatoryServices {
-		reference, exists := images[name]
+	for _, definition := range mandatoryServices {
+		reference, exists := images[definition.name]
 		if !exists {
-			return nil, fmt.Errorf("checked-in versions do not declare image %q", name)
+			return nil, fmt.Errorf("checked-in versions do not declare image %q", definition.name)
 		}
-		if err := config.ValidateImage(name, reference); err != nil {
+		if err := config.ValidateImage(definition.name, reference); err != nil {
 			return nil, err
 		}
 
 		environment := map[string]string{"TZ": defaults.Timezone}
-		if puidServices[name] {
+		user := ""
+		switch definition.identity {
+		case puidIdentity:
 			environment["PUID"] = strconv.Itoa(defaults.RuntimeUID)
 			environment["PGID"] = strconv.Itoa(defaults.RuntimeGID)
-		}
-		user := ""
-		if composeUserServices[name] {
+		case composeUserIdentity:
 			user = fmt.Sprintf("%d:%d", defaults.RuntimeUID, defaults.RuntimeGID)
 		}
-		volumeName := name + "-config"
-		volumeTarget := "/config"
-		switch name {
-		case "gluetun":
-			volumeTarget = "/gluetun"
-		case "seerr":
-			volumeTarget = "/app/config"
-		}
-		project.Services[name] = composeService{
+		volumeName := definition.name + "-config"
+		project.Services[definition.name] = composeService{
 			Image:       reference,
 			User:        user,
 			Environment: environment,
@@ -103,7 +97,7 @@ func Render(defaults config.Defaults, images map[string]string) ([]byte, error) 
 					"max-file": "3",
 				},
 			},
-			Volumes: []string{volumeName + ":" + volumeTarget},
+			Volumes: []string{volumeName + ":" + definition.configTarget},
 		}
 		project.Volumes[volumeName] = composeVolume{}
 	}
