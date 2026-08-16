@@ -12,15 +12,15 @@ import (
 func TestInitPreservesExistingChoicesOwnershipAndEncryptedSecrets(t *testing.T) {
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	configuration := append(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")), []byte(`  acquisition:
-    vpn:
-      provider: nordvpn
-      protocol: openvpn
-      openvpnProtocol: tcp
-      server:
-        countries: [Iceland]
-        categories: [P2P]
-      catalogueUpdateInterval: 720h
+	configuration := append(uninitializedConfiguration(t), []byte(`    acquisition:
+        vpn:
+            provider: nordvpn
+            protocol: openvpn
+            openvpnProtocol: tcp
+            server:
+                countries: [Iceland]
+                categories: [P2P]
+            catalogueUpdateInterval: 720h
 `)...)
 	writeFile(t, configPath, configuration, 0o640)
 	secretPath := filepath.Join(temporary, "secrets", "staging.sops.yaml")

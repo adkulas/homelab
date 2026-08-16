@@ -14,7 +14,7 @@ import (
 func TestInitWizardExplainsAndCollectsSupportedOpenVPNChoices(t *testing.T) {
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	configuration := string(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")))
+	configuration := string(uninitializedConfiguration(t))
 	configuration = strings.Replace(configuration, "timezone: America/Toronto", `timezone: ""`, 1)
 	configuration = strings.Replace(configuration, "runtimeUID: 1000", "runtimeUID: 0", 1)
 	configuration = strings.Replace(configuration, "runtimeGID: 1000", "runtimeGID: 0", 1)

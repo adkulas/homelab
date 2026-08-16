@@ -14,7 +14,7 @@ import (
 func TestInitSendsOnlyOpenVPNServiceCredentialsToSOPS(t *testing.T) {
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	copyFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml"), configPath, 0o640)
+	copyUninitializedConfig(t, configPath, 0o640)
 	answersPath := filepath.Join(temporary, "answers.yaml")
 	writeFile(t, answersPath, completeAnswers("1234", "2345", "Canada", "udp", "service-user", "service-password"), 0o600)
 	binDirectory := filepath.Join(temporary, "bin")
@@ -56,7 +56,7 @@ func TestInitSendsOnlyOpenVPNServiceCredentialsToSOPS(t *testing.T) {
 func TestInitRejectsAccessTokenAnswers(t *testing.T) {
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	copyFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml"), configPath, 0o640)
+	copyUninitializedConfig(t, configPath, 0o640)
 	before := fileState(t, configPath)
 	answersPath := filepath.Join(temporary, "answers.yaml")
 	answers := append(completeAnswers("1234", "2345", "Canada", "udp", "service-user", "service-password"), []byte("accessToken: forbidden-token\n")...)

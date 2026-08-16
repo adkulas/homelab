@@ -11,7 +11,7 @@ import (
 func TestInitPreservesDeclaredChoicesWhenAddingAnotherEnvironmentSecrets(t *testing.T) {
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	copyFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml"), configPath, 0o640)
+	copyUninitializedConfig(t, configPath, 0o640)
 	binDirectory := filepath.Join(temporary, "bin")
 	if err := os.Mkdir(binDirectory, 0o700); err != nil {
 		t.Fatal(err)

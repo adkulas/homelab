@@ -11,7 +11,7 @@ import (
 func TestInitRejectsInvalidTimezoneBeforeWritingConfigurationOrSecrets(t *testing.T) {
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	copyFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml"), configPath, 0o640)
+	copyUninitializedConfig(t, configPath, 0o640)
 	before := fileState(t, configPath)
 	answersPath := filepath.Join(temporary, "answers.yaml")
 	answers := strings.Replace(string(completeAnswers("1234", "2345", "Canada", "udp", "service-user", "service-password")),

@@ -13,7 +13,7 @@ import (
 func TestInitCreatesSelectedEnvironmentDeclaredConfigurationAndEncryptedSecrets(t *testing.T) {
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	copyFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml"), configPath, 0o640)
+	copyUninitializedConfig(t, configPath, 0o640)
 	answersPath := filepath.Join(temporary, "answers.yaml")
 	writeFile(t, answersPath, []byte(`runtimeUID: 1234
 runtimeGID: 2345
@@ -98,6 +98,29 @@ servicePassword: nord-service-password
 	if got := info.Mode().Perm(); got != 0o600 {
 		t.Fatalf("secret document mode = %#o, want 0600", got)
 	}
+}
+
+func uninitializedConfiguration(t *testing.T) []byte {
+	t.Helper()
+	var document map[string]any
+	if err := yaml.Unmarshal(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")), &document); err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := document["spec"].(map[string]any)
+	if !ok {
+		t.Fatal("Declared Configuration has no spec mapping")
+	}
+	delete(spec, "acquisition")
+	contents, err := yaml.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contents
+}
+
+func copyUninitializedConfig(t *testing.T, destination string, mode os.FileMode) {
+	t.Helper()
+	writeFile(t, destination, uninitializedConfiguration(t), mode)
 }
 
 func copyFile(t *testing.T, source, destination string, mode os.FileMode) {
