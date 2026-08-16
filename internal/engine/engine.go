@@ -67,7 +67,11 @@ func (localEngine) Plan(ctx context.Context, request PlanRequest) (Plan, error) 
 	if err != nil {
 		return Plan{}, err
 	}
-	compose, err := topology.Render(declared.Spec.Defaults, versions.Images)
+	environment := declared.Spec.Environments[request.environment]
+	if !filepath.IsAbs(environment.SecretsFile) {
+		environment.SecretsFile = filepath.Join(filepath.Dir(request.configPath), environment.SecretsFile)
+	}
+	compose, err := topology.Render(declared.Spec.Defaults, environment, versions.Images)
 	if err != nil {
 		return Plan{}, err
 	}

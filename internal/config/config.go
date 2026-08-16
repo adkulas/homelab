@@ -22,12 +22,28 @@ type MediaStackSpec struct {
 }
 
 type Defaults struct {
-	Timezone   string `yaml:"timezone"`
-	RuntimeUID int    `yaml:"runtimeUID"`
-	RuntimeGID int    `yaml:"runtimeGID"`
+	Timezone       string `yaml:"timezone"`
+	RuntimeUID     int    `yaml:"runtimeUID"`
+	RuntimeGID     int    `yaml:"runtimeGID"`
+	LANBindAddress string `yaml:"lanBindAddress"`
 }
 
-type Environment struct{}
+type Environment struct {
+	ProjectName string `yaml:"projectName"`
+	DataRoot    string `yaml:"dataRoot"`
+	SecretsFile string `yaml:"secretsFile"`
+	Ports       Ports  `yaml:"ports"`
+}
+
+type Ports struct {
+	QBittorrent int `yaml:"qbittorrent"`
+	Prowlarr    int `yaml:"prowlarr"`
+	Sonarr      int `yaml:"sonarr"`
+	Radarr      int `yaml:"radarr"`
+	Profilarr   int `yaml:"profilarr"`
+	Jellyfin    int `yaml:"jellyfin"`
+	Seerr       int `yaml:"seerr"`
+}
 
 type Versions struct {
 	APIVersion string            `yaml:"apiVersion"`

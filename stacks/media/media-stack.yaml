@@ -5,6 +5,29 @@ spec:
     timezone: America/Toronto
     runtimeUID: 1000
     runtimeGID: 1000
+    lanBindAddress: 0.0.0.0
   environments:
-    production: {}
-    staging: {}
+    production:
+      projectName: media-production
+      dataRoot: /srv/media/production
+      secretsFile: secrets/production.sops.yaml
+      ports:
+        qbittorrent: 8080
+        prowlarr: 9696
+        sonarr: 8989
+        radarr: 7878
+        profilarr: 6868
+        jellyfin: 8096
+        seerr: 5055
+    staging:
+      projectName: media-staging
+      dataRoot: /srv/media/staging
+      secretsFile: secrets/staging.sops.yaml
+      ports:
+        qbittorrent: 18080
+        prowlarr: 19696
+        sonarr: 18989
+        radarr: 17878
+        profilarr: 16868
+        jellyfin: 18096
+        seerr: 15055

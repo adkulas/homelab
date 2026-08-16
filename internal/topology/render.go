@@ -2,6 +2,7 @@ package topology
 
 import (
 	"fmt"
+	"path"
 	"strconv"
 
 	"github.com/adkulas/homelab/internal/config"
@@ -20,21 +21,27 @@ type serviceDefinition struct {
 	name         string
 	identity     runtimeIdentity
 	configTarget string
+	port         func(config.Ports) int
+	targetPort   int
+	dataMount    func(string) string
 }
 
 var mandatoryServices = []serviceDefinition{
-	{name: "gluetun", identity: inheritedIdentity, configTarget: "/gluetun"},
-	{name: "qbittorrent", identity: puidIdentity, configTarget: "/config"},
-	{name: "prowlarr", identity: puidIdentity, configTarget: "/config"},
-	{name: "sonarr", identity: puidIdentity, configTarget: "/config"},
-	{name: "radarr", identity: puidIdentity, configTarget: "/config"},
-	{name: "profilarr", identity: puidIdentity, configTarget: "/config"},
-	{name: "jellyfin", identity: composeUserIdentity, configTarget: "/config"},
-	{name: "seerr", identity: composeUserIdentity, configTarget: "/app/config"},
+	{name: "gluetun", identity: inheritedIdentity, configTarget: "/gluetun", port: func(ports config.Ports) int { return ports.QBittorrent }, targetPort: 8080},
+	{name: "qbittorrent", identity: puidIdentity, configTarget: "/config", dataMount: func(root string) string { return path.Join(root, "torrents") + ":/data/torrents" }},
+	{name: "prowlarr", identity: puidIdentity, configTarget: "/config", port: func(ports config.Ports) int { return ports.Prowlarr }, targetPort: 9696},
+	{name: "sonarr", identity: puidIdentity, configTarget: "/config", port: func(ports config.Ports) int { return ports.Sonarr }, targetPort: 8989, dataMount: func(root string) string { return root + ":/data" }},
+	{name: "radarr", identity: puidIdentity, configTarget: "/config", port: func(ports config.Ports) int { return ports.Radarr }, targetPort: 7878, dataMount: func(root string) string { return root + ":/data" }},
+	{name: "profilarr", identity: puidIdentity, configTarget: "/config", port: func(ports config.Ports) int { return ports.Profilarr }, targetPort: 6868},
+	{name: "jellyfin", identity: composeUserIdentity, configTarget: "/config", port: func(ports config.Ports) int { return ports.Jellyfin }, targetPort: 8096, dataMount: func(root string) string { return path.Join(root, "media") + ":/data/media:ro" }},
+	{name: "seerr", identity: composeUserIdentity, configTarget: "/app/config", port: func(ports config.Ports) int { return ports.Seerr }, targetPort: 5055},
 }
 
 type composeProject struct {
+	Name     string                    `yaml:"name"`
 	Services map[string]composeService `yaml:"services"`
+	Networks map[string]composeNetwork `yaml:"networks"`
+	Secrets  map[string]composeSecret  `yaml:"secrets"`
 	Volumes  map[string]composeVolume  `yaml:"volumes"`
 }
 
@@ -44,6 +51,9 @@ type composeService struct {
 	Environment map[string]string `yaml:"environment"`
 	Restart     string            `yaml:"restart"`
 	Logging     composeLogging    `yaml:"logging"`
+	Networks    []string          `yaml:"networks"`
+	Ports       []string          `yaml:"ports,omitempty"`
+	Secrets     []string          `yaml:"secrets,omitempty"`
 	Volumes     []string          `yaml:"volumes"`
 }
 
@@ -53,8 +63,12 @@ type composeLogging struct {
 }
 
 type composeVolume struct{}
+type composeNetwork struct{}
+type composeSecret struct {
+	File string `yaml:"file"`
+}
 
-func Render(defaults config.Defaults, images map[string]string) ([]byte, error) {
+func Render(defaults config.Defaults, environment config.Environment, images map[string]string) ([]byte, error) {
 	if defaults.Timezone == "" {
 		return nil, fmt.Errorf("declared timezone is required")
 	}
@@ -63,7 +77,10 @@ func Render(defaults config.Defaults, images map[string]string) ([]byte, error) 
 	}
 
 	project := composeProject{
+		Name:     environment.ProjectName,
 		Services: make(map[string]composeService, len(mandatoryServices)),
+		Networks: map[string]composeNetwork{"application": {}},
+		Secrets:  map[string]composeSecret{"environment": {File: environment.SecretsFile}},
 		Volumes:  make(map[string]composeVolume, len(mandatoryServices)),
 	}
 	for _, definition := range mandatoryServices {
@@ -75,20 +92,32 @@ func Render(defaults config.Defaults, images map[string]string) ([]byte, error) 
 			return nil, err
 		}
 
-		environment := map[string]string{"TZ": defaults.Timezone}
+		serviceEnvironment := map[string]string{"TZ": defaults.Timezone}
 		user := ""
 		switch definition.identity {
 		case puidIdentity:
-			environment["PUID"] = strconv.Itoa(defaults.RuntimeUID)
-			environment["PGID"] = strconv.Itoa(defaults.RuntimeGID)
+			serviceEnvironment["PUID"] = strconv.Itoa(defaults.RuntimeUID)
+			serviceEnvironment["PGID"] = strconv.Itoa(defaults.RuntimeGID)
 		case composeUserIdentity:
 			user = fmt.Sprintf("%d:%d", defaults.RuntimeUID, defaults.RuntimeGID)
 		}
 		volumeName := definition.name + "-config"
+		mounts := []string{volumeName + ":" + definition.configTarget}
+		if definition.dataMount != nil {
+			mounts = append(mounts, definition.dataMount(environment.DataRoot))
+		}
+		var ports []string
+		if definition.port != nil {
+			ports = []string{fmt.Sprintf("%s:%d:%d", defaults.LANBindAddress, definition.port(environment.Ports), definition.targetPort)}
+		}
+		var secrets []string
+		if definition.name == "gluetun" {
+			secrets = []string{"environment"}
+		}
 		project.Services[definition.name] = composeService{
 			Image:       reference,
 			User:        user,
-			Environment: environment,
+			Environment: serviceEnvironment,
 			Restart:     "unless-stopped",
 			Logging: composeLogging{
 				Driver: "json-file",
@@ -97,7 +126,10 @@ func Render(defaults config.Defaults, images map[string]string) ([]byte, error) 
 					"max-file": "3",
 				},
 			},
-			Volumes: []string{volumeName + ":" + definition.configTarget},
+			Networks: []string{"application"},
+			Ports:    ports,
+			Secrets:  secrets,
+			Volumes:  mounts,
 		}
 		project.Volumes[volumeName] = composeVolume{}
 	}
