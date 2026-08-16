@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -19,7 +20,7 @@ func TestInitPreservesDeclaredChoicesWhenAddingAnotherEnvironmentSecrets(t *test
 	writeFile(t, filepath.Join(binDirectory, "sops"), []byte("#!/bin/sh\ncat >/dev/null\nprintf 'encrypted: ENC[ciphertext]\\n'\n"), 0o700)
 
 	stagingAnswers := filepath.Join(temporary, "staging-answers.yaml")
-	writeFile(t, stagingAnswers, completeAnswers("1234", "2345", "Iceland", "tcp", "staging-user", "staging-password"), 0o600)
+	writeFile(t, stagingAnswers, completeAnswers(strconv.Itoa(os.Getuid()), strconv.Itoa(os.Getgid()), "Iceland", "tcp", "staging-user", "staging-password"), 0o600)
 	runNonInteractiveInit(t, binDirectory, configPath, "staging", stagingAnswers)
 	afterStaging := fileState(t, configPath)
 	if !strings.Contains(afterStaging.Contents, "openvpnProtocol: tcp") {

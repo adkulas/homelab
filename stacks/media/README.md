@@ -5,9 +5,9 @@ episodic television. It is designed for Ubuntu and Docker Desktop with WSL 2, co
 independent Production and Staging Environments so changes can be proven before they affect the household libraries.
 
 > [!IMPORTANT]
-> This stack is currently **planned, not implemented**. The commands and file paths below describe the target operator
-> experience tracked by the [implementation map](https://github.com/adkulas/homelab/issues/36). They will become executable
-> as its child tickets land. The authoritative design is in the
+> This stack is being implemented incrementally. `init`, `doctor`, and the current Compose-rendering form of `plan` are
+> available now; `apply`, `backup`, `restore`, `verify`, and `destroy` remain planned. Sections below label planned behavior
+> explicitly. The authoritative target design is in the
 > [implementation plan](../../docs/plans/media-stack.md) and
 > [CLI contract](../../docs/plans/media-stack-cli.md).
 
@@ -32,54 +32,127 @@ public internet.
 
 Use either:
 
-- Ubuntu with Docker Engine and the Docker Compose plugin; or
-- Windows with Docker Desktop's WSL 2 backend, running these commands from an integrated WSL distribution.
+- Ubuntu 22.04, 24.04, or 26.04 with Docker Engine and the Docker Compose plugin; or
+- Windows with Docker Desktop using its WSL 2 backend, running all repository commands from an integrated Ubuntu WSL
+  distribution.
 
-You will also need `age` and SOPS, a native Linux or WSL filesystem for active media and downloads, a separate backup
-location, and NordVPN OpenVPN **service credentials** from the Nord Account manual-setup area. These are not your Nord
-account email and password, and no Nord access token is required.
-
-The host must expose `/dev/net/tun` and permit the `NET_ADMIN` capability used by Gluetun. The planned `doctor` command checks
-all of these prerequisites before anything starts.
-
-### 2. Initialize Staging first
-
-From the repository root, the planned bootstrap entry point is:
+On Ubuntu, install the base tools and `age` first:
 
 ```bash
-./setup.sh
+sudo apt update
+sudo apt install ca-certificates curl git age
 ```
 
-It downloads or locates a pinned, checksum-verified `media-stack` CLI and starts the interactive initializer. Select the
-Staging Environment first. The initializer collects:
+Install Docker Engine from the [official Ubuntu apt-repository instructions](https://docs.docker.com/engine/install/ubuntu/).
+The package step must include all of the components used by this stack:
 
-- Staging data and backup roots;
-- unique LAN ports and Compose project identity;
-- timezone and the numeric UID/GID used by storage-owning containers;
-- an age recipient and environment-specific secret values;
-- NordVPN country/category intent and OpenVPN UDP or TCP; and
-- optional hardware-transcoding preference.
+```bash
+sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+docker version
+docker compose version
+```
 
-Initialization writes Declared Configuration and SOPS-encrypted secrets, but does not start containers. It is safe to rerun:
-existing choices are preserved and only missing answers are requested.
+For Windows, install [Docker Desktop with its WSL 2 backend](https://docs.docker.com/desktop/features/wsl/), enable
+**Settings > Resources > WSL Integration** for the Ubuntu distribution, and install `git`, `curl`, and `age` inside that
+distribution with the Ubuntu command above. Do not install a second Docker Engine inside the integrated distribution.
 
-### 3. Check, preview, and apply
+Install SOPS inside Ubuntu or the integrated WSL distribution. This amd64 example pins the version documented here; use the
+matching `linux.arm64` release asset on arm64:
+
+```bash
+curl -LO https://github.com/getsops/sops/releases/download/v3.13.2/sops-v3.13.2.linux.amd64
+curl -LO https://github.com/getsops/sops/releases/download/v3.13.2/sops-v3.13.2.checksums.txt
+sha256sum --ignore-missing -c sops-v3.13.2.checksums.txt
+sudo install -m 0755 sops-v3.13.2.linux.amd64 /usr/local/bin/sops
+rm sops-v3.13.2.linux.amd64 sops-v3.13.2.checksums.txt
+sops --version
+age --version
+```
+
+Generate an age identity once and keep the identity file outside Git. Give the resulting `age1...` recipient to `init`:
+
+```bash
+mkdir -p ~/.config/sops/age
+age-keygen -o ~/.config/sops/age/keys.txt
+age-keygen -y ~/.config/sops/age/keys.txt
+```
+
+You also need:
+
+- a native Linux or WSL filesystem for active downloads and libraries;
+- a separate backup location for later backup tickets;
+- `/dev/net/tun` and permission for Docker to grant Gluetun `NET_ADMIN`; and
+- NordVPN OpenVPN **service credentials** from the Nord Account manual-setup area. These are not the Nord account email and
+  password, and the stack does not need a Nord access token.
+
+### 2. Configure and initialize Staging first
+
+Edit `stacks/media/media-stack.yaml` before the first run. At minimum, choose absolute, non-overlapping `dataRoot` values, Compose
+`projectName` values, secret-file paths, and non-conflicting LAN ports for Production and Staging. Set `runtimeUID` and
+`runtimeGID` to the numeric identity that should own new data directories; for the current operator, obtain them with:
+
+```bash
+id -u
+id -g
+```
+
+From the repository root, initialize Staging:
+
+```bash
+./setup.sh --environment staging
+```
+
+`setup.sh` downloads the pinned `media-stack` Linux binary for amd64 or arm64, verifies its SHA-256 checksum, caches it, and
+runs `media-stack init`. `init` currently prompts for the runtime UID/GID, timezone, NordVPN country, optional P2P category,
+OpenVPN UDP or TCP, Gluetun catalogue interval, age recipient, and NordVPN service credentials. Non-interactive automation can
+supply the same answers explicitly:
+
+```bash
+media-stack init \
+  --environment staging \
+  --non-interactive \
+  --answers staging-answers.yaml
+```
+
+Initialization writes the reviewable Declared Configuration and `secrets/staging.sops.yaml`; it never starts containers. It
+also creates only the selected Staging Environment layout:
+
+```text
+<dataRoot>/
+├── torrents/
+│   ├── movies/
+│   └── series/
+└── media/
+    ├── movies/
+    └── series/
+```
+
+Every directory created by `init` uses mode `0750` and the declared runtime UID/GID. Assigning an identity other than the
+operator may therefore require pre-provisioned permissions or a privileged invocation. Existing directories and their
+contents are left untouched: `init` does not recursively `chown` or `chmod` data. Re-running restores missing derived
+directories while preserving complete configuration and encrypted secrets.
+
+### 3. Check prerequisites and render the selected topology
+
+These commands are available now:
 
 ```bash
 media-stack doctor --environment staging
-media-stack plan --environment staging --out staging-plan.json
-media-stack apply --plan staging-plan.json
+media-stack doctor --environment staging --output json
+media-stack plan --environment staging > staging-compose.yaml
+docker compose -f staging-compose.yaml config --quiet
 ```
 
-`doctor` validates the host, storage, secrets, ports, VPN prerequisites, and container-visible hardlink behavior. `plan` makes
-the intended changes reviewable without starting the stack. `apply` rejects an expired or stale saved plan rather than
-silently executing different actions.
+`doctor` checks the supported Linux/WSL platform, Docker Engine, Compose, SOPS, age, decryption of the selected Environment
+secret, `/dev/net/tun`, `NET_ADMIN`, and whether the pinned Gluetun catalogue accepts the declared NordVPN filters. Human
+output explains each result; JSON provides stable diagnostic records for automation. It does not start the stack.
 
-During the first apply, the CLI starts and reconciles the services in dependency order. Profilarr currently requires one
-guided UI step to connect it to Radarr and Sonarr in each environment; the CLI pauses, explains the action, and verifies its
-completion before continuing.
+The current `plan` implementation validates Declared Configuration and pinned images, then writes the selected Environment
+Compose model to standard output. It is useful for reviewing project scoping, ports, runtime identity, mounts, secrets,
+restart policy, and bounded logging. It does not yet observe applications, create a saved Plan Artifact, or mutate the host.
+Shell redirection is used above because `--out` is not implemented yet.
 
-### 4. Verify Staging
+### 4. Verify Staging (planned)
 
 ```bash
 media-stack verify --environment staging --suite smoke
@@ -101,7 +174,7 @@ media-stack verify \
 
 Success emits a content-addressed Verification Artifact bound to the exact Declared Configuration and pinned versions.
 
-### 5. Create Production and promote the proven change
+### 5. Create Production and promote the proven change (planned)
 
 Initialize Production separately, then use the Staging evidence when planning the Production change:
 
@@ -118,7 +191,7 @@ media-stack apply --plan production-plan.json
 Production is never the default. A changed configuration, image digest, CLI contract, expired verification, or missing current
 backup when one is required invalidates Promotion evidence.
 
-## How the system works
+## Target system design (planned)
 
 ### Request-to-playback flow
 
@@ -276,10 +349,35 @@ stacks/media/
 └── README.md
 ```
 
-`media-stack.yaml` declares semantic choices such as environment roots, LAN ports, runtime identity, VPN server filters,
-approved source IDs, request policy, backup retention, and verification fixtures. It does not expose arbitrary Compose
-topology. The CLI derives paths, networks, volume names, qBittorrent categories, application URLs, logging defaults, and the
-mandatory service set so that safety properties remain enforceable.
+The current `media-stack.yaml` schema contains only the fields below. Unknown fields are rejected, which prevents misspellings
+from silently becoming ineffective configuration.
+
+| YAML field | Current consumer | Exact effect |
+| --- | --- | --- |
+| `apiVersion` | all commands | Must be `homelab.media-stack/v1alpha1`. |
+| `kind` | all commands | Must be `MediaStack`. |
+| `spec.defaults.timezone` | `init`, `plan` | Validated as an IANA timezone; rendered as `TZ` for every service. |
+| `spec.defaults.runtimeUID` / `runtimeGID` | `init`, `plan` | Own newly created data directories; render as `PUID`/`PGID` for LinuxServer-style services and Compose `user` for Jellyfin and Seerr. |
+| `spec.defaults.lanBindAddress` | `plan` | Host address used for every published web port. `0.0.0.0` listens on all host interfaces. |
+| `spec.environments.<name>.projectName` | `plan` | Compose project name; scopes networks, secrets, and config volumes independently for Production and Staging. |
+| `spec.environments.<name>.dataRoot` | `init`, `plan` | Absolute host root provisioned by `init`; mounted as the selected Environment `/data` seam. The other Environment root is never rendered. |
+| `spec.environments.<name>.secretsFile` | `init`, `doctor`, `plan` | Environment-specific SOPS document written by `init`, decrypted by `doctor`, and referenced by the rendered Gluetun secret. |
+| `spec.environments.<name>.ports.qbittorrent` | `plan` | Host port published on Gluetun for the qBittorrent Web UI target `8080`; qBittorrent has no direct published port. |
+| `spec.environments.<name>.ports.prowlarr` | `plan` | Host port for Prowlarr target `9696`. |
+| `spec.environments.<name>.ports.sonarr` | `plan` | Host port for Sonarr target `8989`. |
+| `spec.environments.<name>.ports.radarr` | `plan` | Host port for Radarr target `7878`. |
+| `spec.environments.<name>.ports.profilarr` | `plan` | Host port for Profilarr target `6868`. |
+| `spec.environments.<name>.ports.jellyfin` | `plan` | Host port for Jellyfin target `8096`. |
+| `spec.environments.<name>.ports.seerr` | `plan` | Host port for Seerr target `5055`. |
+| `spec.acquisition.vpn.provider` / `protocol` | `init`, `doctor` | Currently fixed to `nordvpn` and `openvpn`; `doctor` rejects another combination. Gluetun rendering lands in a later ticket. |
+| `spec.acquisition.vpn.openvpnProtocol` | `init`, `doctor` | `udp` by default or explicit `tcp`; passed to Gluetun catalogue validation. |
+| `spec.acquisition.vpn.server.countries` | `init`, `doctor` | Exactly one semantic country selected by `init`; passed to Gluetun catalogue validation. |
+| `spec.acquisition.vpn.server.categories` | `init`, `doctor` | Optional `P2P` category passed to Gluetun catalogue validation. |
+| `spec.acquisition.vpn.catalogueUpdateInterval` | `init` | Must parse as at least `360h`; Gluetun updater wiring is planned. |
+
+Container paths, network names, config-volume names, application URLs, qBittorrent categories, restart policy, and logging
+limits are derived rather than exposed as arbitrary YAML. This preserves the shared `/data` and environment-isolation
+invariants.
 
 `versions.yaml` pins every container image by digest and pins the Profilarr PCD policy input. A version-only change is still a
 reviewable, verifiable change and invalidates evidence created for older digests.
@@ -296,9 +394,9 @@ reviewable, verifiable change and invalidates evidence created for older digests
 Keeping one writer per configuration domain prevents reconciliation loops. In particular, Recyclarr is excluded because it
 would compete with Profilarr for the same Sonarr and Radarr policy.
 
-### Reconciliation
+### Reconciliation (planned)
 
-The repository holds Declared Configuration; the applications hold observed state. `plan` compares the two and reports
+The target workflow keeps Declared Configuration in the repository and observed state in the applications. The completed `plan` will compare the two and report
 ordered `create`, `update`, `restart`, `guide`, `verify`, `unknown`, and eligible `delete` actions. `apply` creates missing
 resources and repairs drift through supported interfaces. A successful repeated apply converges to an empty plan.
 
@@ -382,24 +480,24 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 
 ## Command reference
 
-| Command | Purpose |
-| --- | --- |
-| `media-stack init` | Collect and write environment-specific Declared Configuration and encrypted secrets |
-| `media-stack doctor` | Diagnose host, dependency, storage, secret, network, and hardware readiness |
-| `media-stack plan` | Render Compose, observe applications, and preview ordered actions without mutation |
-| `media-stack apply` | Execute a reviewed plan and reconcile to convergence |
-| `media-stack backup` | Create verified, checksummed application-state archives |
-| `media-stack restore` | Preview and safely restore compatible environment state |
-| `media-stack verify` | Run named operational suites and emit evidence |
-| `media-stack destroy` | Remove selected-environment runtime resources behind explicit safety guards |
+| Command | Availability | What it does and why to use it |
+| --- | --- | --- |
+| `media-stack init --environment production|staging [--config path]` | Available | Interactively completes runtime/VPN choices, encrypts that Environment credentials, and provisions its isolated data layout. Use it once per Environment and rerun it to restore missing directories without replacing complete choices. |
+| `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
+| `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, capability, and Gluetun-filter preflights. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
+| `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
+| `media-stack apply` | Planned | Will execute a reviewed plan and reconcile services to convergence. It is not accepted by the current binary. |
+| `media-stack backup` | Planned | Will create verified, checksummed application-state archives. It is not accepted by the current binary. |
+| `media-stack restore` | Planned | Will preview and safely restore compatible Environment state. It is not accepted by the current binary. |
+| `media-stack verify` | Planned | Will run named operational suites and emit evidence for Promotion. It is not accepted by the current binary. |
+| `media-stack destroy` | Planned | Will remove only selected-Environment runtime resources behind explicit safety guards. It is not accepted by the current binary. |
 
-Every environment-scoped command requires exactly one of `production` or `staging`. Commands support human output and
-versioned JSON where useful. Mutation commands share the planner, take an environment lock, and recheck volatile safety
-conditions before execution.
+Every currently available command requires an explicit `production` or `staging`; Production is never inferred. A relative
+`--config` path is resolved from the working directory, while omitting it selects `stacks/media/media-stack.yaml` from the
+repository root.
 
-`destroy` removes only selected-environment containers and networks by default. Removing mutable volumes needs a saved plan,
-current backup, and second confirmation. There is deliberately no purge option for media, torrent payloads, backups, secrets,
-or Declared Configuration.
+The planned mutation commands will share the planner, take an Environment lock, and recheck volatile safety conditions before
+execution. Planned `destroy` will never purge media, torrent payloads, backups, secrets, or Declared Configuration.
 
 ## Operating principles
 

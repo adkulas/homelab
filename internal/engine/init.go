@@ -82,6 +82,9 @@ func (localEngine) Init(ctx context.Context, request InitRequest) (InitReport, e
 	if _, err := os.Stat(secretsPath); err == nil {
 		secretExists = true
 		if configurationAlreadyComplete {
+			if err := provisionDataLayout(environment.DataRoot, declared.Spec.Defaults.RuntimeUID, declared.Spec.Defaults.RuntimeGID); err != nil {
+				return InitReport{}, err
+			}
 			return InitReport{Environment: request.environment, Preserved: true}, nil
 		}
 	} else if !os.IsNotExist(err) {
@@ -105,6 +108,9 @@ func (localEngine) Init(ctx context.Context, request InitRequest) (InitReport, e
 		}
 	}
 	if configurationAlreadyComplete {
+		if err := provisionDataLayout(environment.DataRoot, declared.Spec.Defaults.RuntimeUID, declared.Spec.Defaults.RuntimeGID); err != nil {
+			return InitReport{}, err
+		}
 		return InitReport{Environment: request.environment}, nil
 	}
 
@@ -122,6 +128,9 @@ func (localEngine) Init(ctx context.Context, request InitRequest) (InitReport, e
 		declared.Spec.Acquisition.VPN.Server.Categories = []string{answers.ServerCategory}
 	}
 	if err := config.Write(request.configPath, declared); err != nil {
+		return InitReport{}, err
+	}
+	if err := provisionDataLayout(environment.DataRoot, answers.RuntimeUID, answers.RuntimeGID); err != nil {
 		return InitReport{}, err
 	}
 	return InitReport{Environment: request.environment}, nil

@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -16,7 +17,7 @@ func TestInitSendsOnlyOpenVPNServiceCredentialsToSOPS(t *testing.T) {
 	configPath := filepath.Join(temporary, "media-stack.yaml")
 	copyUninitializedConfig(t, configPath, 0o640)
 	answersPath := filepath.Join(temporary, "answers.yaml")
-	writeFile(t, answersPath, completeAnswers("1234", "2345", "Canada", "udp", "service-user", "service-password"), 0o600)
+	writeFile(t, answersPath, completeAnswers(strconv.Itoa(os.Getuid()), strconv.Itoa(os.Getgid()), "Canada", "udp", "service-user", "service-password"), 0o600)
 	binDirectory := filepath.Join(temporary, "bin")
 	if err := os.Mkdir(binDirectory, 0o700); err != nil {
 		t.Fatal(err)

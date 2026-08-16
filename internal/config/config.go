@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -98,7 +99,28 @@ func (declared MediaStack) ValidateEnvironment(name string) error {
 	if _, exists := declared.Spec.Environments[name]; !exists {
 		return fmt.Errorf("environment %q is not declared", name)
 	}
+	production, productionExists := declared.Spec.Environments["production"]
+	staging, stagingExists := declared.Spec.Environments["staging"]
+	if !productionExists || !stagingExists {
+		return fmt.Errorf("Production and Staging Environments must both be declared")
+	}
+	if !filepath.IsAbs(production.DataRoot) || !filepath.IsAbs(staging.DataRoot) {
+		return fmt.Errorf("Production and Staging data roots must be absolute")
+	}
+	productionRoot := filepath.Clean(production.DataRoot)
+	stagingRoot := filepath.Clean(staging.DataRoot)
+	if pathContains(productionRoot, stagingRoot) || pathContains(stagingRoot, productionRoot) {
+		return fmt.Errorf("Production and Staging data roots must not overlap: %q and %q", productionRoot, stagingRoot)
+	}
 	return nil
+}
+
+func pathContains(parent, candidate string) bool {
+	relative, err := filepath.Rel(parent, candidate)
+	if err != nil {
+		return false
+	}
+	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
 }
 
 func LoadVersions(path string) (Versions, error) {

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,17 +16,7 @@ func TestInitCreatesSelectedEnvironmentDeclaredConfigurationAndEncryptedSecrets(
 	configPath := filepath.Join(temporary, "media-stack.yaml")
 	copyUninitializedConfig(t, configPath, 0o640)
 	answersPath := filepath.Join(temporary, "answers.yaml")
-	writeFile(t, answersPath, []byte(`runtimeUID: 1234
-runtimeGID: 2345
-timezone: America/Toronto
-country: Canada
-serverCategory: P2P
-openvpnProtocol: udp
-catalogueUpdateInterval: 480h
-ageRecipient: age1example
-serviceUsername: nord-service-user
-servicePassword: nord-service-password
-`), 0o600)
+	writeFile(t, answersPath, completeAnswers(strconv.Itoa(os.Getuid()), strconv.Itoa(os.Getgid()), "Canada", "udp", "nord-service-user", "nord-service-password"), 0o600)
 
 	binDirectory := filepath.Join(temporary, "bin")
 	if err := os.Mkdir(binDirectory, 0o700); err != nil {
@@ -75,7 +66,7 @@ servicePassword: nord-service-password
 	if err := yaml.Unmarshal(configuration, &declared); err != nil {
 		t.Fatalf("decode initialized Declared Configuration: %v\n%s", err, configuration)
 	}
-	if declared.Spec.Defaults.RuntimeUID != 1234 || declared.Spec.Defaults.RuntimeGID != 2345 || declared.Spec.Defaults.Timezone != "America/Toronto" {
+	if declared.Spec.Defaults.RuntimeUID != os.Getuid() || declared.Spec.Defaults.RuntimeGID != os.Getgid() || declared.Spec.Defaults.Timezone != "America/Toronto" {
 		t.Fatalf("runtime defaults = %#v", declared.Spec.Defaults)
 	}
 	vpn := declared.Spec.Acquisition.VPN
@@ -111,6 +102,10 @@ func uninitializedConfiguration(t *testing.T) []byte {
 		t.Fatal("Declared Configuration has no spec mapping")
 	}
 	delete(spec, "acquisition")
+	environments := spec["environments"].(map[string]any)
+	temporaryDataRoot := t.TempDir()
+	environments["production"].(map[string]any)["dataRoot"] = filepath.Join(temporaryDataRoot, "production")
+	environments["staging"].(map[string]any)["dataRoot"] = filepath.Join(temporaryDataRoot, "staging")
 	contents, err := yaml.Marshal(document)
 	if err != nil {
 		t.Fatal(err)
