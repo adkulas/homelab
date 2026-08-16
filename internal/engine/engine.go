@@ -27,6 +27,7 @@ type Plan struct {
 
 type Engine interface {
 	Plan(context.Context, PlanRequest) (Plan, error)
+	Init(context.Context, InitRequest) (InitReport, error)
 }
 
 type localEngine struct{}
