@@ -5,9 +5,11 @@ episodic television. It is designed for Ubuntu and Docker Desktop with WSL 2, co
 independent Production and Staging Environments so changes can be proven before they affect the household libraries.
 
 > [!IMPORTANT]
-> This stack is being implemented incrementally. `init`, `doctor`, and the current Compose-rendering form of `plan` are
-> available now; `apply`, `backup`, `restore`, `verify`, and `destroy` remain planned. Sections below label planned behavior
-> explicitly. The authoritative target design is in the
+> This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, and the
+> Gluetun-startup phase of `apply` are available now; application reconciliation, `backup`, `restore`, `verify`, and
+> `destroy` remain planned. Ubuntu is the authoritative implementation and completion platform. Docker Desktop WSL2
+> compatibility is verified independently and does not block Ubuntu work. Sections below label planned behavior explicitly.
+> The authoritative target design is in the
 > [implementation plan](../../docs/plans/media-stack.md) and
 > [CLI contract](../../docs/plans/media-stack-cli.md).
 
@@ -155,7 +157,23 @@ Compose model to standard output. It is useful for reviewing project scoping, po
 restart policy, and bounded logging. It does not yet observe applications, create a saved Plan Artifact, or mutate the host.
 Shell redirection is used above because `--out` is not implemented yet.
 
-### 4. Verify Staging (planned)
+### 4. Start the Staging VPN tunnel
+
+After `doctor` passes, start only the Staging Gluetun service:
+
+```bash
+media-stack apply --environment staging
+```
+
+The currently available `apply` phase decrypts only the selected Environment's NordVPN OpenVPN service username and
+password. It atomically materializes them as `0600` files beneath the operator's `0700`
+`$XDG_RUNTIME_DIR/media-stack/<projectName>/` directory, streams the value-free Compose model to Docker, starts only
+Gluetun, and waits up to two minutes for its built-in health check. A transient unhealthy state is polled so Gluetun can try
+another catalogue endpoint; a persistent failure exits `1`. The runtime files remain while the service is running so Docker
+can remount them after a container restart. Rerunning `apply` safely replaces the files and converges the same Gluetun
+service. Later tickets extend `apply` to the other services and application reconciliation.
+
+### 5. Verify Staging (planned)
 
 ```bash
 media-stack verify --environment staging --suite smoke
@@ -177,7 +195,7 @@ media-stack verify \
 
 Success emits a content-addressed Verification Artifact bound to the exact Declared Configuration and pinned versions.
 
-### 5. Create Production and promote the proven change (planned)
+### 6. Create Production and promote the proven change (planned)
 
 Initialize Production separately, then use the Staging evidence when planning the Production change:
 
@@ -362,9 +380,9 @@ from silently becoming ineffective configuration.
 | `spec.defaults.timezone` | `init`, `plan` | Validated as an IANA timezone; rendered as `TZ` for every service. |
 | `spec.defaults.runtimeUID` / `runtimeGID` | `init`, `plan` | Own newly created data directories; render as `PUID`/`PGID` for LinuxServer-style services and Compose `user` for Jellyfin and Seerr. |
 | `spec.defaults.lanBindAddress` | `plan` | Host address used for every published web port. `0.0.0.0` listens on all host interfaces. |
-| `spec.environments.<name>.projectName` | `plan` | Compose project name; scopes networks, secrets, and config volumes independently for Production and Staging. |
+| `spec.environments.<name>.projectName` | `plan`, `apply` | Compose project name; scopes networks, runtime secret paths, and config volumes independently for Production and Staging. |
 | `spec.environments.<name>.dataRoot` | `init`, `plan` | Absolute host root provisioned by `init`; mounted as the selected Environment `/data` seam. The other Environment root is never rendered. |
-| `spec.environments.<name>.secretsFile` | `init`, `doctor`, `plan` | Environment-specific SOPS document written by `init`, decrypted by `doctor`, and referenced by the rendered Gluetun secret. |
+| `spec.environments.<name>.secretsFile` | `init`, `doctor`, `apply` | Environment-specific SOPS document written by `init`; `doctor` proves it can be decrypted, and `apply` materializes only its two OpenVPN values as owner-only runtime Compose secret files. `plan` never decrypts it. |
 | `spec.environments.<name>.ports.qbittorrent` | `plan` | Host port published on Gluetun for the qBittorrent Web UI target `8080`; qBittorrent has no direct published port. |
 | `spec.environments.<name>.ports.prowlarr` | `plan` | Host port for Prowlarr target `9696`. |
 | `spec.environments.<name>.ports.sonarr` | `plan` | Host port for Sonarr target `8989`. |
@@ -372,11 +390,11 @@ from silently becoming ineffective configuration.
 | `spec.environments.<name>.ports.profilarr` | `plan` | Host port for Profilarr target `6868`. |
 | `spec.environments.<name>.ports.jellyfin` | `plan` | Host port for Jellyfin target `8096`. |
 | `spec.environments.<name>.ports.seerr` | `plan` | Host port for Seerr target `5055`. |
-| `spec.acquisition.vpn.provider` / `protocol` | `init`, `doctor` | Currently fixed to `nordvpn` and `openvpn`; `doctor` rejects another combination. Gluetun rendering lands in a later ticket. |
-| `spec.acquisition.vpn.openvpnProtocol` | `init`, `doctor` | `udp` by default or explicit `tcp`; passed to Gluetun catalogue validation. |
-| `spec.acquisition.vpn.server.countries` | `init`, `doctor` | Exactly one semantic country selected by `init`; passed to Gluetun catalogue validation. |
-| `spec.acquisition.vpn.server.categories` | `init`, `doctor` | Optional `P2P` category passed to Gluetun catalogue validation. |
-| `spec.acquisition.vpn.catalogueUpdateInterval` | `init` | Must parse as at least `360h`; Gluetun updater wiring is planned. |
+| `spec.acquisition.vpn.provider` / `protocol` | `init`, `doctor`, `plan`, `apply` | Currently fixed to `nordvpn` and `openvpn`; rendered as Gluetun's explicit `VPN_SERVICE_PROVIDER` and `VPN_TYPE`. The CLI never requests a Nord access token or calls a Nord API. |
+| `spec.acquisition.vpn.openvpnProtocol` | `init`, `doctor`, `plan`, `apply` | `udp` by default or explicit `tcp`; validated against the pinned catalogue and rendered as `OPENVPN_PROTOCOL`. |
+| `spec.acquisition.vpn.server.countries` | `init`, `doctor`, `plan`, `apply` | Non-empty semantic country selection rendered as `SERVER_COUNTRIES`; an empty selection is rejected before Docker starts. |
+| `spec.acquisition.vpn.server.categories` | `init`, `doctor`, `plan`, `apply` | Optional `P2P` category rendered as `SERVER_CATEGORIES`. |
+| `spec.acquisition.vpn.catalogueUpdateInterval` | `init`, `plan`, `apply` | Must parse as at least `360h`; rendered as `UPDATER_PERIOD`, with `/gluetun` backed by the Environment's persistent named volume. |
 
 Container paths, network names, config-volume names, application URLs, qBittorrent categories, restart policy, and logging
 limits are derived rather than exposed as arbitrary YAML. This preserves the shared `/data` and environment-isolation
@@ -413,6 +431,13 @@ Secrets are committed only as SOPS-encrypted values using age recipients. Age pr
 decrypts narrowly at runtime and uses Compose secret files where the target image supports them; plaintext values must not
 appear in arguments, rendered Compose, plans, reports, logs, diagnostics, or backup manifests.
 
+`apply` writes only `openvpn_user` and `openvpn_password` beneath
+`$XDG_RUNTIME_DIR/media-stack/<projectName>/` (or a per-user directory under the system temporary directory when
+`XDG_RUNTIME_DIR` is unavailable). The directory is mode `0700`; both files are mode `0600`; only Gluetun receives their
+Compose mounts. They are intentionally not stored in the repository or embedded in Compose environment variables. They
+remain present for container restart support and are atomically replaced on the next `apply`; ending the user's runtime
+session removes the standard runtime directory.
+
 The initial VPN path uses NordVPN OpenVPN manual-setup service username/password with UDP by default and TCP as an explicit
 fallback. Gluetun selects endpoints from semantic country and optional category filters, persists its server catalogue, and
 may refresh it no more often than the configured minimum interval. The CLI does not request a Nord access token, call a Nord
@@ -423,7 +448,10 @@ documented supported interface allows stable creation and storage.
 
 ## Applying configuration
 
-The planned apply order is:
+The available first phase validates and renders the selected Environment, materializes Gluetun's runtime secrets, starts
+only Gluetun, and waits boundedly for health. The remaining target order below is planned.
+
+The complete apply order will be:
 
 ```mermaid
 flowchart TD
@@ -489,7 +517,7 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
 | `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
-| `media-stack apply` | Planned | Will execute a reviewed plan and reconcile services to convergence. It is not accepted by the current binary. |
+| `media-stack apply --environment production|staging [--config path]` | Available, Gluetun phase | Decrypts the selected Environment's OpenVPN service credentials into owner-only runtime Compose secret files, starts only Gluetun, and waits up to 120 seconds for health. Use it after `doctor`; repeated runs converge the same service. Application startup and reconciliation remain planned. |
 | `media-stack backup` | Planned | Will create verified, checksummed application-state archives. It is not accepted by the current binary. |
 | `media-stack restore` | Planned | Will preview and safely restore compatible Environment state. It is not accepted by the current binary. |
 | `media-stack verify` | Planned | Will run named operational suites and emit evidence for Promotion. It is not accepted by the current binary. |
@@ -499,8 +527,9 @@ Every currently available command requires an explicit `production` or `staging`
 `--config` path is resolved from the working directory, while omitting it selects `stacks/media/media-stack.yaml` from the
 repository root.
 
-The planned mutation commands will share the planner, take an Environment lock, and recheck volatile safety conditions before
-execution. Planned `destroy` will never purge media, torrent payloads, backups, secrets, or Declared Configuration.
+The current Gluetun apply phase shares the renderer with `plan`; later mutation phases will add saved Plan Artifacts,
+Environment locking, confirmation, and volatile safety rechecks. Planned `destroy` will never purge media, torrent payloads,
+backups, secrets, or Declared Configuration.
 
 ## Operating principles
 

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -91,6 +93,106 @@ func TestPlanRendersSchemaValidPortableServiceDefaults(t *testing.T) {
 	}
 }
 
+func TestPlanRejectsEmptyNordVPNServerSelection(t *testing.T) {
+	temporary := t.TempDir()
+	configPath := filepath.Join(temporary, "media-stack.yaml")
+	configuration := string(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")))
+	configuration = strings.Replace(configuration, "countries:\n                    - Canada", "countries: []", 1)
+	if strings.Contains(configuration, "countries:\n                    - Canada") {
+		t.Fatal("fixture did not remove the declared country")
+	}
+	writeFile(t, configPath, []byte(configuration), 0o600)
+
+	command := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)
+	command.Dir = repositoryRoot(t)
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("plan accepted empty NordVPN server selection:\n%s", output)
+	}
+	if !strings.Contains(string(output), "at least one server country") {
+		t.Fatalf("plan did not explain empty NordVPN server selection: %s", output)
+	}
+}
+
+func TestPlanRejectsTooFrequentGluetunCatalogueUpdate(t *testing.T) {
+	temporary := t.TempDir()
+	configPath := filepath.Join(temporary, "media-stack.yaml")
+	configuration := string(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")))
+	configuration = strings.Replace(configuration, "catalogueUpdateInterval: 480h", "catalogueUpdateInterval: 24h", 1)
+	writeFile(t, configPath, []byte(configuration), 0o600)
+
+	command := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)
+	command.Dir = repositoryRoot(t)
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("plan accepted a too-frequent Gluetun catalogue update:\n%s", output)
+	}
+	if !strings.Contains(string(output), "at least 360h") {
+		t.Fatalf("plan did not explain the catalogue update minimum: %s", output)
+	}
+}
+
+func TestPlanRendersHealthyNordVPNOpenVPNTunnel(t *testing.T) {
+	rendered, err := planCommand(t, "--environment", "staging").CombinedOutput()
+	if err != nil {
+		t.Fatalf("media-stack plan failed: %v\n%s", err, rendered)
+	}
+	project := mergedComposeProject(t, rendered)
+	gluetun := project.Services["gluetun"]
+
+	wantEnvironment := map[string]string{
+		"FIREWALL":                    "on",
+		"OPENVPN_PASSWORD_SECRETFILE": "/run/secrets/openvpn_password",
+		"OPENVPN_PROTOCOL":            "udp",
+		"OPENVPN_USER_SECRETFILE":     "/run/secrets/openvpn_user",
+		"SERVER_CATEGORIES":           "P2P",
+		"SERVER_COUNTRIES":            "Canada",
+		"TZ":                          "America/Toronto",
+		"UPDATER_PERIOD":              "480h",
+		"VPN_PORT_FORWARDING":         "off",
+		"VPN_SERVICE_PROVIDER":        "nordvpn",
+		"VPN_TYPE":                    "openvpn",
+	}
+	var problems []string
+	if !reflect.DeepEqual(gluetun.Environment, wantEnvironment) {
+		problems = append(problems, fmt.Sprintf("Gluetun environment = %#v, want %#v", gluetun.Environment, wantEnvironment))
+	}
+	if !reflect.DeepEqual(gluetun.CapAdd, []string{"NET_ADMIN"}) {
+		problems = append(problems, fmt.Sprintf("Gluetun capabilities = %#v, want NET_ADMIN", gluetun.CapAdd))
+	}
+	if !reflect.DeepEqual(gluetun.Devices, []composeDevice{{Source: "/dev/net/tun", Target: "/dev/net/tun", Permissions: "rwm"}}) {
+		problems = append(problems, fmt.Sprintf("Gluetun devices = %#v, want /dev/net/tun", gluetun.Devices))
+	}
+	wantSecrets := []composeServiceSecret{
+		{Source: "openvpn_password", Target: "/run/secrets/openvpn_password"},
+		{Source: "openvpn_user", Target: "/run/secrets/openvpn_user"},
+	}
+	sort.Slice(gluetun.Secrets, func(i, j int) bool { return gluetun.Secrets[i].Source < gluetun.Secrets[j].Source })
+	if !reflect.DeepEqual(gluetun.Secrets, wantSecrets) {
+		problems = append(problems, fmt.Sprintf("Gluetun secrets = %#v, want %#v", gluetun.Secrets, wantSecrets))
+	}
+	for name, suffix := range map[string]string{
+		"openvpn_user":     "/media-stack/media-staging/openvpn_user",
+		"openvpn_password": "/media-stack/media-staging/openvpn_password",
+	} {
+		secret, exists := project.Secrets[name]
+		if !exists || !strings.HasSuffix(secret.File, suffix) {
+			problems = append(problems, fmt.Sprintf("%s secret = %#v, want runtime-file suffix %q", name, secret, suffix))
+		}
+	}
+	if _, exists := gluetun.Environment["FIREWALL_OUTBOUND_SUBNETS"]; exists {
+		problems = append(problems, "Gluetun declares FIREWALL_OUTBOUND_SUBNETS")
+	}
+	if strings.Contains(string(rendered), "serviceUsername") || strings.Contains(string(rendered), "servicePassword") {
+		problems = append(problems, "rendered Compose exposes credential fields")
+	}
+
+	sort.Strings(problems)
+	if len(problems) != 0 {
+		t.Fatalf("rendered Compose violates the Gluetun tunnel contract:\n%s\nrendered Compose:\n%s", strings.Join(problems, "\n"), rendered)
+	}
+}
+
 func TestPlanSelectsDistinctComposeProjectNames(t *testing.T) {
 	want := map[string]string{
 		"production": "media-production",
@@ -119,16 +221,16 @@ func TestPlanSelectsDistinctComposeProjectNames(t *testing.T) {
 
 func TestPlanRendersCoexistingEnvironmentResources(t *testing.T) {
 	type expectedEnvironment struct {
-		projectName string
-		dataRoot    string
-		secretFile  string
-		ports       map[string]composePort
+		projectName     string
+		dataRoot        string
+		secretDirectory string
+		ports           map[string]composePort
 	}
 	want := map[string]expectedEnvironment{
 		"production": {
-			projectName: "media-production",
-			dataRoot:    "/srv/media/production",
-			secretFile:  "secrets/production.sops.yaml",
+			projectName:     "media-production",
+			dataRoot:        "/srv/media/production",
+			secretDirectory: "/media-stack/media-production/",
 			ports: map[string]composePort{
 				"gluetun": {Published: "8080", Target: 8080}, "prowlarr": {Published: "9696", Target: 9696},
 				"sonarr": {Published: "8989", Target: 8989}, "radarr": {Published: "7878", Target: 7878},
@@ -137,9 +239,9 @@ func TestPlanRendersCoexistingEnvironmentResources(t *testing.T) {
 			},
 		},
 		"staging": {
-			projectName: "media-staging",
-			dataRoot:    "/srv/media/staging",
-			secretFile:  "secrets/staging.sops.yaml",
+			projectName:     "media-staging",
+			dataRoot:        "/srv/media/staging",
+			secretDirectory: "/media-stack/media-staging/",
 			ports: map[string]composePort{
 				"gluetun": {Published: "18080", Target: 8080}, "prowlarr": {Published: "19696", Target: 9696},
 				"sonarr": {Published: "18989", Target: 8989}, "radarr": {Published: "17878", Target: 7878},
@@ -179,9 +281,11 @@ func TestPlanRendersCoexistingEnvironmentResources(t *testing.T) {
 					problems = append(problems, fmt.Sprintf("%s mounts = %#v, missing %#v", serviceName, project.Services[serviceName].Volumes, mount))
 				}
 			}
-			secret, exists := project.Secrets["environment"]
-			if !exists || !strings.HasSuffix(secret.File, expected.secretFile) {
-				problems = append(problems, fmt.Sprintf("environment secret = %#v, want file suffix %q", secret, expected.secretFile))
+			for _, secretName := range []string{"openvpn_user", "openvpn_password"} {
+				secret, exists := project.Secrets[secretName]
+				if !exists || !strings.HasSuffix(secret.File, expected.secretDirectory+secretName) {
+					problems = append(problems, fmt.Sprintf("%s secret = %#v, want runtime file under %q", secretName, secret, expected.secretDirectory))
+				}
 			}
 
 			resourceNames[environment] = map[string]struct{}{}
@@ -255,13 +359,27 @@ type composeProject struct {
 }
 
 type composeService struct {
-	ContainerName string            `json:"container_name"`
-	Environment   map[string]string `json:"environment"`
-	Logging       composeLogging    `json:"logging"`
-	Restart       string            `json:"restart"`
-	User          string            `json:"user"`
-	Ports         []composePort     `json:"ports"`
-	Volumes       []composeMount    `json:"volumes"`
+	ContainerName string                 `json:"container_name"`
+	Environment   map[string]string      `json:"environment"`
+	CapAdd        []string               `json:"cap_add"`
+	Devices       []composeDevice        `json:"devices"`
+	Logging       composeLogging         `json:"logging"`
+	Restart       string                 `json:"restart"`
+	User          string                 `json:"user"`
+	Ports         []composePort          `json:"ports"`
+	Secrets       []composeServiceSecret `json:"secrets"`
+	Volumes       []composeMount         `json:"volumes"`
+}
+
+type composeDevice struct {
+	Source      string `json:"source"`
+	Target      string `json:"target"`
+	Permissions string `json:"permissions"`
+}
+
+type composeServiceSecret struct {
+	Source string `json:"source"`
+	Target string `json:"target"`
 }
 
 type composeLogging struct {

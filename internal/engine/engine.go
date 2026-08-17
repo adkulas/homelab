@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"time"
 
 	"github.com/adkulas/homelab/internal/config"
 	"github.com/adkulas/homelab/internal/topology"
@@ -27,6 +29,7 @@ type Plan struct {
 
 type Engine interface {
 	Plan(context.Context, PlanRequest) (Plan, error)
+	Apply(context.Context, ApplyRequest) (ApplyReport, error)
 	Init(context.Context, InitRequest) (InitReport, error)
 	Doctor(context.Context, DoctorRequest) (DoctorReport, error)
 }
@@ -65,19 +68,37 @@ func (localEngine) Plan(ctx context.Context, request PlanRequest) (Plan, error) 
 	if err := declared.ValidateEnvironment(request.environment); err != nil {
 		return Plan{}, err
 	}
+	if len(declared.Spec.Acquisition.VPN.Server.Countries) == 0 {
+		return Plan{}, fmt.Errorf("Declared Configuration requires at least one server country")
+	}
+	updateInterval, err := time.ParseDuration(declared.Spec.Acquisition.VPN.CatalogueUpdateInterval)
+	if err != nil || updateInterval < 360*time.Hour {
+		return Plan{}, fmt.Errorf("Declared Configuration catalogue update interval must be at least 360h")
+	}
 	versions, err := config.LoadVersions(request.versionsPath)
 	if err != nil {
 		return Plan{}, err
 	}
 	environment := declared.Spec.Environments[request.environment]
-	if !filepath.IsAbs(environment.SecretsFile) {
-		environment.SecretsFile = filepath.Join(filepath.Dir(request.configPath), environment.SecretsFile)
-	}
-	compose, err := topology.Render(declared.Spec.Defaults, environment, versions.Images)
+	compose, err := topology.Render(
+		declared.Spec.Defaults,
+		environment,
+		declared.Spec.Acquisition.VPN,
+		versions.Images,
+		runtimeSecretDirectory(environment.ProjectName),
+	)
 	if err != nil {
 		return Plan{}, err
 	}
 	return Plan{compose: compose}, nil
+}
+
+func runtimeSecretDirectory(projectName string) string {
+	root := os.Getenv("XDG_RUNTIME_DIR")
+	if root == "" {
+		root = filepath.Join(os.TempDir(), "media-stack-"+strconv.Itoa(os.Getuid()))
+	}
+	return filepath.Join(root, "media-stack", projectName)
 }
 
 func (plan Plan) Compose() []byte {
