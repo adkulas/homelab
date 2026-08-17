@@ -32,6 +32,7 @@ type Engine interface {
 	Apply(context.Context, ApplyRequest) (ApplyReport, error)
 	Init(context.Context, InitRequest) (InitReport, error)
 	Doctor(context.Context, DoctorRequest) (DoctorReport, error)
+	Verify(context.Context, VerifyRequest) (VerifyReport, error)
 }
 
 type localEngine struct{}
