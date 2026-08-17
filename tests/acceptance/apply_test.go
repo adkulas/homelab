@@ -18,7 +18,36 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	configPath := filepath.Join(temporary, "media-stack.yaml")
 	preferences := map[string]any{}
 	categories := map[string]map[string]string{}
+	var rootFolders []map[string]any
+	var downloadClients []map[string]any
 	api := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if strings.HasPrefix(request.URL.Path, "/api/v3/") {
+			if request.Header.Get("X-Api-Key") != "fixture-radarr-api-key" {
+				http.Error(writer, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			switch request.Method + " " + request.URL.Path {
+			case "GET /api/v3/system/status":
+				_ = json.NewEncoder(writer).Encode(map[string]string{"appName": "Radarr"})
+			case "GET /api/v3/rootfolder":
+				_ = json.NewEncoder(writer).Encode(rootFolders)
+			case "POST /api/v3/rootfolder":
+				var root map[string]any
+				_ = json.NewDecoder(request.Body).Decode(&root)
+				rootFolders = append(rootFolders, root)
+				writer.WriteHeader(http.StatusCreated)
+			case "GET /api/v3/downloadclient":
+				_ = json.NewEncoder(writer).Encode(downloadClients)
+			case "POST /api/v3/downloadclient":
+				var client map[string]any
+				_ = json.NewDecoder(request.Body).Decode(&client)
+				downloadClients = append(downloadClients, client)
+				writer.WriteHeader(http.StatusCreated)
+			default:
+				http.NotFound(writer, request)
+			}
+			return
+		}
 		if request.URL.Path == "/api/v2/auth/login" {
 			body, _ := io.ReadAll(request.Body)
 			values, _ := url.ParseQuery(string(body))
@@ -59,6 +88,7 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 		t.Fatal(err)
 	}
 	declared := strings.Replace(string(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml"))), "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
+	declared = strings.Replace(declared, "radarr: 17878", "radarr: "+apiURL.Port(), 1)
 	writeFile(t, configPath, []byte(declared), 0o600)
 	if err := os.Mkdir(filepath.Join(temporary, "secrets"), 0o700); err != nil {
 		t.Fatal(err)
@@ -87,6 +117,8 @@ EOF
 	  "compose -f - up -d gluetun") exit 0 ;;
 	  "compose -f - up -d qbittorrent") exit 0 ;;
 	  "compose -f - logs --no-color qbittorrent") printf 'A temporary password is provided for this session: fixture-temporary-password\n'; exit 0 ;;
+	  "compose -f - up -d radarr") exit 0 ;;
+	  "compose -f - exec -T radarr cat /config/config.xml") printf '<Config><ApiKey>fixture-radarr-api-key</ApiKey></Config>\n'; exit 0 ;;
 	  "compose -f - ps --format json gluetun")
 	    count=0
 	    [ -f "$APPLY_HEALTH_COUNT" ] && count=$(cat "$APPLY_HEALTH_COUNT")
@@ -111,11 +143,11 @@ EOF
 	if err != nil {
 		t.Fatalf("media-stack apply failed: %v\n%s", err, output)
 	}
-	if !strings.Contains(string(output), "Started qBittorrent behind healthy Gluetun and reconciled its acquisition policy for the staging Environment.") {
-		t.Errorf("apply output = %q, want completed VPN-confined qBittorrent phase", output)
+	if !strings.Contains(string(output), "Prepared Radarr for the Movie Library in the staging Environment.") {
+		t.Errorf("apply output = %q, want completed Radarr phase", output)
 	}
 
-	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent"
+	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml"
 	if got := strings.TrimSpace(string(readFile(t, dockerLog))); got != wantDocker {
 		t.Errorf("Docker invocation = %q", got)
 	}
@@ -148,6 +180,30 @@ EOF
 	}
 	if preferences["save_path"] != "/data/torrents" || categories["movies"]["savePath"] != "movies" || categories["series"]["savePath"] != "series" {
 		t.Errorf("apply did not reconcile qBittorrent acquisition policy: preferences=%v categories=%v", preferences, categories)
+	}
+	if len(rootFolders) != 1 || rootFolders[0]["path"] != "/data/media/movies" {
+		t.Errorf("apply did not reconcile the Movie Library root folder: %v", rootFolders)
+	}
+	if len(downloadClients) != 1 {
+		t.Fatalf("apply did not reconcile Radarr's qBittorrent client: %v", downloadClients)
+	}
+	fields := map[string]any{}
+	for _, item := range downloadClients[0]["fields"].([]any) {
+		field := item.(map[string]any)
+		fields[field["name"].(string)] = field["value"]
+	}
+	if fields["host"] != "qbittorrent" || fields["port"] != float64(8080) || fields["movieCategory"] != "movies" {
+		t.Errorf("Radarr qBittorrent contract = %v", fields)
+	}
+	secondCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
+	secondCommand.Dir = command.Dir
+	secondCommand.Env = command.Env
+	secondOutput, err := secondCommand.CombinedOutput()
+	if err != nil {
+		t.Fatalf("repeated media-stack apply failed: %v\n%s", err, secondOutput)
+	}
+	if len(rootFolders) != 1 || len(downloadClients) != 1 {
+		t.Errorf("repeated apply did not converge: roots=%v downloadClients=%v", rootFolders, downloadClients)
 	}
 }
 

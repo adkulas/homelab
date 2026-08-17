@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/adkulas/homelab/internal/config"
 	"github.com/adkulas/homelab/internal/qbittorrent"
+	"github.com/adkulas/homelab/internal/radarr"
 	"gopkg.in/yaml.v3"
 )
 
@@ -78,7 +80,69 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if _, err := client.ReconcileAcquisitionPolicy(ctx); err != nil {
 		return ApplyReport{}, fmt.Errorf("reconcile qBittorrent acquisition policy: %w", err)
 	}
+	if output, err := runDockerCompose(ctx, plan, "up", "-d", "radarr"); err != nil {
+		return ApplyReport{}, fmt.Errorf("start Radarr: %w: %s", err, redactCredentials(output, credentials))
+	}
+	apiKey, err := waitForRadarrAPIKey(ctx, plan, 120*time.Second)
+	if err != nil {
+		return ApplyReport{}, err
+	}
+	radarrAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Radarr)
+	radarrClient := radarr.New("http://"+radarrAddress, apiKey, &http.Client{Timeout: 10 * time.Second})
+	if err := waitForRadarrReady(ctx, radarrClient, 120*time.Second); err != nil {
+		return ApplyReport{}, err
+	}
+	if _, err := radarrClient.ReconcileMovieLibrary(ctx, password); err != nil {
+		return ApplyReport{}, fmt.Errorf("reconcile Radarr Movie Library: %w", err)
+	}
 	return ApplyReport{Environment: request.plan.environment}, nil
+}
+
+func waitForRadarrAPIKey(ctx context.Context, plan Plan, timeout time.Duration) (string, error) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		output, err := runDockerCompose(ctx, plan, "exec", "-T", "radarr", "cat", "/config/config.xml")
+		if err == nil {
+			var document struct {
+				APIKey string `xml:"ApiKey"`
+			}
+			if xml.Unmarshal(output, &document) == nil && document.APIKey != "" {
+				return document.APIKey, nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-deadline.C:
+			return "", fmt.Errorf("Radarr did not publish its API key within %s", timeout)
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+type radarrReadiness interface {
+	Ready(context.Context) error
+}
+
+func waitForRadarrReady(ctx context.Context, client radarrReadiness, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	var lastErr error
+	for {
+		if err := client.Ready(ctx); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("Radarr API did not become ready within %s: %w", timeout, lastErr)
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 var temporaryPasswordPattern = regexp.MustCompile(`temporary password is provided for this session:\s*(\S+)`)

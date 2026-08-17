@@ -6,7 +6,7 @@ independent Production and Staging Environments so changes can be proven before 
 
 > [!IMPORTANT]
 > This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, and the
-> VPN-confined qBittorrent startup phase of `apply` are available now; application reconciliation, `backup`, `restore`,
+> VPN-confined qBittorrent and Radarr Movie Library phases of `apply` are available now; remaining application reconciliation, `backup`, `restore`,
 > `verify`, and `destroy` remain planned. Ubuntu is the authoritative implementation and completion platform. Docker
 > Desktop WSL2 compatibility is verified independently and does not block Ubuntu work. Sections below label planned behavior explicitly.
 > The authoritative target design is in the
@@ -159,7 +159,7 @@ Compose model to standard output. It is useful for reviewing project scoping, po
 restart policy, and bounded logging. It does not yet observe applications, create a saved Plan Artifact, or mutate the host.
 Shell redirection is used above because `--out` is not implemented yet.
 
-### 4. Start VPN-confined qBittorrent
+### 4. Start VPN-confined qBittorrent and prepare Radarr
 
 After `doctor` passes, start Staging qBittorrent behind Gluetun:
 
@@ -179,7 +179,12 @@ they already match the Declared Configuration. During the CLI-owned bootstrap ph
 image's latest temporary admin password from container logs, exchanges it for an in-memory Web API session, and never writes
 the password to command output or repository files. No remote path mappings are created. A transient unhealthy state is polled so Gluetun can try
 another catalogue endpoint; a persistent failure exits `1`. The runtime files remain while the service is running so Docker
-can remount them after a container restart. Rerunning `apply` safely replaces the files and converges the same Gluetun and qBittorrent services.
+can remount them after a container restart. After qBittorrent converges, `apply` starts Radarr, reads its generated API key
+from that Environment's `/config/config.xml` into memory, and waits for the supported Radarr v3 API. It reconciles
+`/data/media/movies` as the Movie Library root and a qBittorrent download client at `qbittorrent:8080` with the `movies`
+category. Both applications see the same `/data` paths, so no remote path mapping is created. Repeated reconciliation makes
+no API writes once these values match. Rerunning `apply` safely replaces the runtime VPN files and converges Gluetun,
+qBittorrent, and Radarr.
 Gluetun alone
 publishes the selected Environment's qBittorrent Web UI port, and its firewall admits only the narrow input port `8080`
 needed for that UI. Its `qbittorrent` application-network alias preserves the internal
@@ -462,8 +467,8 @@ documented supported interface allows stable creation and storage.
 ## Applying configuration
 
 The available phase validates and renders the selected Environment, materializes Gluetun's runtime secrets, starts Gluetun,
-waits boundedly for health, and then starts qBittorrent in Gluetun's network namespace. The remaining target order
-below is planned.
+waits boundedly for health, starts and reconciles qBittorrent in Gluetun's network namespace, then starts Radarr and
+reconciles its Movie Library contract through the supported API. The remaining target order below is planned.
 
 The complete apply order will be:
 
@@ -531,7 +536,7 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
 | `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
-| `media-stack apply --environment production|staging [--config path]` | Available, VPN-confined qBittorrent reconciliation phase | Decrypts the selected Environment's OpenVPN service credentials into owner-only runtime Compose secret files, starts Gluetun, waits up to 120 seconds for health, starts qBittorrent in the shared namespace, and reconciles its acquisition paths, categories, Automatic Torrent Management relocation, and ratio-or-time seeding limits through the Web API. Use it after `doctor`; repeated runs converge without API writes when the policy already matches. Remaining application startup and reconciliation are planned. |
+| `media-stack apply --environment production|staging [--config path]` | Available through Radarr Movie Library reconciliation | Decrypts the selected Environment's OpenVPN service credentials into owner-only runtime Compose secret files; starts healthy Gluetun and VPN-confined qBittorrent; reconciles qBittorrent's acquisition policy; then starts API-ready Radarr and reconciles `/data/media/movies` plus its `qbittorrent:8080` `movies` download client without a remote path mapping. Use it after `doctor`; repeated runs converge without API writes when state already matches. Remaining application startup and reconciliation are planned. |
 | `media-stack backup` | Planned | Will create verified, checksummed application-state archives. It is not accepted by the current binary. |
 | `media-stack restore` | Planned | Will preview and safely restore compatible Environment state. It is not accepted by the current binary. |
 | `media-stack verify` | Planned | Will run named operational suites and emit evidence for Promotion. It is not accepted by the current binary. |
@@ -541,7 +546,7 @@ Every currently available command requires an explicit `production` or `staging`
 `--config` path is resolved from the working directory, while omitting it selects `stacks/media/media-stack.yaml` from the
 repository root.
 
-The current VPN-confined qBittorrent apply phase shares the renderer with `plan`; later mutation phases will add saved
+The current qBittorrent and Radarr apply phases share the renderer with `plan`; later mutation phases will add saved
 Plan Artifacts, Environment locking, confirmation, and volatile safety rechecks. Planned `destroy` will never purge media, torrent payloads,
 backups, secrets, or Declared Configuration.
 
