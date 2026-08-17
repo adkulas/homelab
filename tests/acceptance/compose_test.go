@@ -142,6 +142,7 @@ func TestPlanRendersHealthyNordVPNOpenVPNTunnel(t *testing.T) {
 
 	wantEnvironment := map[string]string{
 		"FIREWALL":                    "on",
+		"FIREWALL_INPUT_PORTS":        "8080",
 		"OPENVPN_PASSWORD_SECRETFILE": "/run/secrets/openvpn_password",
 		"OPENVPN_PROTOCOL":            "udp",
 		"OPENVPN_USER_SECRETFILE":     "/run/secrets/openvpn_user",
@@ -190,6 +191,55 @@ func TestPlanRendersHealthyNordVPNOpenVPNTunnel(t *testing.T) {
 	sort.Strings(problems)
 	if len(problems) != 0 {
 		t.Fatalf("rendered Compose violates the Gluetun tunnel contract:\n%s\nrendered Compose:\n%s", strings.Join(problems, "\n"), rendered)
+	}
+}
+
+func TestPlanConfinesQBittorrentToGluetunNetworkNamespace(t *testing.T) {
+	rendered, err := planCommand(t, "--environment", "staging").CombinedOutput()
+	if err != nil {
+		t.Fatalf("media-stack plan failed: %v\n%s", err, rendered)
+	}
+	project := mergedComposeProject(t, rendered)
+	gluetun := project.Services["gluetun"]
+	qbittorrent := project.Services["qbittorrent"]
+
+	var problems []string
+	if qbittorrent.Privileged || gluetun.Privileged {
+		problems = append(problems, "Gluetun or qBittorrent enables privileged mode")
+	}
+	if len(gluetun.DNS) != 0 || len(qbittorrent.DNS) != 0 {
+		problems = append(problems, fmt.Sprintf("Gluetun/qBittorrent custom DNS = %#v/%#v, want none", gluetun.DNS, qbittorrent.DNS))
+	}
+	if qbittorrent.NetworkMode != "service:gluetun" {
+		problems = append(problems, fmt.Sprintf("qBittorrent network_mode = %q, want service:gluetun", qbittorrent.NetworkMode))
+	}
+	if len(qbittorrent.Networks) != 0 {
+		problems = append(problems, fmt.Sprintf("qBittorrent networks = %#v, want none", qbittorrent.Networks))
+	}
+	if len(qbittorrent.Ports) != 0 {
+		problems = append(problems, fmt.Sprintf("qBittorrent ports = %#v, want none", qbittorrent.Ports))
+	}
+	if qbittorrent.DependsOn["gluetun"].Condition != "service_healthy" {
+		problems = append(problems, fmt.Sprintf("qBittorrent Gluetun dependency = %#v, want service_healthy", qbittorrent.DependsOn["gluetun"]))
+	}
+	if !reflect.DeepEqual(gluetun.Networks["application"].Aliases, []string{"qbittorrent"}) {
+		problems = append(problems, fmt.Sprintf("Gluetun application aliases = %#v, want qbittorrent", gluetun.Networks["application"].Aliases))
+	}
+	if !reflect.DeepEqual(gluetun.Ports, []composePort{{Published: "18080", Target: 8080}}) {
+		problems = append(problems, fmt.Sprintf("Gluetun ports = %#v, want qBittorrent Web UI 18080:8080", gluetun.Ports))
+	}
+	for _, forbidden := range []string{"FIREWALL_OUTBOUND_SUBNETS", "DNS_ADDRESS"} {
+		if _, exists := gluetun.Environment[forbidden]; exists {
+			problems = append(problems, fmt.Sprintf("Gluetun declares forbidden %s", forbidden))
+		}
+	}
+	if gluetun.Environment["FIREWALL"] != "on" {
+		problems = append(problems, fmt.Sprintf("Gluetun firewall = %q, want on", gluetun.Environment["FIREWALL"]))
+	}
+
+	sort.Strings(problems)
+	if len(problems) != 0 {
+		t.Fatalf("rendered Compose does not confine qBittorrent to Gluetun:\n%s\nrendered Compose:\n%s", strings.Join(problems, "\n"), rendered)
 	}
 }
 
@@ -359,16 +409,29 @@ type composeProject struct {
 }
 
 type composeService struct {
-	ContainerName string                 `json:"container_name"`
-	Environment   map[string]string      `json:"environment"`
-	CapAdd        []string               `json:"cap_add"`
-	Devices       []composeDevice        `json:"devices"`
-	Logging       composeLogging         `json:"logging"`
-	Restart       string                 `json:"restart"`
-	User          string                 `json:"user"`
-	Ports         []composePort          `json:"ports"`
-	Secrets       []composeServiceSecret `json:"secrets"`
-	Volumes       []composeMount         `json:"volumes"`
+	ContainerName string                           `json:"container_name"`
+	Privileged    bool                             `json:"privileged"`
+	DNS           []string                         `json:"dns"`
+	Environment   map[string]string                `json:"environment"`
+	CapAdd        []string                         `json:"cap_add"`
+	Devices       []composeDevice                  `json:"devices"`
+	Logging       composeLogging                   `json:"logging"`
+	Restart       string                           `json:"restart"`
+	User          string                           `json:"user"`
+	Ports         []composePort                    `json:"ports"`
+	Secrets       []composeServiceSecret           `json:"secrets"`
+	Volumes       []composeMount                   `json:"volumes"`
+	NetworkMode   string                           `json:"network_mode"`
+	Networks      map[string]composeServiceNetwork `json:"networks"`
+	DependsOn     map[string]composeDependency     `json:"depends_on"`
+}
+
+type composeServiceNetwork struct {
+	Aliases []string `json:"aliases"`
+}
+
+type composeDependency struct {
+	Condition string `json:"condition"`
 }
 
 type composeDevice struct {

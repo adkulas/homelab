@@ -59,6 +59,9 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if err := waitForHealthyGluetun(ctx, plan, 120*time.Second); err != nil {
 		return ApplyReport{}, err
 	}
+	if output, err := runDockerCompose(ctx, plan, "up", "-d", "qbittorrent"); err != nil {
+		return ApplyReport{}, fmt.Errorf("start qBittorrent after healthy Gluetun: %w: %s", err, redactCredentials(output, credentials))
+	}
 	return ApplyReport{Environment: request.plan.environment}, nil
 }
 

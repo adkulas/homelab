@@ -48,17 +48,27 @@ type composeProject struct {
 }
 
 type composeService struct {
-	Image       string            `yaml:"image"`
-	User        string            `yaml:"user,omitempty"`
-	Environment map[string]string `yaml:"environment"`
-	CapAdd      []string          `yaml:"cap_add,omitempty"`
-	Devices     []string          `yaml:"devices,omitempty"`
-	Restart     string            `yaml:"restart"`
-	Logging     composeLogging    `yaml:"logging"`
-	Networks    []string          `yaml:"networks"`
-	Ports       []string          `yaml:"ports,omitempty"`
-	Secrets     []string          `yaml:"secrets,omitempty"`
-	Volumes     []string          `yaml:"volumes"`
+	Image       string                           `yaml:"image"`
+	User        string                           `yaml:"user,omitempty"`
+	Environment map[string]string                `yaml:"environment"`
+	CapAdd      []string                         `yaml:"cap_add,omitempty"`
+	Devices     []string                         `yaml:"devices,omitempty"`
+	Restart     string                           `yaml:"restart"`
+	Logging     composeLogging                   `yaml:"logging"`
+	NetworkMode string                           `yaml:"network_mode,omitempty"`
+	Networks    map[string]composeServiceNetwork `yaml:"networks,omitempty"`
+	DependsOn   map[string]composeDependency     `yaml:"depends_on,omitempty"`
+	Ports       []string                         `yaml:"ports,omitempty"`
+	Secrets     []string                         `yaml:"secrets,omitempty"`
+	Volumes     []string                         `yaml:"volumes"`
+}
+
+type composeServiceNetwork struct {
+	Aliases []string `yaml:"aliases,omitempty"`
+}
+
+type composeDependency struct {
+	Condition string `yaml:"condition"`
 }
 
 type composeLogging struct {
@@ -120,6 +130,9 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 		var secrets []string
 		var capabilities []string
 		var devices []string
+		networkMode := ""
+		networks := map[string]composeServiceNetwork{"application": {}}
+		var dependsOn map[string]composeDependency
 		if definition.name == "gluetun" {
 			serviceEnvironment["VPN_SERVICE_PROVIDER"] = vpn.Provider
 			serviceEnvironment["VPN_TYPE"] = vpn.Protocol
@@ -130,12 +143,19 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 			}
 			serviceEnvironment["UPDATER_PERIOD"] = vpn.CatalogueUpdateInterval
 			serviceEnvironment["FIREWALL"] = "on"
+			serviceEnvironment["FIREWALL_INPUT_PORTS"] = "8080"
 			serviceEnvironment["VPN_PORT_FORWARDING"] = "off"
 			serviceEnvironment["OPENVPN_USER_SECRETFILE"] = "/run/secrets/openvpn_user"
 			serviceEnvironment["OPENVPN_PASSWORD_SECRETFILE"] = "/run/secrets/openvpn_password"
 			secrets = []string{"openvpn_user", "openvpn_password"}
 			capabilities = []string{"NET_ADMIN"}
 			devices = []string{"/dev/net/tun:/dev/net/tun"}
+			networks["application"] = composeServiceNetwork{Aliases: []string{"qbittorrent"}}
+		}
+		if definition.name == "qbittorrent" {
+			networkMode = "service:gluetun"
+			networks = nil
+			dependsOn = map[string]composeDependency{"gluetun": {Condition: "service_healthy"}}
 		}
 		project.Services[definition.name] = composeService{
 			Image:       reference,
@@ -151,10 +171,12 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 					"max-file": "3",
 				},
 			},
-			Networks: []string{"application"},
-			Ports:    ports,
-			Secrets:  secrets,
-			Volumes:  mounts,
+			NetworkMode: networkMode,
+			Networks:    networks,
+			DependsOn:   dependsOn,
+			Ports:       ports,
+			Secrets:     secrets,
+			Volumes:     mounts,
 		}
 		project.Volumes[volumeName] = composeVolume{}
 	}
