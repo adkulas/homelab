@@ -73,6 +73,27 @@ func TestDoctorProbesTheApplicationStorageMountsAsTheDeclaredRuntimeIdentity(t *
 	}
 }
 
+func TestDoctorDisablesInheritedHealthchecksForEveryDisposableContainer(t *testing.T) {
+	configPath, binDirectory := doctorFixture(t)
+	dockerLog := filepath.Join(t.TempDir(), "docker.log")
+	command := exec.Command("go", "run", "./cmd/media-stack", "doctor",
+		"--environment", "staging", "--config", configPath, "--output", "json")
+	command.Dir = repositoryRoot(t)
+	command.Env = append(os.Environ(),
+		"PATH="+binDirectory+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DOCTOR_DOCKER_LOG="+dockerLog,
+	)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("doctor rejected capable probes: %v\n%s", err, output)
+	}
+
+	for _, invocation := range strings.Split(strings.TrimSpace(string(readFile(t, dockerLog))), "\n") {
+		if strings.HasPrefix(invocation, "run --rm ") && !strings.Contains(invocation, " --no-healthcheck ") {
+			t.Errorf("disposable Docker probe inherits its image health check: %s", invocation)
+		}
+	}
+}
+
 func TestStorageProbeExercisesFilesystemCapabilitiesAndRemovesOnlyItsArtifacts(t *testing.T) {
 	temporary := t.TempDir()
 	source := filepath.Join(temporary, "torrents", "movies")

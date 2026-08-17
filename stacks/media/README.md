@@ -150,7 +150,9 @@ secret, `/dev/net/tun`, `NET_ADMIN`, and whether the pinned Gluetun catalogue ac
 runs disposable probes from the pinned qBittorrent, Radarr, and Sonarr images as the declared runtime UID/GID, using their
 actual `/data/torrents` or `/data` bind-mount shapes. Those probes verify write permission, same-device layout, hardlink
 creation and inode identity, atomic rename, filesystem events, and cleanup. Human output explains each result; JSON provides
-stable diagnostic records and remedies for automation. It does not start the stack.
+stable diagnostic records and remedies for automation. Each disposable Docker probe has a two-minute deadline and disables
+the pinned image's service health check so a quick preflight command cannot be retained by Docker Desktop after it exits. It
+does not start the stack.
 
 The current `plan` implementation validates Declared Configuration and pinned images, then writes the selected Environment
 Compose model to standard output. It is useful for reviewing project scoping, ports, runtime identity, mounts, secrets,
