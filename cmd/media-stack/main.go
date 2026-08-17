@@ -85,7 +85,7 @@ func runApply(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return operationalFailure{cause: err}
 	}
-	fmt.Fprintf(os.Stdout, "Started healthy Gluetun for the %s Environment.\n", report.Environment)
+	fmt.Fprintf(os.Stdout, "Started qBittorrent behind healthy Gluetun for the %s Environment.\n", report.Environment)
 	return nil
 }
 

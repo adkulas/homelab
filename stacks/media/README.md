@@ -6,9 +6,9 @@ independent Production and Staging Environments so changes can be proven before 
 
 > [!IMPORTANT]
 > This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, and the
-> Gluetun-startup phase of `apply` are available now; application reconciliation, `backup`, `restore`, `verify`, and
-> `destroy` remain planned. Ubuntu is the authoritative implementation and completion platform. Docker Desktop WSL2
-> compatibility is verified independently and does not block Ubuntu work. Sections below label planned behavior explicitly.
+> VPN-confined qBittorrent startup phase of `apply` are available now; application reconciliation, `backup`, `restore`,
+> `verify`, and `destroy` remain planned. Ubuntu is the authoritative implementation and completion platform. Docker
+> Desktop WSL2 compatibility is verified independently and does not block Ubuntu work. Sections below label planned behavior explicitly.
 > The authoritative target design is in the
 > [implementation plan](../../docs/plans/media-stack.md) and
 > [CLI contract](../../docs/plans/media-stack-cli.md).
@@ -157,9 +157,9 @@ Compose model to standard output. It is useful for reviewing project scoping, po
 restart policy, and bounded logging. It does not yet observe applications, create a saved Plan Artifact, or mutate the host.
 Shell redirection is used above because `--out` is not implemented yet.
 
-### 4. Start the Staging VPN tunnel
+### 4. Start VPN-confined qBittorrent
 
-After `doctor` passes, start only the Staging Gluetun service:
+After `doctor` passes, start Staging qBittorrent behind Gluetun:
 
 ```bash
 media-stack apply --environment staging
@@ -167,11 +167,16 @@ media-stack apply --environment staging
 
 The currently available `apply` phase decrypts only the selected Environment's NordVPN OpenVPN service username and
 password. It atomically materializes them as `0600` files beneath the operator's `0700`
-`$XDG_RUNTIME_DIR/media-stack/<projectName>/` directory, streams the value-free Compose model to Docker, starts only
-Gluetun, and waits up to two minutes for its built-in health check. A transient unhealthy state is polled so Gluetun can try
+`$XDG_RUNTIME_DIR/media-stack/<projectName>/` directory, streams the value-free Compose model to Docker, starts
+Gluetun, and waits up to two minutes for its built-in health check. Only after Gluetun is healthy does `apply` start
+qBittorrent, which shares Gluetun's network namespace. A transient unhealthy state is polled so Gluetun can try
 another catalogue endpoint; a persistent failure exits `1`. The runtime files remain while the service is running so Docker
-can remount them after a container restart. Rerunning `apply` safely replaces the files and converges the same Gluetun
-service. Later tickets extend `apply` to the other services and application reconciliation.
+can remount them after a container restart. Rerunning `apply` safely replaces the files and converges the same Gluetun and qBittorrent services.
+Gluetun alone
+publishes the selected Environment's qBittorrent Web UI port, and its firewall admits only the narrow input port `8080`
+needed for that UI. Its `qbittorrent` application-network alias preserves the internal
+`http://qbittorrent:8080` endpoint without granting qBittorrent an independent route. Later tickets extend `apply` to the
+other services and application reconciliation.
 
 ### 5. Verify Staging (planned)
 
@@ -448,8 +453,9 @@ documented supported interface allows stable creation and storage.
 
 ## Applying configuration
 
-The available first phase validates and renders the selected Environment, materializes Gluetun's runtime secrets, starts
-only Gluetun, and waits boundedly for health. The remaining target order below is planned.
+The available phase validates and renders the selected Environment, materializes Gluetun's runtime secrets, starts Gluetun,
+waits boundedly for health, and then starts qBittorrent in Gluetun's network namespace. The remaining target order
+below is planned.
 
 The complete apply order will be:
 
@@ -517,7 +523,7 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
 | `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
-| `media-stack apply --environment production|staging [--config path]` | Available, Gluetun phase | Decrypts the selected Environment's OpenVPN service credentials into owner-only runtime Compose secret files, starts only Gluetun, and waits up to 120 seconds for health. Use it after `doctor`; repeated runs converge the same service. Application startup and reconciliation remain planned. |
+| `media-stack apply --environment production|staging [--config path]` | Available, VPN-confined qBittorrent phase | Decrypts the selected Environment's OpenVPN service credentials into owner-only runtime Compose secret files, starts Gluetun, waits up to 120 seconds for health, then starts qBittorrent in the shared namespace. Use it after `doctor`; repeated runs converge both services. Remaining application startup and reconciliation are planned. |
 | `media-stack backup` | Planned | Will create verified, checksummed application-state archives. It is not accepted by the current binary. |
 | `media-stack restore` | Planned | Will preview and safely restore compatible Environment state. It is not accepted by the current binary. |
 | `media-stack verify` | Planned | Will run named operational suites and emit evidence for Promotion. It is not accepted by the current binary. |
@@ -527,8 +533,8 @@ Every currently available command requires an explicit `production` or `staging`
 `--config` path is resolved from the working directory, while omitting it selects `stacks/media/media-stack.yaml` from the
 repository root.
 
-The current Gluetun apply phase shares the renderer with `plan`; later mutation phases will add saved Plan Artifacts,
-Environment locking, confirmation, and volatile safety rechecks. Planned `destroy` will never purge media, torrent payloads,
+The current VPN-confined qBittorrent apply phase shares the renderer with `plan`; later mutation phases will add saved
+Plan Artifacts, Environment locking, confirmation, and volatile safety rechecks. Planned `destroy` will never purge media, torrent payloads,
 backups, secrets, or Declared Configuration.
 
 ## Operating principles

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestApplyStartsOnlyHealthyGluetunWithRuntimeSecrets(t *testing.T) {
+func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *testing.T) {
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
 	writeFile(t, configPath, readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")), 0o600)
@@ -37,6 +37,7 @@ EOF
 	cat > "$APPLY_COMPOSE_CAPTURE"
 	case "$*" in
 	  "compose -f - up -d gluetun") exit 0 ;;
+	  "compose -f - up -d qbittorrent") exit 0 ;;
 	  "compose -f - ps --format json gluetun")
 	    count=0
 	    [ -f "$APPLY_HEALTH_COUNT" ] && count=$(cat "$APPLY_HEALTH_COUNT")
@@ -61,8 +62,11 @@ EOF
 	if err != nil {
 		t.Fatalf("media-stack apply failed: %v\n%s", err, output)
 	}
+	if !strings.Contains(string(output), "Started qBittorrent behind healthy Gluetun for the staging Environment.") {
+		t.Errorf("apply output = %q, want completed VPN-confined qBittorrent phase", output)
+	}
 
-	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun"
+	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent"
 	if got := strings.TrimSpace(string(readFile(t, dockerLog))); got != wantDocker {
 		t.Errorf("Docker invocation = %q", got)
 	}
