@@ -16,7 +16,8 @@ const usage = `usage:
   media-stack init --environment production|staging [--config path] --non-interactive --answers path
   media-stack doctor --environment production|staging [--config path] [--output human|json]
   media-stack plan --environment production|staging [--config path]
-  media-stack apply --environment production|staging [--config path]`
+  media-stack apply --environment production|staging [--config path]
+  media-stack verify --environment production|staging [--config path] --suite full [--output human|json]`
 
 type operationalFailure struct {
 	cause error
@@ -55,11 +56,68 @@ func run(ctx context.Context, arguments []string) error {
 		return runPlan(ctx, arguments[1:])
 	case "apply":
 		return runApply(ctx, arguments[1:])
+	case "verify":
+		return runVerify(ctx, arguments[1:])
 	case "__storage-probe":
 		return runStorageProbe(arguments[1:])
 	default:
 		return fmt.Errorf("%s", usage)
 	}
+}
+
+func runVerify(ctx context.Context, arguments []string) error {
+	flags := flag.NewFlagSet("verify", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	environmentName := flags.String("environment", "", "Production or Staging Environment")
+	configPath := flags.String("config", "", "Declared Configuration path")
+	suite := flags.String("suite", "full", "verification suite")
+	output := flags.String("output", "human", "human or json")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	if *environmentName == "" {
+		return fmt.Errorf("environment is required\n%s", usage)
+	}
+	if *environmentName == "production" {
+		return fmt.Errorf("full verification is disruptive and requires the Staging Environment")
+	}
+	if *suite != "full" {
+		return fmt.Errorf("suite must be full; other verification suites are not implemented yet")
+	}
+	if *output != "human" && *output != "json" {
+		return fmt.Errorf("output must be human or json")
+	}
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("locate working directory: %w", err)
+	}
+	request, err := engine.NewVerifyRequest(workingDirectory, *environmentName, *configPath, *suite)
+	if err != nil {
+		return err
+	}
+	report, err := engine.New().Verify(ctx, request)
+	if err != nil {
+		return operationalFailure{cause: err}
+	}
+	if *output == "json" {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetEscapeHTML(false)
+		if err := encoder.Encode(report); err != nil {
+			return err
+		}
+	} else {
+		for _, diagnostic := range report.Diagnostics {
+			fmt.Fprintf(os.Stdout, "%s %-5s %s", diagnostic.Code, diagnostic.Status, diagnostic.Explanation)
+			if diagnostic.Status == "fail" {
+				fmt.Fprintf(os.Stdout, "; remedy: %s", diagnostic.Remedy)
+			}
+			fmt.Fprintln(os.Stdout)
+		}
+	}
+	if report.Failed() {
+		return operationalFailure{}
+	}
+	return nil
 }
 
 func runApply(ctx context.Context, arguments []string) error {

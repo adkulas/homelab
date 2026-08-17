@@ -5,9 +5,11 @@ episodic television. It is designed for Ubuntu and Docker Desktop with WSL 2, co
 independent Production and Staging Environments so changes can be proven before they affect the household libraries.
 
 > [!IMPORTANT]
-> This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, and the
-> VPN-confined qBittorrent, Radarr Movie Library, and Prowlarr movie-discovery phases of `apply` are available now; remaining application reconciliation, `backup`, `restore`,
-> `verify`, and `destroy` remain planned. Ubuntu is the authoritative implementation and completion platform. Docker
+> This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, the
+> VPN-confined qBittorrent, Radarr Movie Library, and Prowlarr movie-discovery phases of `apply`, and the VPN-focused
+> `verify --suite full` phase are available now. Remaining application reconciliation, `backup`, `restore`, the other
+> verification suites and artifacts, and `destroy` remain planned. Ubuntu is the authoritative implementation and
+> completion platform. Docker
 > Desktop WSL2 compatibility is verified independently and does not block Ubuntu work. Sections below label planned behavior explicitly.
 > The authoritative target design is in the
 > [implementation plan](../../docs/plans/media-stack.md) and
@@ -195,27 +197,21 @@ needed for that UI. Its `qbittorrent` application-network alias preserves the in
 `http://qbittorrent:8080` endpoint without granting qBittorrent an independent route. Later tickets extend `apply` to the
 other services and application reconciliation.
 
-### 5. Verify Staging (planned)
+### 5. Verify Staging VPN behavior
 
 ```bash
-media-stack verify --environment staging --suite smoke
 media-stack verify --environment staging --suite full
+media-stack verify --environment staging --suite full --output json
 ```
 
-The smoke suite checks rendered topology, isolation, health, APIs, LAN reachability, and internal service discovery. The full
-suite additionally checks storage semantics, configuration convergence, backup sampling, VPN egress, fail-closed behavior,
-and recovery.
+The available full-suite phase verifies the Gluetun TUN device and health, resolves an external-IP service from
+qBittorrent's shared namespace, and requires that tunneled address to differ from the host address. It then stops Gluetun,
+requires a fresh qBittorrent-namespace request to fail, restarts Gluetun, waits up to two minutes for health, recreates
+qBittorrent in Gluetun's current network namespace, and proves tunneled egress returns. Cleanup always attempts recovery after an interruption. Run it only in the
+Staging Environment because it deliberately interrupts acquisition. Exit `1` means verification failed; JSON output
+includes stable `VERIFY_*` diagnostics and remedies.
 
-A Promotion verification also exercises a repository-declared legal acquisition fixture:
-
-```bash
-media-stack verify \
-  --environment staging \
-  --suite promotion \
-  --legal-fixture stacks/media/fixtures/legal-movie.yaml
-```
-
-Success emits a content-addressed Verification Artifact bound to the exact Declared Configuration and pinned versions.
+The smoke, Promotion, and Restore Drill suites and content-addressed Verification Artifacts remain planned.
 
 ### 6. Create Production and promote the proven change (planned)
 
@@ -294,9 +290,10 @@ application network, preserving the stable internal address `http://qbittorrent:
 qBittorrent another route. The deployed design prohibits host networking, privileged mode, `FIREWALL=off`, and broad LAN
 firewall exceptions as kill-switch workarounds.
 
-`media-stack verify` compares the public IP seen from the shared namespace with a host-side observation, interrupts the
-tunnel, proves a fresh qBittorrent egress attempt fails instead of using the host route, then restores and verifies the
-tunnel.
+`media-stack verify --environment staging --suite full [--config path] [--output human|json]` compares the public IP
+seen from qBittorrent's shared namespace with a host-side observation, interrupts the tunnel, proves a fresh egress attempt
+fails instead of using the host route, then restores Gluetun and verifies tunneled egress returns. It rejects Production
+because this phase is disruptive.
 
 ### Storage and hardlinks
 
@@ -544,7 +541,7 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack apply --environment production|staging [--config path]` | Available through Prowlarr movie discovery | Decrypts the selected Environment's OpenVPN service credentials into owner-only runtime Compose secret files; starts healthy Gluetun and VPN-confined qBittorrent; reconciles qBittorrent's acquisition policy; prepares Radarr's Movie Library; then starts Prowlarr and reconciles the approved Internet Archive source plus its full-sync Radarr application link. Use it after `doctor`; repeated runs converge without API writes when state already matches. Remaining application startup and reconciliation are planned. |
 | `media-stack backup` | Planned | Will create verified, checksummed application-state archives. It is not accepted by the current binary. |
 | `media-stack restore` | Planned | Will preview and safely restore compatible Environment state. It is not accepted by the current binary. |
-| `media-stack verify` | Planned | Will run named operational suites and emit evidence for Promotion. It is not accepted by the current binary. |
+| `media-stack verify --environment staging --suite full [--config path] [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, and recovery. Use it after `apply` in Staging; it is deliberately rejected for Production. Smoke, Promotion, Restore Drill, and Verification Artifact behavior remain planned. |
 | `media-stack destroy` | Planned | Will remove only selected-Environment runtime resources behind explicit safety guards. It is not accepted by the current binary. |
 
 Every currently available command requires an explicit `production` or `staging`; Production is never inferred. A relative
