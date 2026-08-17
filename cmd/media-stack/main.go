@@ -15,11 +15,21 @@ import (
 const usage = `usage:
   media-stack init --environment production|staging [--config path] --non-interactive --answers path
   media-stack doctor --environment production|staging [--config path] [--output human|json]
-  media-stack plan --environment production|staging [--config path]`
+  media-stack plan --environment production|staging [--config path]
+  media-stack apply --environment production|staging [--config path]`
 
-type operationalFailure struct{}
+type operationalFailure struct {
+	cause error
+}
 
-func (operationalFailure) Error() string { return "one or more prerequisite checks failed" }
+func (failure operationalFailure) Error() string {
+	if failure.cause != nil {
+		return failure.cause.Error()
+	}
+	return "one or more prerequisite checks failed"
+}
+
+func (failure operationalFailure) Unwrap() error { return failure.cause }
 
 func main() {
 	if err := run(context.Background(), os.Args[1:]); err != nil {
@@ -43,11 +53,40 @@ func run(ctx context.Context, arguments []string) error {
 		return runDoctor(ctx, arguments[1:])
 	case "plan":
 		return runPlan(ctx, arguments[1:])
+	case "apply":
+		return runApply(ctx, arguments[1:])
 	case "__storage-probe":
 		return runStorageProbe(arguments[1:])
 	default:
 		return fmt.Errorf("%s", usage)
 	}
+}
+
+func runApply(ctx context.Context, arguments []string) error {
+	flags := flag.NewFlagSet("apply", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	environmentName := flags.String("environment", "", "Production or Staging Environment")
+	configPath := flags.String("config", "", "Declared Configuration path")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	if *environmentName == "" {
+		return fmt.Errorf("environment is required\n%s", usage)
+	}
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("locate working directory: %w", err)
+	}
+	request, err := engine.NewApplyRequest(workingDirectory, *environmentName, *configPath)
+	if err != nil {
+		return err
+	}
+	report, err := engine.New().Apply(ctx, request)
+	if err != nil {
+		return operationalFailure{cause: err}
+	}
+	fmt.Fprintf(os.Stdout, "Started healthy Gluetun for the %s Environment.\n", report.Environment)
+	return nil
 }
 
 func runStorageProbe(arguments []string) error {

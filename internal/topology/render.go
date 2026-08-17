@@ -3,7 +3,9 @@ package topology
 import (
 	"fmt"
 	"path"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/adkulas/homelab/internal/config"
 	"gopkg.in/yaml.v3"
@@ -49,6 +51,8 @@ type composeService struct {
 	Image       string            `yaml:"image"`
 	User        string            `yaml:"user,omitempty"`
 	Environment map[string]string `yaml:"environment"`
+	CapAdd      []string          `yaml:"cap_add,omitempty"`
+	Devices     []string          `yaml:"devices,omitempty"`
 	Restart     string            `yaml:"restart"`
 	Logging     composeLogging    `yaml:"logging"`
 	Networks    []string          `yaml:"networks"`
@@ -68,7 +72,7 @@ type composeSecret struct {
 	File string `yaml:"file"`
 }
 
-func Render(defaults config.Defaults, environment config.Environment, images map[string]string) ([]byte, error) {
+func Render(defaults config.Defaults, environment config.Environment, vpn config.VPN, images map[string]string, runtimeSecretDirectory string) ([]byte, error) {
 	if defaults.Timezone == "" {
 		return nil, fmt.Errorf("declared timezone is required")
 	}
@@ -80,8 +84,11 @@ func Render(defaults config.Defaults, environment config.Environment, images map
 		Name:     environment.ProjectName,
 		Services: make(map[string]composeService, len(mandatoryServices)),
 		Networks: map[string]composeNetwork{"application": {}},
-		Secrets:  map[string]composeSecret{"environment": {File: environment.SecretsFile}},
-		Volumes:  make(map[string]composeVolume, len(mandatoryServices)),
+		Secrets: map[string]composeSecret{
+			"openvpn_user":     {File: filepath.Join(runtimeSecretDirectory, "openvpn_user")},
+			"openvpn_password": {File: filepath.Join(runtimeSecretDirectory, "openvpn_password")},
+		},
+		Volumes: make(map[string]composeVolume, len(mandatoryServices)),
 	}
 	for _, definition := range mandatoryServices {
 		reference, exists := images[definition.name]
@@ -111,13 +118,31 @@ func Render(defaults config.Defaults, environment config.Environment, images map
 			ports = []string{fmt.Sprintf("%s:%d:%d", defaults.LANBindAddress, definition.port(environment.Ports), definition.targetPort)}
 		}
 		var secrets []string
+		var capabilities []string
+		var devices []string
 		if definition.name == "gluetun" {
-			secrets = []string{"environment"}
+			serviceEnvironment["VPN_SERVICE_PROVIDER"] = vpn.Provider
+			serviceEnvironment["VPN_TYPE"] = vpn.Protocol
+			serviceEnvironment["OPENVPN_PROTOCOL"] = vpn.OpenVPNProtocol
+			serviceEnvironment["SERVER_COUNTRIES"] = strings.Join(vpn.Server.Countries, ",")
+			if len(vpn.Server.Categories) > 0 {
+				serviceEnvironment["SERVER_CATEGORIES"] = strings.Join(vpn.Server.Categories, ",")
+			}
+			serviceEnvironment["UPDATER_PERIOD"] = vpn.CatalogueUpdateInterval
+			serviceEnvironment["FIREWALL"] = "on"
+			serviceEnvironment["VPN_PORT_FORWARDING"] = "off"
+			serviceEnvironment["OPENVPN_USER_SECRETFILE"] = "/run/secrets/openvpn_user"
+			serviceEnvironment["OPENVPN_PASSWORD_SECRETFILE"] = "/run/secrets/openvpn_password"
+			secrets = []string{"openvpn_user", "openvpn_password"}
+			capabilities = []string{"NET_ADMIN"}
+			devices = []string{"/dev/net/tun:/dev/net/tun"}
 		}
 		project.Services[definition.name] = composeService{
 			Image:       reference,
 			User:        user,
 			Environment: serviceEnvironment,
+			CapAdd:      capabilities,
+			Devices:     devices,
 			Restart:     "unless-stopped",
 			Logging: composeLogging{
 				Driver: "json-file",
