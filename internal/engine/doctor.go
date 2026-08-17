@@ -8,11 +8,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/adkulas/homelab/internal/config"
 )
 
 const doctorSchemaVersion = "homelab.media-stack/doctor/v1alpha1"
+
+const doctorProbeTimeout = 2 * time.Minute
 
 type DoctorRequest struct{ environment, configPath, versionsPath string }
 
@@ -84,9 +87,9 @@ func (localEngine) Doctor(ctx context.Context, request DoctorRequest) (DoctorRep
 	add("DEPENDENCY_AGE_UNAVAILABLE", "age", "Install age and ensure it is on PATH.", runQuiet(ctx, "age", "--version"))
 	add("SECRET_DECRYPT_FAILED", "selected Environment secret decryption", "Install the matching age identity and verify the SOPS document can be decrypted.", runQuiet(ctx, "sops", "decrypt", "--output-type", "yaml", secretPath))
 	image := versions.Images["gluetun"]
-	add("PREFLIGHT_TUN_UNAVAILABLE", "/dev/net/tun in the pinned Gluetun image", "Enable the TUN device for Docker and rerun doctor.", runQuiet(ctx, "docker", "run", "--rm", "--device", "/dev/net/tun", "--entrypoint", "/bin/sh", image, "-c", "test -c /dev/net/tun"))
-	add("PREFLIGHT_NET_ADMIN_UNAVAILABLE", "NET_ADMIN for the pinned Gluetun image", "Allow Docker to grant NET_ADMIN to the Gluetun container.", runQuiet(ctx, "docker", "run", "--rm", "--cap-add", "NET_ADMIN", "--entrypoint", "/bin/sh", image, "-c", "ip link add ms-doctor type dummy && ip link delete ms-doctor"))
-	filterArguments := []string{"run", "--rm", "-e", "VPN_SERVICE_PROVIDER=nordvpn", "-e", "VPN_TYPE=openvpn", "-e", "OPENVPN_PROTOCOL=" + vpn.OpenVPNProtocol}
+	add("PREFLIGHT_TUN_UNAVAILABLE", "/dev/net/tun in the pinned Gluetun image", "Enable the TUN device for Docker and rerun doctor.", runDockerProbeQuiet(ctx, "--device", "/dev/net/tun", "--entrypoint", "/bin/sh", image, "-c", "test -c /dev/net/tun"))
+	add("PREFLIGHT_NET_ADMIN_UNAVAILABLE", "NET_ADMIN for the pinned Gluetun image", "Allow Docker to grant NET_ADMIN to the Gluetun container.", runDockerProbeQuiet(ctx, "--cap-add", "NET_ADMIN", "--entrypoint", "/bin/sh", image, "-c", "ip link add ms-doctor type dummy && ip link delete ms-doctor"))
+	filterArguments := []string{"-e", "VPN_SERVICE_PROVIDER=nordvpn", "-e", "VPN_TYPE=openvpn", "-e", "OPENVPN_PROTOCOL=" + vpn.OpenVPNProtocol}
 	if len(vpn.Server.Countries) > 0 {
 		filterArguments = append(filterArguments, "-e", "SERVER_COUNTRIES="+strings.Join(vpn.Server.Countries, ","))
 	}
@@ -95,7 +98,7 @@ func (localEngine) Doctor(ctx context.Context, request DoctorRequest) (DoctorRep
 	}
 	filterArguments = append(filterArguments, image, "format-servers", "-nordvpn")
 	validFilter := vpn.Provider == "nordvpn" && vpn.Protocol == "openvpn" && (vpn.OpenVPNProtocol == "udp" || vpn.OpenVPNProtocol == "tcp") && len(vpn.Server.Countries) > 0
-	add("PREFLIGHT_VPN_FILTER_UNSUPPORTED", "declared NordVPN OpenVPN server filters", "Choose protocol, country, and category values supported by the pinned Gluetun catalogue.", validFilter && runNonEmpty(ctx, "docker", filterArguments...))
+	add("PREFLIGHT_VPN_FILTER_UNSUPPORTED", "declared NordVPN OpenVPN server filters", "Choose protocol, country, and category values supported by the pinned Gluetun catalogue.", validFilter && runDockerProbeNonEmpty(ctx, filterArguments...))
 	report.Diagnostics = append(report.Diagnostics, storageDiagnostics(ctx, request.environment, environment.DataRoot,
 		declared.Spec.Defaults.RuntimeUID, declared.Spec.Defaults.RuntimeGID, versions.Images)...)
 	return report, nil
@@ -112,6 +115,22 @@ func runNonEmpty(ctx context.Context, name string, arguments ...string) bool {
 	command.Stderr = io.Discard
 	output, err := command.Output()
 	return err == nil && len(strings.TrimSpace(string(output))) > 0
+}
+
+func runDockerProbeQuiet(ctx context.Context, arguments ...string) bool {
+	probeContext, cancel := context.WithTimeout(ctx, doctorProbeTimeout)
+	defer cancel()
+	return runQuiet(probeContext, "docker", dockerProbeArguments(arguments...)...)
+}
+
+func runDockerProbeNonEmpty(ctx context.Context, arguments ...string) bool {
+	probeContext, cancel := context.WithTimeout(ctx, doctorProbeTimeout)
+	defer cancel()
+	return runNonEmpty(probeContext, "docker", dockerProbeArguments(arguments...)...)
+}
+
+func dockerProbeArguments(arguments ...string) []string {
+	return append([]string{"run", "--rm", "--no-healthcheck"}, arguments...)
 }
 
 func supportedPlatform() bool {

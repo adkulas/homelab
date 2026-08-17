@@ -156,17 +156,18 @@ func runStorageProbe(ctx context.Context, probe storageProbeInvocation, uid, gid
 	if err != nil {
 		return storageProbeReport{}, fmt.Errorf("locate probe executable: %w", err)
 	}
-	arguments := []string{
-		"run", "--rm",
-		"--user", strconv.Itoa(uid) + ":" + strconv.Itoa(gid),
-		"--mount", "type=bind,source=" + probe.hostMount + ",target=" + probe.targetMount,
-		"--mount", "type=bind,source=" + executable + ",target=/media-stack-doctor-probe,readonly",
+	arguments := dockerProbeArguments(
+		"--user", strconv.Itoa(uid)+":"+strconv.Itoa(gid),
+		"--mount", "type=bind,source="+probe.hostMount+",target="+probe.targetMount,
+		"--mount", "type=bind,source="+executable+",target=/media-stack-doctor-probe,readonly",
 		"--entrypoint", "/media-stack-doctor-probe",
 		probe.image,
 		"__storage-probe", "--source", probe.source, "--destination", probe.destination,
 		"--uid", strconv.Itoa(uid), "--gid", strconv.Itoa(gid),
-	}
-	command := exec.CommandContext(ctx, "docker", arguments...)
+	)
+	probeContext, cancel := context.WithTimeout(ctx, doctorProbeTimeout)
+	defer cancel()
+	command := exec.CommandContext(probeContext, "docker", arguments...)
 	output, err := command.Output()
 	if err != nil {
 		return storageProbeReport{}, err
