@@ -20,7 +20,36 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	categories := map[string]map[string]string{}
 	var rootFolders []map[string]any
 	var downloadClients []map[string]any
+	var indexers []map[string]any
+	var applications []map[string]any
 	api := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if strings.HasPrefix(request.URL.Path, "/api/v1/") {
+			if request.Header.Get("X-Api-Key") != "fixture-prowlarr-api-key" {
+				http.Error(writer, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			switch request.Method + " " + request.URL.Path {
+			case "GET /api/v1/system/status":
+				_ = json.NewEncoder(writer).Encode(map[string]string{"appName": "Prowlarr"})
+			case "GET /api/v1/indexer":
+				_ = json.NewEncoder(writer).Encode(indexers)
+			case "POST /api/v1/indexer":
+				var indexer map[string]any
+				_ = json.NewDecoder(request.Body).Decode(&indexer)
+				indexers = append(indexers, indexer)
+				writer.WriteHeader(http.StatusCreated)
+			case "GET /api/v1/applications":
+				_ = json.NewEncoder(writer).Encode(applications)
+			case "POST /api/v1/applications":
+				var application map[string]any
+				_ = json.NewDecoder(request.Body).Decode(&application)
+				applications = append(applications, application)
+				writer.WriteHeader(http.StatusCreated)
+			default:
+				http.NotFound(writer, request)
+			}
+			return
+		}
 		if strings.HasPrefix(request.URL.Path, "/api/v3/") {
 			if request.Header.Get("X-Api-Key") != "fixture-radarr-api-key" {
 				http.Error(writer, "Unauthorized", http.StatusUnauthorized)
@@ -89,6 +118,7 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	}
 	declared := strings.Replace(string(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml"))), "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "radarr: 17878", "radarr: "+apiURL.Port(), 1)
+	declared = strings.Replace(declared, "prowlarr: 19696", "prowlarr: "+apiURL.Port(), 1)
 	writeFile(t, configPath, []byte(declared), 0o600)
 	if err := os.Mkdir(filepath.Join(temporary, "secrets"), 0o700); err != nil {
 		t.Fatal(err)
@@ -119,6 +149,8 @@ EOF
 	  "compose -f - logs --no-color qbittorrent") printf 'A temporary password is provided for this session: fixture-temporary-password\n'; exit 0 ;;
 	  "compose -f - up -d radarr") exit 0 ;;
 	  "compose -f - exec -T radarr cat /config/config.xml") printf '<Config><ApiKey>fixture-radarr-api-key</ApiKey></Config>\n'; exit 0 ;;
+	  "compose -f - up -d prowlarr") exit 0 ;;
+	  "compose -f - exec -T prowlarr cat /config/config.xml") printf '<Config><ApiKey>fixture-prowlarr-api-key</ApiKey></Config>\n'; exit 0 ;;
 	  "compose -f - ps --format json gluetun")
 	    count=0
 	    [ -f "$APPLY_HEALTH_COUNT" ] && count=$(cat "$APPLY_HEALTH_COUNT")
@@ -143,11 +175,11 @@ EOF
 	if err != nil {
 		t.Fatalf("media-stack apply failed: %v\n%s", err, output)
 	}
-	if !strings.Contains(string(output), "Prepared Radarr for the Movie Library in the staging Environment.") {
-		t.Errorf("apply output = %q, want completed Radarr phase", output)
+	if !strings.Contains(string(output), "Prepared movie discovery through Prowlarr in the staging Environment.") {
+		t.Errorf("apply output = %q, want completed movie-discovery phase", output)
 	}
 
-	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml"
+	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml"
 	if got := strings.TrimSpace(string(readFile(t, dockerLog))); got != wantDocker {
 		t.Errorf("Docker invocation = %q", got)
 	}
@@ -195,6 +227,20 @@ EOF
 	if fields["host"] != "qbittorrent" || fields["port"] != float64(8080) || fields["movieCategory"] != "movies" {
 		t.Errorf("Radarr qBittorrent contract = %v", fields)
 	}
+	if len(indexers) != 1 || indexers[0]["definitionName"] != "internetarchive" {
+		t.Fatalf("apply did not reconcile the approved Public Torrent Source: %v", indexers)
+	}
+	if len(applications) != 1 {
+		t.Fatalf("apply did not reconcile Prowlarr's Radarr application link: %v", applications)
+	}
+	applicationFields := map[string]any{}
+	for _, item := range applications[0]["fields"].([]any) {
+		field := item.(map[string]any)
+		applicationFields[field["name"].(string)] = field["value"]
+	}
+	if applicationFields["baseUrl"] != "http://radarr:7878" || applicationFields["prowlarrUrl"] != "http://prowlarr:9696" || applicationFields["apiKey"] != "fixture-radarr-api-key" {
+		t.Errorf("Prowlarr Radarr application contract = %v", applicationFields)
+	}
 	secondCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
 	secondCommand.Dir = command.Dir
 	secondCommand.Env = command.Env
@@ -202,8 +248,8 @@ EOF
 	if err != nil {
 		t.Fatalf("repeated media-stack apply failed: %v\n%s", err, secondOutput)
 	}
-	if len(rootFolders) != 1 || len(downloadClients) != 1 {
-		t.Errorf("repeated apply did not converge: roots=%v downloadClients=%v", rootFolders, downloadClients)
+	if len(rootFolders) != 1 || len(downloadClients) != 1 || len(indexers) != 1 || len(applications) != 1 {
+		t.Errorf("repeated apply did not converge: roots=%v downloadClients=%v indexers=%v applications=%v", rootFolders, downloadClients, indexers, applications)
 	}
 }
 

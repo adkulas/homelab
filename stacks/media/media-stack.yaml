@@ -32,6 +32,9 @@ spec:
                 jellyfin: 18096
                 seerr: 15055
     acquisition:
+        publicTorrentSources:
+            - id: internetarchive
+              enabled: true
         vpn:
             provider: nordvpn
             protocol: openvpn

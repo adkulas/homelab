@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/adkulas/homelab/internal/config"
+	"github.com/adkulas/homelab/internal/prowlarr"
 	"github.com/adkulas/homelab/internal/qbittorrent"
 	"github.com/adkulas/homelab/internal/radarr"
 	"gopkg.in/yaml.v3"
@@ -95,14 +96,33 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if _, err := radarrClient.ReconcileMovieLibrary(ctx, password); err != nil {
 		return ApplyReport{}, fmt.Errorf("reconcile Radarr Movie Library: %w", err)
 	}
+	if output, err := runDockerCompose(ctx, plan, "up", "-d", "prowlarr"); err != nil {
+		return ApplyReport{}, fmt.Errorf("start Prowlarr: %w: %s", err, redactCredentials(output, credentials))
+	}
+	prowlarrAPIKey, err := waitForServiceAPIKey(ctx, plan, "prowlarr", "Prowlarr", 120*time.Second)
+	if err != nil {
+		return ApplyReport{}, err
+	}
+	prowlarrAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Prowlarr)
+	prowlarrClient := prowlarr.New("http://"+prowlarrAddress, prowlarrAPIKey, &http.Client{Timeout: 10 * time.Second})
+	if err := waitForProwlarrReady(ctx, prowlarrClient, 120*time.Second); err != nil {
+		return ApplyReport{}, err
+	}
+	if _, err := prowlarrClient.ReconcileMovieDiscovery(ctx, apiKey); err != nil {
+		return ApplyReport{}, fmt.Errorf("reconcile Prowlarr movie discovery: %w", err)
+	}
 	return ApplyReport{Environment: request.plan.environment}, nil
 }
 
 func waitForRadarrAPIKey(ctx context.Context, plan Plan, timeout time.Duration) (string, error) {
+	return waitForServiceAPIKey(ctx, plan, "radarr", "Radarr", timeout)
+}
+
+func waitForServiceAPIKey(ctx context.Context, plan Plan, service, application string, timeout time.Duration) (string, error) {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	for {
-		output, err := runDockerCompose(ctx, plan, "exec", "-T", "radarr", "cat", "/config/config.xml")
+		output, err := runDockerCompose(ctx, plan, "exec", "-T", service, "cat", "/config/config.xml")
 		if err == nil {
 			var document struct {
 				APIKey string `xml:"ApiKey"`
@@ -115,7 +135,7 @@ func waitForRadarrAPIKey(ctx context.Context, plan Plan, timeout time.Duration) 
 		case <-ctx.Done():
 			return "", ctx.Err()
 		case <-deadline.C:
-			return "", fmt.Errorf("Radarr did not publish its API key within %s", timeout)
+			return "", fmt.Errorf("%s did not publish its API key within %s", application, timeout)
 		case <-time.After(2 * time.Second):
 		}
 	}
@@ -123,6 +143,30 @@ func waitForRadarrAPIKey(ctx context.Context, plan Plan, timeout time.Duration) 
 
 type radarrReadiness interface {
 	Ready(context.Context) error
+}
+
+type prowlarrReadiness interface {
+	Ready(context.Context) error
+}
+
+func waitForProwlarrReady(ctx context.Context, client prowlarrReadiness, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	var lastErr error
+	for {
+		if err := client.Ready(ctx); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("Prowlarr API did not become ready within %s: %w", timeout, lastErr)
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 func waitForRadarrReady(ctx context.Context, client radarrReadiness, timeout time.Duration) error {

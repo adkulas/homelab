@@ -6,7 +6,7 @@ independent Production and Staging Environments so changes can be proven before 
 
 > [!IMPORTANT]
 > This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, and the
-> VPN-confined qBittorrent and Radarr Movie Library phases of `apply` are available now; remaining application reconciliation, `backup`, `restore`,
+> VPN-confined qBittorrent, Radarr Movie Library, and Prowlarr movie-discovery phases of `apply` are available now; remaining application reconciliation, `backup`, `restore`,
 > `verify`, and `destroy` remain planned. Ubuntu is the authoritative implementation and completion platform. Docker
 > Desktop WSL2 compatibility is verified independently and does not block Ubuntu work. Sections below label planned behavior explicitly.
 > The authoritative target design is in the
@@ -159,7 +159,7 @@ Compose model to standard output. It is useful for reviewing project scoping, po
 restart policy, and bounded logging. It does not yet observe applications, create a saved Plan Artifact, or mutate the host.
 Shell redirection is used above because `--out` is not implemented yet.
 
-### 4. Start VPN-confined qBittorrent and prepare Radarr
+### 4. Start VPN-confined qBittorrent and prepare movie discovery
 
 After `doctor` passes, start Staging qBittorrent behind Gluetun:
 
@@ -183,8 +183,12 @@ can remount them after a container restart. After qBittorrent converges, `apply`
 from that Environment's `/config/config.xml` into memory, and waits for the supported Radarr v3 API. It reconciles
 `/data/media/movies` as the Movie Library root and a qBittorrent download client at `qbittorrent:8080` with the `movies`
 category. Both applications see the same `/data` paths, so no remote path mapping is created. Repeated reconciliation makes
-no API writes once these values match. Rerunning `apply` safely replaces the runtime VPN files and converges Gluetun,
-qBittorrent, and Radarr.
+no API writes once these values match. It then starts API-ready Prowlarr and reconciles the checked-in `internetarchive`
+Public Torrent Source plus a full-sync Radarr application link. Prowlarr reaches Radarr at `http://radarr:7878`; its own
+callback URL is `http://prowlarr:9696`. The Internet Archive source is the first entry in the CLI's approved semantic catalog,
+requires no credentials, and supports movie-title search for later legal verification fixtures. Repeating `apply` observes
+both Prowlarr resources through `/api/v1` and makes no writes when they already match. Rerunning `apply` safely replaces the
+runtime VPN files and converges Gluetun, qBittorrent, Radarr, and Prowlarr.
 Gluetun alone
 publishes the selected Environment's qBittorrent Web UI port, and its firewall admits only the narrow input port `8080`
 needed for that UI. Its `qbittorrent` application-network alias preserves the internal
@@ -413,6 +417,7 @@ from silently becoming ineffective configuration.
 | `spec.acquisition.vpn.server.countries` | `init`, `doctor`, `plan`, `apply` | Non-empty semantic country selection rendered as `SERVER_COUNTRIES`; an empty selection is rejected before Docker starts. |
 | `spec.acquisition.vpn.server.categories` | `init`, `doctor`, `plan`, `apply` | Optional `P2P` category rendered as `SERVER_CATEGORIES`. |
 | `spec.acquisition.vpn.catalogueUpdateInterval` | `init`, `plan`, `apply` | Must parse as at least `360h`; rendered as `UPDATER_PERIOD`, with `/gluetun` backed by the Environment's persistent named volume. |
+| `spec.acquisition.publicTorrentSources[].id` / `enabled` | `apply` | Selects a semantic source from the CLI's approved catalog. The current catalog contains only `internetarchive`, enabled in the checked-in configuration. Unknown IDs are rejected. |
 
 Container paths, network names, config-volume names, application URLs, qBittorrent categories, restart policy, and logging
 limits are derived rather than exposed as arbitrary YAML. This preserves the shared `/data` and environment-isolation
@@ -536,7 +541,7 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
 | `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
-| `media-stack apply --environment production|staging [--config path]` | Available through Radarr Movie Library reconciliation | Decrypts the selected Environment's OpenVPN service credentials into owner-only runtime Compose secret files; starts healthy Gluetun and VPN-confined qBittorrent; reconciles qBittorrent's acquisition policy; then starts API-ready Radarr and reconciles `/data/media/movies` plus its `qbittorrent:8080` `movies` download client without a remote path mapping. Use it after `doctor`; repeated runs converge without API writes when state already matches. Remaining application startup and reconciliation are planned. |
+| `media-stack apply --environment production|staging [--config path]` | Available through Prowlarr movie discovery | Decrypts the selected Environment's OpenVPN service credentials into owner-only runtime Compose secret files; starts healthy Gluetun and VPN-confined qBittorrent; reconciles qBittorrent's acquisition policy; prepares Radarr's Movie Library; then starts Prowlarr and reconciles the approved Internet Archive source plus its full-sync Radarr application link. Use it after `doctor`; repeated runs converge without API writes when state already matches. Remaining application startup and reconciliation are planned. |
 | `media-stack backup` | Planned | Will create verified, checksummed application-state archives. It is not accepted by the current binary. |
 | `media-stack restore` | Planned | Will preview and safely restore compatible Environment state. It is not accepted by the current binary. |
 | `media-stack verify` | Planned | Will run named operational suites and emit evidence for Promotion. It is not accepted by the current binary. |

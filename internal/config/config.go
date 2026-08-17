@@ -39,7 +39,13 @@ type Environment struct {
 }
 
 type Acquisition struct {
-	VPN VPN `yaml:"vpn"`
+	VPN                  VPN                   `yaml:"vpn"`
+	PublicTorrentSources []PublicTorrentSource `yaml:"publicTorrentSources,omitempty"`
+}
+
+type PublicTorrentSource struct {
+	ID      string `yaml:"id"`
+	Enabled bool   `yaml:"enabled"`
 }
 
 type VPN struct {
@@ -80,6 +86,16 @@ func Load(path string) (MediaStack, error) {
 	}
 	if declared.APIVersion != schemaVersion || declared.Kind != "MediaStack" {
 		return MediaStack{}, fmt.Errorf("load Declared Configuration: unsupported document %q %q", declared.APIVersion, declared.Kind)
+	}
+	seenSources := map[string]bool{}
+	for _, source := range declared.Spec.Acquisition.PublicTorrentSources {
+		if source.ID != "internetarchive" {
+			return MediaStack{}, fmt.Errorf("load Declared Configuration: Public Torrent Source %q is not in the approved catalog", source.ID)
+		}
+		if seenSources[source.ID] {
+			return MediaStack{}, fmt.Errorf("load Declared Configuration: Public Torrent Source %q is declared more than once", source.ID)
+		}
+		seenSources[source.ID] = true
 	}
 	return declared, nil
 }
