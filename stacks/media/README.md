@@ -171,7 +171,13 @@ The currently available `apply` phase decrypts only the selected Environment's N
 password. It atomically materializes them as `0600` files beneath the operator's `0700`
 `$XDG_RUNTIME_DIR/media-stack/<projectName>/` directory, streams the value-free Compose model to Docker, starts
 Gluetun, and waits up to two minutes for its built-in health check. Only after Gluetun is healthy does `apply` start
-qBittorrent, which shares Gluetun's network namespace. A transient unhealthy state is polled so Gluetun can try
+qBittorrent, which shares Gluetun's network namespace. It then reconciles qBittorrent through its Web API: the default
+save path is `/data/torrents`; Automatic Torrent Management relocates downloads when their torrent, save path, or category
+changes; the exact `movies` and `series` categories use relative `movies` and `series` save paths; and global seeding stops
+at ratio 1.0 or seven days, whichever is reached first. Repeating `apply` observes those values and makes no API writes when
+they already match the Declared Configuration. During the CLI-owned bootstrap phase, `apply` reads the pinned LinuxServer
+image's latest temporary admin password from container logs, exchanges it for an in-memory Web API session, and never writes
+the password to command output or repository files. No remote path mappings are created. A transient unhealthy state is polled so Gluetun can try
 another catalogue endpoint; a persistent failure exits `1`. The runtime files remain while the service is running so Docker
 can remount them after a container restart. Rerunning `apply` safely replaces the files and converges the same Gluetun and qBittorrent services.
 Gluetun alone
@@ -525,7 +531,7 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
 | `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
-| `media-stack apply --environment production|staging [--config path]` | Available, VPN-confined qBittorrent phase | Decrypts the selected Environment's OpenVPN service credentials into owner-only runtime Compose secret files, starts Gluetun, waits up to 120 seconds for health, then starts qBittorrent in the shared namespace. Use it after `doctor`; repeated runs converge both services. Remaining application startup and reconciliation are planned. |
+| `media-stack apply --environment production|staging [--config path]` | Available, VPN-confined qBittorrent reconciliation phase | Decrypts the selected Environment's OpenVPN service credentials into owner-only runtime Compose secret files, starts Gluetun, waits up to 120 seconds for health, starts qBittorrent in the shared namespace, and reconciles its acquisition paths, categories, Automatic Torrent Management relocation, and ratio-or-time seeding limits through the Web API. Use it after `doctor`; repeated runs converge without API writes when the policy already matches. Remaining application startup and reconciliation are planned. |
 | `media-stack backup` | Planned | Will create verified, checksummed application-state archives. It is not accepted by the current binary. |
 | `media-stack restore` | Planned | Will preview and safely restore compatible Environment state. It is not accepted by the current binary. |
 | `media-stack verify` | Planned | Will run named operational suites and emit evidence for Promotion. It is not accepted by the current binary. |

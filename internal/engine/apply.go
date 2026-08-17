@@ -5,13 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/adkulas/homelab/internal/config"
+	"github.com/adkulas/homelab/internal/qbittorrent"
 	"gopkg.in/yaml.v3"
 )
 
@@ -62,7 +66,57 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if output, err := runDockerCompose(ctx, plan, "up", "-d", "qbittorrent"); err != nil {
 		return ApplyReport{}, fmt.Errorf("start qBittorrent after healthy Gluetun: %w: %s", err, redactCredentials(output, credentials))
 	}
+	password, err := waitForTemporaryQBittorrentPassword(ctx, plan, 120*time.Second)
+	if err != nil {
+		return ApplyReport{}, err
+	}
+	address := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.QBittorrent)
+	client := qbittorrent.New("http://"+address, &http.Client{Timeout: 10 * time.Second})
+	if err := client.Login(ctx, "admin", password); err != nil {
+		return ApplyReport{}, err
+	}
+	if _, err := client.ReconcileAcquisitionPolicy(ctx); err != nil {
+		return ApplyReport{}, fmt.Errorf("reconcile qBittorrent acquisition policy: %w", err)
+	}
 	return ApplyReport{Environment: request.plan.environment}, nil
+}
+
+var temporaryPasswordPattern = regexp.MustCompile(`temporary password is provided for this session:\s*(\S+)`)
+
+func temporaryQBittorrentPassword(logs []byte) (string, error) {
+	matches := temporaryPasswordPattern.FindAllSubmatch(logs, -1)
+	if len(matches) == 0 {
+		return "", fmt.Errorf("qBittorrent did not report its temporary Web UI password; restore the CLI-owned bootstrap state or provide a supported credential contract")
+	}
+	return string(matches[len(matches)-1][1]), nil
+}
+
+func waitForTemporaryQBittorrentPassword(ctx context.Context, plan Plan, timeout time.Duration) (string, error) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		logs, err := runDockerCompose(ctx, plan, "logs", "--no-color", "qbittorrent")
+		if err != nil {
+			return "", fmt.Errorf("read qBittorrent bootstrap credentials: %w", err)
+		}
+		if password, err := temporaryQBittorrentPassword(logs); err == nil {
+			return password, nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-deadline.C:
+			return "", fmt.Errorf("qBittorrent did not report its temporary Web UI password within %s", timeout)
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func environmentAddress(bindAddress string, port int) string {
+	if bindAddress == "0.0.0.0" || bindAddress == "::" || bindAddress == "" {
+		bindAddress = "127.0.0.1"
+	}
+	return net.JoinHostPort(bindAddress, fmt.Sprint(port))
 }
 
 func runDockerCompose(ctx context.Context, plan Plan, arguments ...string) ([]byte, error) {

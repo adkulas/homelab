@@ -1,6 +1,11 @@
 package acceptance_test
 
 import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,7 +16,50 @@ import (
 func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *testing.T) {
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	writeFile(t, configPath, readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")), 0o600)
+	preferences := map[string]any{}
+	categories := map[string]map[string]string{}
+	api := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v2/auth/login" {
+			body, _ := io.ReadAll(request.Body)
+			values, _ := url.ParseQuery(string(body))
+			if values.Get("username") != "admin" || values.Get("password") != "fixture-temporary-password" {
+				http.Error(writer, "Fails.", http.StatusForbidden)
+				return
+			}
+			http.SetCookie(writer, &http.Cookie{Name: "SID", Value: "acceptance-session", Path: "/"})
+			_, _ = writer.Write([]byte("Ok."))
+			return
+		}
+		cookie, err := request.Cookie("SID")
+		if err != nil || cookie.Value != "acceptance-session" {
+			http.Error(writer, "Forbidden", http.StatusForbidden)
+			return
+		}
+		switch request.URL.Path {
+		case "/api/v2/app/preferences":
+			_ = json.NewEncoder(writer).Encode(preferences)
+		case "/api/v2/app/setPreferences":
+			body, _ := io.ReadAll(request.Body)
+			values, _ := url.ParseQuery(string(body))
+			_ = json.Unmarshal([]byte(values.Get("json")), &preferences)
+		case "/api/v2/torrents/categories":
+			_ = json.NewEncoder(writer).Encode(categories)
+		case "/api/v2/torrents/createCategory":
+			body, _ := io.ReadAll(request.Body)
+			values, _ := url.ParseQuery(string(body))
+			name := values.Get("category")
+			categories[name] = map[string]string{"name": name, "savePath": values.Get("savePath")}
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer api.Close()
+	apiURL, err := url.Parse(api.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := strings.Replace(string(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml"))), "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
+	writeFile(t, configPath, []byte(declared), 0o600)
 	if err := os.Mkdir(filepath.Join(temporary, "secrets"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -38,6 +86,7 @@ EOF
 	case "$*" in
 	  "compose -f - up -d gluetun") exit 0 ;;
 	  "compose -f - up -d qbittorrent") exit 0 ;;
+	  "compose -f - logs --no-color qbittorrent") printf 'A temporary password is provided for this session: fixture-temporary-password\n'; exit 0 ;;
 	  "compose -f - ps --format json gluetun")
 	    count=0
 	    [ -f "$APPLY_HEALTH_COUNT" ] && count=$(cat "$APPLY_HEALTH_COUNT")
@@ -62,11 +111,11 @@ EOF
 	if err != nil {
 		t.Fatalf("media-stack apply failed: %v\n%s", err, output)
 	}
-	if !strings.Contains(string(output), "Started qBittorrent behind healthy Gluetun for the staging Environment.") {
+	if !strings.Contains(string(output), "Started qBittorrent behind healthy Gluetun and reconciled its acquisition policy for the staging Environment.") {
 		t.Errorf("apply output = %q, want completed VPN-confined qBittorrent phase", output)
 	}
 
-	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent"
+	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent"
 	if got := strings.TrimSpace(string(readFile(t, dockerLog))); got != wantDocker {
 		t.Errorf("Docker invocation = %q", got)
 	}
@@ -75,6 +124,9 @@ EOF
 		if strings.Contains(rendered, secret) || strings.Contains(string(output), secret) {
 			t.Errorf("apply exposed secret %q\noutput: %s\nCompose: %s", secret, output, rendered)
 		}
+	}
+	if strings.Contains(string(output), "fixture-temporary-password") {
+		t.Errorf("apply exposed qBittorrent temporary password: %s", output)
 	}
 
 	runtimeDirectory := filepath.Join(temporary, "runtime", "media-stack", "media-staging")
@@ -93,6 +145,9 @@ EOF
 		if got := strings.TrimSpace(string(readFile(t, path))); got != want {
 			t.Errorf("runtime secret %s = %q, want selected credential", name, got)
 		}
+	}
+	if preferences["save_path"] != "/data/torrents" || categories["movies"]["savePath"] != "movies" || categories["series"]["savePath"] != "series" {
+		t.Errorf("apply did not reconcile qBittorrent acquisition policy: preferences=%v categories=%v", preferences, categories)
 	}
 }
 

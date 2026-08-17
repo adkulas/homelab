@@ -1,0 +1,12 @@
+{
+  "save_path": "/downloads",
+  "auto_tmm_enabled": false,
+  "torrent_changed_tmm_enabled": false,
+  "save_path_changed_tmm_enabled": false,
+  "category_changed_tmm_enabled": false,
+  "max_ratio_enabled": false,
+  "max_ratio": -1,
+  "max_seeding_time_enabled": false,
+  "max_seeding_time": -1,
+  "max_ratio_act": 0
+}
