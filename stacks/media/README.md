@@ -144,8 +144,11 @@ docker compose -f staging-compose.yaml config --quiet
 ```
 
 `doctor` checks the supported Linux/WSL platform, Docker Engine, Compose, SOPS, age, decryption of the selected Environment
-secret, `/dev/net/tun`, `NET_ADMIN`, and whether the pinned Gluetun catalogue accepts the declared NordVPN filters. Human
-output explains each result; JSON provides stable diagnostic records for automation. It does not start the stack.
+secret, `/dev/net/tun`, `NET_ADMIN`, and whether the pinned Gluetun catalogue accepts the declared NordVPN filters. It also
+runs disposable probes from the pinned qBittorrent, Radarr, and Sonarr images as the declared runtime UID/GID, using their
+actual `/data/torrents` or `/data` bind-mount shapes. Those probes verify write permission, same-device layout, hardlink
+creation and inode identity, atomic rename, filesystem events, and cleanup. Human output explains each result; JSON provides
+stable diagnostic records and remedies for automation. It does not start the stack.
 
 The current `plan` implementation validates Declared Configuration and pinned images, then writes the selected Environment
 Compose model to standard output. It is useful for reviewing project scoping, ports, runtime identity, mounts, secrets,
@@ -484,7 +487,7 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | --- | --- | --- |
 | `media-stack init --environment production|staging [--config path]` | Available | Interactively completes runtime/VPN choices, encrypts that Environment credentials, and provisions its isolated data layout. Use it once per Environment and rerun it to restore missing directories without replacing complete choices. |
 | `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
-| `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, capability, and Gluetun-filter preflights. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
+| `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
 | `media-stack apply` | Planned | Will execute a reviewed plan and reconcile services to convergence. It is not accepted by the current binary. |
 | `media-stack backup` | Planned | Will create verified, checksummed application-state archives. It is not accepted by the current binary. |

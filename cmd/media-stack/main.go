@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/adkulas/homelab/internal/engine"
+	"github.com/adkulas/homelab/internal/storageprobe"
 )
 
 const usage = `usage:
@@ -42,9 +43,27 @@ func run(ctx context.Context, arguments []string) error {
 		return runDoctor(ctx, arguments[1:])
 	case "plan":
 		return runPlan(ctx, arguments[1:])
+	case "__storage-probe":
+		return runStorageProbe(arguments[1:])
 	default:
 		return fmt.Errorf("%s", usage)
 	}
+}
+
+func runStorageProbe(arguments []string) error {
+	flags := flag.NewFlagSet("__storage-probe", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	source := flags.String("source", "", "source directory")
+	destination := flags.String("destination", "", "destination directory")
+	uid := flags.Int("uid", -1, "expected numeric UID")
+	gid := flags.Int("gid", -1, "expected numeric GID")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	if *source == "" || *destination == "" || *uid < 0 || *gid < 0 {
+		return fmt.Errorf("storage probe source, destination, uid, and gid are required")
+	}
+	return json.NewEncoder(os.Stdout).Encode(storageprobe.Run(*source, *destination, *uid, *gid))
 }
 
 func runDoctor(ctx context.Context, arguments []string) error {

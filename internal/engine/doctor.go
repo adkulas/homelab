@@ -96,6 +96,8 @@ func (localEngine) Doctor(ctx context.Context, request DoctorRequest) (DoctorRep
 	filterArguments = append(filterArguments, image, "format-servers", "-nordvpn")
 	validFilter := vpn.Provider == "nordvpn" && vpn.Protocol == "openvpn" && (vpn.OpenVPNProtocol == "udp" || vpn.OpenVPNProtocol == "tcp") && len(vpn.Server.Countries) > 0
 	add("PREFLIGHT_VPN_FILTER_UNSUPPORTED", "declared NordVPN OpenVPN server filters", "Choose protocol, country, and category values supported by the pinned Gluetun catalogue.", validFilter && runNonEmpty(ctx, "docker", filterArguments...))
+	report.Diagnostics = append(report.Diagnostics, storageDiagnostics(ctx, request.environment, environment.DataRoot,
+		declared.Spec.Defaults.RuntimeUID, declared.Spec.Defaults.RuntimeGID, versions.Images)...)
 	return report, nil
 }
 
