@@ -15,6 +15,7 @@ const (
 	internetArchiveDefinition = "internetarchive"
 	internalProwlarrURL       = "http://prowlarr:9696"
 	internalRadarrURL         = "http://radarr:7878"
+	internalSonarrURL         = "http://sonarr:8989"
 )
 
 type Client struct {
@@ -79,7 +80,7 @@ func (client *Client) Ready(ctx context.Context) error {
 	return nil
 }
 
-func (client *Client) ReconcileMovieDiscovery(ctx context.Context, radarrAPIKey string) (bool, error) {
+func (client *Client) ReconcileLibraryDiscovery(ctx context.Context, radarrAPIKey, sonarrAPIKey string) (bool, error) {
 	var indexers []indexer
 	if err := client.getJSON(ctx, "/api/v1/indexer", &indexers); err != nil {
 		return false, err
@@ -104,16 +105,24 @@ func (client *Client) ReconcileMovieDiscovery(ctx context.Context, radarrAPIKey 
 	if err := client.getJSON(ctx, "/api/v1/applications", &applications); err != nil {
 		return false, err
 	}
-	desiredApplication := declaredRadarrApplication(radarrAPIKey)
-	for _, current := range applications {
-		if current.Implementation == desiredApplication.Implementation && applicationMatches(current, desiredApplication) {
-			return changed, nil
+	desiredApplications := []application{declaredRadarrApplication(radarrAPIKey), declaredSonarrApplication(sonarrAPIKey)}
+	for _, desiredApplication := range desiredApplications {
+		foundApplication := false
+		for _, current := range applications {
+			if current.Implementation == desiredApplication.Implementation && applicationMatches(current, desiredApplication) {
+				foundApplication = true
+				break
+			}
 		}
+		if foundApplication {
+			continue
+		}
+		if err := client.sendJSON(ctx, http.MethodPost, "/api/v1/applications", desiredApplication); err != nil {
+			return false, err
+		}
+		changed = true
 	}
-	if err := client.sendJSON(ctx, http.MethodPost, "/api/v1/applications", desiredApplication); err != nil {
-		return false, err
-	}
-	return true, nil
+	return changed, nil
 }
 
 func declaredInternetArchive() indexer {
@@ -142,6 +151,22 @@ func declaredRadarrApplication(apiKey string) application {
 			{Name: "baseUrl", Value: internalRadarrURL},
 			{Name: "apiKey", Value: apiKey},
 			{Name: "syncCategories", Value: []int{}},
+		},
+	}
+}
+
+func declaredSonarrApplication(apiKey string) application {
+	return application{
+		Enable: true, Name: "Sonarr", SyncLevel: "fullSync",
+		ImplementationName: "Sonarr", Implementation: "Sonarr", ConfigContract: "SonarrSettings", Tags: []int{},
+		Fields: []field{
+			{Name: "prowlarrUrl", Value: internalProwlarrURL},
+			{Name: "baseUrl", Value: internalSonarrURL},
+			{Name: "apiKey", Value: apiKey},
+			{Name: "syncCategories", Value: []int{5000, 5010, 5020, 5030, 5040, 5045, 5050, 5090}},
+			{Name: "animeSyncCategories", Value: []int{5070}},
+			{Name: "syncAnimeStandardFormatSearch", Value: true},
+			{Name: "syncRejectBlocklistedTorrentHashesWhileGrabbing", Value: false},
 		},
 	}
 }
@@ -182,8 +207,16 @@ func normalizeJSONValue(value any) any {
 	if number, ok := value.(float64); ok && number == float64(int(number)) {
 		return int(number)
 	}
-	if items, ok := value.([]any); ok && len(items) == 0 {
-		return []int{}
+	if items, ok := value.([]any); ok {
+		normalized := make([]int, len(items))
+		for index, item := range items {
+			number, ok := item.(float64)
+			if !ok || number != float64(int(number)) {
+				return value
+			}
+			normalized[index] = int(number)
+		}
+		return normalized
 	}
 	return value
 }
