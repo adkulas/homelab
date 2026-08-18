@@ -6,7 +6,7 @@ independent Production and Staging Environments so changes can be proven before 
 
 > [!IMPORTANT]
 > This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, the
-> VPN-confined qBittorrent, Radarr Movie Library, Sonarr Series Library, and Prowlarr movie-discovery phases of `apply`; VPN-focused
+> VPN-confined qBittorrent, Radarr Movie Library, Sonarr Series Library, and Prowlarr Movie and Series Library discovery phases of `apply`; VPN-focused
 > `verify --suite full`; and legal movie acquisition/hardlink proof through `verify --suite promotion` are available now.
 > Remaining application reconciliation, `backup`, `restore`, playback verification, the other verification suites and
 > artifacts, and `destroy` remain planned. Ubuntu is the authoritative implementation and
@@ -162,7 +162,7 @@ Compose model to standard output. It is useful for reviewing project scoping, po
 restart policy, and bounded logging. It does not yet observe applications, create a saved Plan Artifact, or mutate the host.
 Shell redirection is used above because `--out` is not implemented yet.
 
-### 4. Start VPN-confined qBittorrent and prepare movie discovery
+### 4. Start VPN-confined qBittorrent and prepare library discovery
 
 After `doctor` passes, start Staging qBittorrent behind Gluetun:
 
@@ -190,10 +190,11 @@ for its supported v3 API. It reconciles `/data/media/series` as the Series Libra
 `qbittorrent:8080` with the `series` category. qBittorrent and both Arr applications see the same `/data` paths, so no remote
 path mapping is created. Repeated reconciliation makes no API writes once these values match. It then starts API-ready
 Prowlarr and reconciles the checked-in `internetarchive`
-Public Torrent Source plus a full-sync Radarr application link. Prowlarr reaches Radarr at `http://radarr:7878`; its own
-callback URL is `http://prowlarr:9696`. The Internet Archive source is the first entry in the CLI's approved semantic catalog,
-requires no credentials, and supports movie-title search for later legal verification fixtures. Repeating `apply` observes
-both Prowlarr resources through `/api/v1` and makes no writes when they already match. Rerunning `apply` safely replaces the
+Public Torrent Source plus full-sync Radarr and Sonarr application links. Prowlarr reaches Radarr at `http://radarr:7878`
+and Sonarr at `http://sonarr:8989`; both links use the `http://prowlarr:9696` callback URL. The Sonarr link syncs the pinned
+standard and anime TV categories reported by the supported Prowlarr schema. The Internet Archive source is the first entry
+in the CLI's approved semantic catalog, requires no credentials, and supports legal movie and series searches. Repeating
+`apply` observes all three Prowlarr resources through `/api/v1` and makes no writes when they already match. Rerunning `apply` safely replaces the
 runtime VPN files and converges Gluetun, qBittorrent, Radarr, Sonarr, and Prowlarr.
 Gluetun alone
 publishes the selected Environment's qBittorrent Web UI port, and its firewall admits only the narrow input port `8080`
@@ -561,7 +562,7 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
 | `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
-| `media-stack apply --environment production|staging [--config path]` | Available through Sonarr preparation and Prowlarr movie discovery | Decrypts the selected Environment's OpenVPN service credentials into owner-only runtime Compose secret files; starts healthy Gluetun and VPN-confined qBittorrent; reconciles qBittorrent's acquisition policy; prepares Radarr's Movie Library and Sonarr's Series Library with path-identical qBittorrent clients; then starts Prowlarr and reconciles the approved Internet Archive source plus its full-sync Radarr application link. Use it after `doctor`; repeated runs converge without API writes when state already matches. Remaining application startup and reconciliation are planned. |
+| `media-stack apply --environment production|staging [--config path]` | Available through Prowlarr Movie and Series Library discovery | Decrypts the selected Environment's OpenVPN service credentials into owner-only runtime Compose secret files; starts healthy Gluetun and VPN-confined qBittorrent; reconciles qBittorrent's acquisition policy; prepares Radarr's Movie Library and Sonarr's Series Library with path-identical qBittorrent clients; then starts Prowlarr and reconciles the approved Internet Archive source plus full-sync Radarr and Sonarr application links with pinned media categories. Use it after `doctor`; repeated runs converge without API writes when state already matches. Remaining application startup and reconciliation are planned. |
 | `media-stack backup` | Planned | Will create verified, checksummed application-state archives. It is not accepted by the current binary. |
 | `media-stack restore` | Planned | Will preview and safely restore compatible Environment state. It is not accepted by the current binary. |
 | `media-stack verify --environment staging --suite full [--config path] [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, and recovery. Use it after `apply` in Staging; it is deliberately rejected for Production. |

@@ -124,8 +124,8 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if err := waitForProwlarrReady(ctx, prowlarrClient, 120*time.Second); err != nil {
 		return ApplyReport{}, err
 	}
-	if _, err := prowlarrClient.ReconcileMovieDiscovery(ctx, apiKey); err != nil {
-		return ApplyReport{}, fmt.Errorf("reconcile Prowlarr movie discovery: %w", err)
+	if _, err := prowlarrClient.ReconcileLibraryDiscovery(ctx, apiKey, sonarrAPIKey); err != nil {
+		return ApplyReport{}, fmt.Errorf("reconcile Prowlarr library discovery: %w", err)
 	}
 	return ApplyReport{Environment: request.plan.environment}, nil
 }

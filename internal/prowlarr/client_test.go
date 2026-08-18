@@ -8,10 +8,11 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 )
 
-func TestReconcileMovieDiscoveryConvergesPinnedContractFixtures(t *testing.T) {
+func TestReconcileLibraryDiscoveryConvergesPinnedContractFixtures(t *testing.T) {
 	indexers := readFixture(t, "indexers.json")
 	applications := readFixture(t, "applications.json")
 	var mutations []string
@@ -35,8 +36,14 @@ func TestReconcileMovieDiscoveryConvergesPinnedContractFixtures(t *testing.T) {
 			_, _ = writer.Write(applications)
 		case "POST /api/v1/applications":
 			body, _ := io.ReadAll(request.Body)
-			applications = []byte("[" + string(body) + "]")
-			mutations = append(mutations, "radarr-application")
+			if string(applications) == "[]\n" {
+				applications = []byte("[" + string(body) + "]")
+			} else {
+				applications = append(applications[:len(applications)-1], append([]byte(","+string(body)), ']')...)
+			}
+			var created map[string]any
+			_ = json.Unmarshal(body, &created)
+			mutations = append(mutations, strings.ToLower(created["name"].(string))+"-application")
 			writer.WriteHeader(http.StatusCreated)
 		default:
 			http.Error(writer, "unexpected endpoint", http.StatusNotFound)
@@ -47,14 +54,14 @@ func TestReconcileMovieDiscoveryConvergesPinnedContractFixtures(t *testing.T) {
 	if err := client.Ready(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := client.ReconcileMovieDiscovery(context.Background(), "fixture-radarr-api-key")
+	changed, err := client.ReconcileLibraryDiscovery(context.Background(), "fixture-radarr-api-key", "fixture-sonarr-api-key")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !changed {
 		t.Fatal("first reconciliation reported no changes")
 	}
-	if want := []string{"internet-archive", "radarr-application"}; !reflect.DeepEqual(mutations, want) {
+	if want := []string{"internet-archive", "radarr-application", "sonarr-application"}; !reflect.DeepEqual(mutations, want) {
 		t.Fatalf("mutations = %v, want %v", mutations, want)
 	}
 
@@ -77,9 +84,17 @@ func TestReconcileMovieDiscoveryConvergesPinnedContractFixtures(t *testing.T) {
 	if fields["baseUrl"] != "http://radarr:7878" || fields["prowlarrUrl"] != "http://prowlarr:9696" || fields["apiKey"] != "fixture-radarr-api-key" {
 		t.Fatalf("Radarr application contract = %v", fields)
 	}
+	fields = fieldValues(createdApplications[1]["fields"])
+	if fields["baseUrl"] != "http://sonarr:8989" || fields["prowlarrUrl"] != "http://prowlarr:9696" || fields["apiKey"] != "fixture-sonarr-api-key" {
+		t.Fatalf("Sonarr application contract = %v", fields)
+	}
+	wantSeriesCategories := []any{float64(5000), float64(5010), float64(5020), float64(5030), float64(5040), float64(5045), float64(5050), float64(5090)}
+	if !reflect.DeepEqual(fields["syncCategories"], wantSeriesCategories) || !reflect.DeepEqual(fields["animeSyncCategories"], []any{float64(5070)}) || fields["syncAnimeStandardFormatSearch"] != true || fields["syncRejectBlocklistedTorrentHashesWhileGrabbing"] != false {
+		t.Fatalf("Sonarr category sync contract = %v", fields)
+	}
 
 	mutations = nil
-	changed, err = client.ReconcileMovieDiscovery(context.Background(), "fixture-radarr-api-key")
+	changed, err = client.ReconcileLibraryDiscovery(context.Background(), "fixture-radarr-api-key", "fixture-sonarr-api-key")
 	if err != nil {
 		t.Fatal(err)
 	}

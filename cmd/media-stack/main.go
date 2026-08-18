@@ -150,7 +150,7 @@ func runApply(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return operationalFailure{cause: err}
 	}
-	fmt.Fprintf(os.Stdout, "Prepared Radarr movie discovery and the Sonarr Series Library in the %s Environment.\n", report.Environment)
+	fmt.Fprintf(os.Stdout, "Prepared Movie and Series Library discovery through Prowlarr in the %s Environment.\n", report.Environment)
 	return nil
 }
 

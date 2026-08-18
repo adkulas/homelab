@@ -211,7 +211,7 @@ EOF
 	if err != nil {
 		t.Fatalf("media-stack apply failed: %v\n%s", err, output)
 	}
-	if !strings.Contains(string(output), "Prepared Radarr movie discovery and the Sonarr Series Library in the staging Environment.") {
+	if !strings.Contains(string(output), "Prepared Movie and Series Library discovery through Prowlarr in the staging Environment.") {
 		t.Errorf("apply output = %q, want completed Radarr and Sonarr phases", output)
 	}
 
@@ -280,16 +280,23 @@ EOF
 	if len(indexers) != 1 || indexers[0]["definitionName"] != "internetarchive" {
 		t.Fatalf("apply did not reconcile the approved Public Torrent Source: %v", indexers)
 	}
-	if len(applications) != 1 {
-		t.Fatalf("apply did not reconcile Prowlarr's Radarr application link: %v", applications)
+	if len(applications) != 2 {
+		t.Fatalf("apply did not reconcile Prowlarr application links: %v", applications)
 	}
-	applicationFields := map[string]any{}
-	for _, item := range applications[0]["fields"].([]any) {
-		field := item.(map[string]any)
-		applicationFields[field["name"].(string)] = field["value"]
+	applicationsByName := map[string]map[string]any{}
+	for _, application := range applications {
+		applicationFields := map[string]any{}
+		for _, item := range application["fields"].([]any) {
+			field := item.(map[string]any)
+			applicationFields[field["name"].(string)] = field["value"]
+		}
+		applicationsByName[application["name"].(string)] = applicationFields
 	}
-	if applicationFields["baseUrl"] != "http://radarr:7878" || applicationFields["prowlarrUrl"] != "http://prowlarr:9696" || applicationFields["apiKey"] != "fixture-radarr-api-key" {
-		t.Errorf("Prowlarr Radarr application contract = %v", applicationFields)
+	if fields := applicationsByName["Radarr"]; fields["baseUrl"] != "http://radarr:7878" || fields["prowlarrUrl"] != "http://prowlarr:9696" || fields["apiKey"] != "fixture-radarr-api-key" {
+		t.Errorf("Prowlarr Radarr application contract = %v", fields)
+	}
+	if fields := applicationsByName["Sonarr"]; fields["baseUrl"] != "http://sonarr:8989" || fields["prowlarrUrl"] != "http://prowlarr:9696" || fields["apiKey"] != "fixture-sonarr-api-key" {
+		t.Errorf("Prowlarr Sonarr application contract = %v", fields)
 	}
 	secondCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
 	secondCommand.Dir = command.Dir
@@ -298,7 +305,7 @@ EOF
 	if err != nil {
 		t.Fatalf("repeated media-stack apply failed: %v\n%s", err, secondOutput)
 	}
-	if len(rootFolders) != 1 || len(downloadClients) != 1 || len(seriesRootFolders) != 1 || len(seriesDownloadClients) != 1 || len(indexers) != 1 || len(applications) != 1 {
+	if len(rootFolders) != 1 || len(downloadClients) != 1 || len(seriesRootFolders) != 1 || len(seriesDownloadClients) != 1 || len(indexers) != 1 || len(applications) != 2 {
 		t.Errorf("repeated apply did not converge: movieRoots=%v movieDownloadClients=%v seriesRoots=%v seriesDownloadClients=%v indexers=%v applications=%v", rootFolders, downloadClients, seriesRootFolders, seriesDownloadClients, indexers, applications)
 	}
 }
