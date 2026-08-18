@@ -6,7 +6,7 @@ independent Production and Staging Environments so changes can be proven before 
 
 > [!IMPORTANT]
 > This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, the
-> VPN-confined qBittorrent, Radarr Movie Library, Sonarr Series Library, and Prowlarr Movie and Series Library discovery phases of `apply`; VPN-focused
+> VPN-confined qBittorrent, Radarr Movie Library, Sonarr Series Library, Prowlarr Movie and Series Library discovery, and guided Profilarr connection phases of `apply`; VPN-focused
 > `verify --suite full`; and legal movie and series-episode acquisition/hardlink proofs through `verify --suite promotion` are available now.
 > Remaining application reconciliation, `backup`, `restore`, playback verification, the other verification suites and
 > artifacts, and `destroy` remain planned. Ubuntu is the authoritative implementation and
@@ -119,7 +119,9 @@ media-stack init \
   --answers staging-answers.yaml
 ```
 
-Initialization writes the reviewable Declared Configuration and `secrets/staging.sops.yaml`; it never starts containers. It
+Initialization also asks for a unique, high-entropy Profilarr API key of at least 32 characters. This key lets the CLI use
+Profilarr's documented API to verify the one-time guided Radarr and Sonarr connections; use a different value for each
+Environment. Initialization writes the reviewable Declared Configuration and `secrets/staging.sops.yaml`; it never starts containers. It
 also creates only the selected Staging Environment layout:
 
 ```text
@@ -481,12 +483,23 @@ Secrets are committed only as SOPS-encrypted values using age recipients. Age pr
 decrypts narrowly at runtime and uses Compose secret files where the target image supports them; plaintext values must not
 appear in arguments, rendered Compose, plans, reports, logs, diagnostics, or backup manifests.
 
-`apply` writes only `openvpn_user` and `openvpn_password` beneath
+`apply` writes `openvpn_user`, `openvpn_password`, and `profilarr.env` beneath
 `$XDG_RUNTIME_DIR/media-stack/<projectName>/` (or a per-user directory under the system temporary directory when
-`XDG_RUNTIME_DIR` is unavailable). The directory is mode `0700`; both files are mode `0600`; only Gluetun receives their
-Compose mounts. They are intentionally not stored in the repository or embedded in Compose environment variables. They
+`XDG_RUNTIME_DIR` is unavailable). The directory is mode `0700` and every file is mode `0600`; only Gluetun receives the
+OpenVPN Compose secret mounts, while Profilarr receives its API key through the owner-only runtime environment file. Values are intentionally not stored in plaintext in the repository or embedded in rendered Compose. They
 remain present for container restart support and are atomically replaced on the next `apply`; ending the user's runtime
 session removes the standard runtime directory.
+
+Each Environment's SOPS document must also contain a unique Profilarr API key of at least 32 characters:
+
+```yaml
+profilarr:
+  apiKey: <unique-high-entropy-value>
+```
+
+New `init` runs collect and encrypt it. For an Environment initialized before guided Profilarr bootstrap was implemented,
+open its existing document with `sops stacks/media/secrets/<environment>.sops.yaml`, add the block above, save it, and rerun
+`apply`. The key declaratively configures Profilarr and authenticates only its documented versioned API; it is never printed.
 
 The initial VPN path uses NordVPN OpenVPN manual-setup service username/password with UDP by default and TCP as an explicit
 fallback. Gluetun selects endpoints from semantic country and optional category filters, persists its server catalogue, and
@@ -498,10 +511,21 @@ documented supported interface allows stable creation and storage.
 
 ## Applying configuration
 
-The available phase validates and renders the selected Environment, materializes Gluetun's runtime secrets, starts Gluetun,
+The available phase validates and renders the selected Environment, materializes runtime secrets, starts Gluetun,
 waits boundedly for health, starts and reconciles qBittorrent in Gluetun's network namespace, then starts Radarr and Sonarr
-and reconciles their Movie Library and Series Library contracts through supported APIs. The remaining target order below is
-planned.
+and reconciles their Movie Library and Series Library contracts through supported APIs. It then prepares Prowlarr discovery,
+starts Profilarr, and verifies its connections through `GET /api/v1/arr/instances`.
+
+On the first run, `apply` reports `manual action required` until the operator opens the selected Environment's Profilarr UI
+and adds exactly these enabled connections:
+
+- Radarr at `http://radarr:7878`, using Radarr's API key from **Settings > General**.
+- Sonarr at `http://sonarr:8989`, using Sonarr's API key from **Settings > General**.
+
+Save and test both connections in Profilarr, then rerun the same `media-stack apply` command. The rerun verifies their types,
+enabled state, and internal service URLs through Profilarr's documented API and continues without relying on private UI
+routes or direct database access. Perform this checklist independently in Production and Staging because their application
+state and credentials are isolated.
 
 The complete apply order will be:
 
@@ -565,11 +589,11 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 
 | Command | Availability | What it does and why to use it |
 | --- | --- | --- |
-| `media-stack init --environment production|staging [--config path]` | Available | Interactively completes runtime/VPN choices, encrypts that Environment credentials, and provisions its isolated data layout. Use it once per Environment and rerun it to restore missing directories without replacing complete choices. |
+| `media-stack init --environment production|staging [--config path]` | Available | Interactively completes runtime/VPN choices, collects a unique Profilarr API key, encrypts that Environment's credentials, and provisions its isolated data layout. Use it once per Environment and rerun it to restore missing directories without replacing complete choices. |
 | `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
 | `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
-| `media-stack apply --environment production|staging [--config path]` | Available through Prowlarr Movie and Series Library discovery | Decrypts the selected Environment's OpenVPN service credentials into owner-only runtime Compose secret files; starts healthy Gluetun and VPN-confined qBittorrent; reconciles qBittorrent's acquisition policy; prepares Radarr's Movie Library and Sonarr's Series Library with path-identical qBittorrent clients; then starts Prowlarr and reconciles the approved Internet Archive source plus full-sync Radarr and Sonarr application links with pinned media categories. Use it after `doctor`; repeated runs converge without API writes when state already matches. Remaining application startup and reconciliation are planned. |
+| `media-stack apply --environment production|staging [--config path]` | Available through guided Profilarr connections | Decrypts the selected Environment's OpenVPN and Profilarr credentials into owner-only runtime files; starts healthy Gluetun and VPN-confined qBittorrent; reconciles qBittorrent, Radarr, Sonarr, and Prowlarr; starts Profilarr; then verifies the operator-created Radarr and Sonarr connections through Profilarr's documented API. The first incomplete run prints the exact UI checklist and exits `1`; rerun after completing it. Remaining application reconciliation is planned. |
 | `media-stack backup` | Planned | Will create verified, checksummed application-state archives. It is not accepted by the current binary. |
 | `media-stack restore` | Planned | Will preview and safely restore compatible Environment state. It is not accepted by the current binary. |
 | `media-stack verify --environment staging --suite full [--config path] [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, and recovery. Use it after `apply` in Staging; it is deliberately rejected for Production. |
@@ -581,7 +605,7 @@ Every currently available command requires an explicit `production` or `staging`
 `--config` path is resolved from the working directory, while omitting it selects `stacks/media/media-stack.yaml` from the
 repository root.
 
-The current qBittorrent, Radarr, Sonarr, and Prowlarr apply phases share the renderer with `plan`; later mutation phases will add saved
+The current qBittorrent, Radarr, Sonarr, Prowlarr, and Profilarr apply phases share the renderer with `plan`; later mutation phases will add saved
 Plan Artifacts, Environment locking, confirmation, and volatile safety rechecks. Planned `destroy` will never purge media, torrent payloads,
 backups, secrets, or Declared Configuration.
 

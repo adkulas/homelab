@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -31,6 +32,11 @@ type ApplyReport struct {
 	Environment string
 }
 
+type environmentSecrets struct {
+	OpenVPN      openVPNCredentials
+	ProfilarrKey string
+}
+
 func NewApplyRequest(workingDirectory, environment, configPath string) (ApplyRequest, error) {
 	plan, err := NewPlanRequest(workingDirectory, environment, configPath)
 	if err != nil {
@@ -53,12 +59,13 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if !filepath.IsAbs(secretPath) {
 		secretPath = filepath.Join(filepath.Dir(request.plan.configPath), secretPath)
 	}
-	credentials, err := decryptOpenVPNCredentials(ctx, secretPath)
+	secrets, err := decryptEnvironmentSecrets(ctx, secretPath)
 	if err != nil {
 		return ApplyReport{}, err
 	}
-	if err := materializeOpenVPNCredentials(runtimeSecretDirectory(environment.ProjectName), credentials); err != nil {
-		return ApplyReport{}, fmt.Errorf("materialize Gluetun runtime secrets: %w", err)
+	credentials := secrets.OpenVPN
+	if err := materializeRuntimeSecrets(runtimeSecretDirectory(environment.ProjectName), secrets); err != nil {
+		return ApplyReport{}, fmt.Errorf("materialize runtime secrets: %w", err)
 	}
 
 	if output, err := runDockerCompose(ctx, plan, "up", "-d", "gluetun"); err != nil {
@@ -127,7 +134,73 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if _, err := prowlarrClient.ReconcileLibraryDiscovery(ctx, apiKey, sonarrAPIKey); err != nil {
 		return ApplyReport{}, fmt.Errorf("reconcile Prowlarr library discovery: %w", err)
 	}
+	if output, err := runDockerCompose(ctx, plan, "up", "-d", "profilarr"); err != nil {
+		return ApplyReport{}, fmt.Errorf("start Profilarr: %w: %s", err, redactCredentials(output, credentials))
+	}
+	profilarrAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Profilarr)
+	if err := verifyProfilarrBootstrap(ctx, "http://"+profilarrAddress, secrets.ProfilarrKey); err != nil {
+		return ApplyReport{}, err
+	}
 	return ApplyReport{Environment: request.plan.environment}, nil
+}
+
+func verifyProfilarrBootstrap(ctx context.Context, baseURL, apiKey string) error {
+	deadline := time.NewTimer(120 * time.Second)
+	defer deadline.Stop()
+	for {
+		complete, retryable, err := observeProfilarrBootstrap(ctx, baseURL, apiKey)
+		if err == nil {
+			if complete {
+				return nil
+			}
+			return fmt.Errorf("manual action required: open %s and add enabled Radarr and Sonarr connections using http://radarr:7878 and http://sonarr:8989; use each application's API key from Settings > General, save and test both connections, then rerun media-stack apply", baseURL)
+		}
+		if !retryable {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("Profilarr API did not become ready within 2m: %w", err)
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func observeProfilarrBootstrap(ctx context.Context, baseURL, apiKey string) (bool, bool, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/api/v1/arr/instances", nil)
+	if err != nil {
+		return false, false, fmt.Errorf("prepare Profilarr connection verification: %w", err)
+	}
+	request.Header.Set("X-Api-Key", apiKey)
+	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+	if err != nil {
+		return false, true, fmt.Errorf("verify Profilarr connections through its documented API: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return false, response.StatusCode >= 500, fmt.Errorf("verify Profilarr connections through its documented API: HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var instances []struct {
+		Type    string `json:"type"`
+		URL     string `json:"url"`
+		Enabled int    `json:"enabled"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&instances); err != nil {
+		return false, false, fmt.Errorf("decode Profilarr connections: %w", err)
+	}
+	want := map[string]string{"radarr": "http://radarr:7878", "sonarr": "http://sonarr:8989"}
+	for _, instance := range instances {
+		if instance.Enabled == 1 && instance.URL == want[instance.Type] {
+			delete(want, instance.Type)
+		}
+	}
+	if len(want) == 0 {
+		return true, false, nil
+	}
+	return false, false, nil
 }
 
 func waitForRadarrAPIKey(ctx context.Context, plan Plan, timeout time.Duration) (string, error) {
@@ -314,11 +387,11 @@ type openVPNCredentials struct {
 	Password string
 }
 
-func decryptOpenVPNCredentials(ctx context.Context, path string) (openVPNCredentials, error) {
+func decryptEnvironmentSecrets(ctx context.Context, path string) (environmentSecrets, error) {
 	command := exec.CommandContext(ctx, "sops", "decrypt", "--output-type", "yaml", path)
 	plain, err := command.Output()
 	if err != nil {
-		return openVPNCredentials{}, fmt.Errorf("decrypt selected Environment secrets: %w", err)
+		return environmentSecrets{}, fmt.Errorf("decrypt selected Environment secrets: %w", err)
 	}
 	var document struct {
 		NordVPN struct {
@@ -327,23 +400,29 @@ func decryptOpenVPNCredentials(ctx context.Context, path string) (openVPNCredent
 				ServicePassword string `yaml:"servicePassword"`
 			} `yaml:"openvpn"`
 		} `yaml:"nordvpn"`
+		Profilarr struct {
+			APIKey string `yaml:"apiKey"`
+		} `yaml:"profilarr"`
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(plain))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&document); err != nil {
-		return openVPNCredentials{}, fmt.Errorf("decode selected Environment secrets: %w", err)
+		return environmentSecrets{}, fmt.Errorf("decode selected Environment secrets: %w", err)
 	}
 	credentials := openVPNCredentials{
 		Username: document.NordVPN.OpenVPN.ServiceUsername,
 		Password: document.NordVPN.OpenVPN.ServicePassword,
 	}
 	if credentials.Username == "" || credentials.Password == "" {
-		return openVPNCredentials{}, fmt.Errorf("selected Environment secrets require NordVPN OpenVPN serviceUsername and servicePassword")
+		return environmentSecrets{}, fmt.Errorf("selected Environment secrets require NordVPN OpenVPN serviceUsername and servicePassword")
 	}
-	return credentials, nil
+	if len(document.Profilarr.APIKey) < 32 {
+		return environmentSecrets{}, fmt.Errorf("selected Environment secrets require profilarr.apiKey with at least 32 characters")
+	}
+	return environmentSecrets{OpenVPN: credentials, ProfilarrKey: document.Profilarr.APIKey}, nil
 }
 
-func materializeOpenVPNCredentials(directory string, credentials openVPNCredentials) error {
+func materializeRuntimeSecrets(directory string, secrets environmentSecrets) error {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return err
 	}
@@ -351,8 +430,9 @@ func materializeOpenVPNCredentials(directory string, credentials openVPNCredenti
 		return err
 	}
 	for name, value := range map[string]string{
-		"openvpn_user":     credentials.Username,
-		"openvpn_password": credentials.Password,
+		"openvpn_user":     secrets.OpenVPN.Username,
+		"openvpn_password": secrets.OpenVPN.Password,
+		"profilarr.env":    "PROFILARR_API_KEY=" + secrets.ProfilarrKey,
 	} {
 		if err := writeSecretAtomic(filepath.Join(directory, name), []byte(value+"\n")); err != nil {
 			return err

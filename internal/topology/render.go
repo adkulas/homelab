@@ -51,6 +51,7 @@ type composeService struct {
 	Image       string                           `yaml:"image"`
 	User        string                           `yaml:"user,omitempty"`
 	Environment map[string]string                `yaml:"environment"`
+	EnvFile     []composeEnvFile                 `yaml:"env_file,omitempty"`
 	CapAdd      []string                         `yaml:"cap_add,omitempty"`
 	Devices     []string                         `yaml:"devices,omitempty"`
 	Restart     string                           `yaml:"restart"`
@@ -69,6 +70,11 @@ type composeServiceNetwork struct {
 
 type composeDependency struct {
 	Condition string `yaml:"condition"`
+}
+
+type composeEnvFile struct {
+	Path     string `yaml:"path"`
+	Required bool   `yaml:"required"`
 }
 
 type composeLogging struct {
@@ -128,6 +134,7 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 			ports = []string{fmt.Sprintf("%s:%d:%d", defaults.LANBindAddress, definition.port(environment.Ports), definition.targetPort)}
 		}
 		var secrets []string
+		var envFiles []composeEnvFile
 		var capabilities []string
 		var devices []string
 		networkMode := ""
@@ -157,10 +164,14 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 			networks = nil
 			dependsOn = map[string]composeDependency{"gluetun": {Condition: "service_healthy"}}
 		}
+		if definition.name == "profilarr" {
+			envFiles = []composeEnvFile{{Path: filepath.Join(runtimeSecretDirectory, "profilarr.env"), Required: false}}
+		}
 		project.Services[definition.name] = composeService{
 			Image:       reference,
 			User:        user,
 			Environment: serviceEnvironment,
+			EnvFile:     envFiles,
 			CapAdd:      capabilities,
 			Devices:     devices,
 			Restart:     "unless-stopped",

@@ -49,6 +49,7 @@ func TestInitWizardExplainsAndCollectsSupportedOpenVPNChoices(t *testing.T) {
 		"age1interactive",  // age recipient
 		"service-user",     // Nord manual-setup username
 		"service-password", // Nord manual-setup password
+		"fixture-profilarr-api-key-32-characters", // Profilarr API key
 	}, "\n") + "\n")
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -61,7 +62,7 @@ func TestInitWizardExplainsAndCollectsSupportedOpenVPNChoices(t *testing.T) {
 		fmt.Sprintf("Confirm runtime identity %d:%d [y/N]", selectedUID, selectedGID),
 		"Nord Account manual-setup area",
 		"not your Nord account email/password",
-		"No access token or API key is requested",
+		"Profilarr API key",
 		"OpenVPN protocol (udp or tcp) [udp]",
 	} {
 		if !strings.Contains(humanOutput, guidance) {

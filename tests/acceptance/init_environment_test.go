@@ -46,7 +46,8 @@ func completeAnswers(uid, gid, country, protocol, username, password string) []b
 		"catalogueUpdateInterval: 480h\n" +
 		"ageRecipient: age1example\n" +
 		"serviceUsername: " + username + "\n" +
-		"servicePassword: " + password + "\n")
+		"servicePassword: " + password + "\n" +
+		"profilarrAPIKey: fixture-profilarr-api-key-32-characters\n")
 }
 
 func runNonInteractiveInit(t *testing.T, binDirectory, configPath, environment, answersPath string) {

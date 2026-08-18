@@ -22,6 +22,11 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	var downloadClients []map[string]any
 	var indexers []map[string]any
 	var applications []map[string]any
+	profilarrInstances := []map[string]any{
+		{"id": 1, "name": "Radarr", "type": "radarr", "url": "http://radarr:7878", "enabled": 1},
+		{"id": 2, "name": "Sonarr", "type": "sonarr", "url": "http://sonarr:8989", "enabled": 1},
+	}
+	profilarrObservations := 0
 	var seriesRootFolders []map[string]any
 	var seriesDownloadClients []map[string]any
 	sonarrAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -52,6 +57,19 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	}))
 	defer sonarrAPI.Close()
 	api := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/arr/instances" {
+			profilarrObservations++
+			if profilarrObservations == 1 {
+				http.Error(writer, "starting", http.StatusServiceUnavailable)
+				return
+			}
+			if request.Header.Get("X-Api-Key") != "fixture-profilarr-api-key-32-characters" {
+				http.Error(writer, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			_ = json.NewEncoder(writer).Encode(profilarrInstances)
+			return
+		}
 		if strings.HasPrefix(request.URL.Path, "/api/v1/") {
 			if request.Header.Get("X-Api-Key") != "fixture-prowlarr-api-key" {
 				http.Error(writer, "Unauthorized", http.StatusUnauthorized)
@@ -148,6 +166,7 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	declared := strings.Replace(string(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml"))), "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "radarr: 17878", "radarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "prowlarr: 19696", "prowlarr: "+apiURL.Port(), 1)
+	declared = strings.Replace(declared, "profilarr: 16868", "profilarr: "+apiURL.Port(), 1)
 	sonarrURL, err := url.Parse(sonarrAPI.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -169,6 +188,8 @@ nordvpn:
   openvpn:
     serviceUsername: apply-service-user
     servicePassword: apply-service-password
+profilarr:
+  apiKey: fixture-profilarr-api-key-32-characters
 EOF
 `), 0o700)
 	dockerLog := filepath.Join(temporary, "docker-arguments")
@@ -187,6 +208,7 @@ EOF
 	  "compose -f - exec -T sonarr cat /config/config.xml") printf '<Config><ApiKey>fixture-sonarr-api-key</ApiKey></Config>\n'; exit 0 ;;
 	  "compose -f - up -d prowlarr") exit 0 ;;
 	  "compose -f - exec -T prowlarr cat /config/config.xml") printf '<Config><ApiKey>fixture-prowlarr-api-key</ApiKey></Config>\n'; exit 0 ;;
+	  "compose -f - up -d profilarr") exit 0 ;;
 	  "compose -f - ps --format json gluetun")
 	    count=0
 	    [ -f "$APPLY_HEALTH_COUNT" ] && count=$(cat "$APPLY_HEALTH_COUNT")
@@ -211,16 +233,16 @@ EOF
 	if err != nil {
 		t.Fatalf("media-stack apply failed: %v\n%s", err, output)
 	}
-	if !strings.Contains(string(output), "Prepared Movie and Series Library discovery through Prowlarr in the staging Environment.") {
+	if !strings.Contains(string(output), "Prepared Movie and Series Library discovery through Prowlarr and verified Profilarr's Radarr and Sonarr connections in the staging Environment.") {
 		t.Errorf("apply output = %q, want completed Radarr and Sonarr phases", output)
 	}
 
-	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml"
+	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr"
 	if got := strings.TrimSpace(string(readFile(t, dockerLog))); got != wantDocker {
 		t.Errorf("Docker invocation = %q", got)
 	}
 	rendered := string(readFile(t, composeCapture))
-	for _, secret := range []string{"apply-service-user", "apply-service-password"} {
+	for _, secret := range []string{"apply-service-user", "apply-service-password", "fixture-profilarr-api-key-32-characters"} {
 		if strings.Contains(rendered, secret) || strings.Contains(string(output), secret) {
 			t.Errorf("apply exposed secret %q\noutput: %s\nCompose: %s", secret, output, rendered)
 		}
@@ -236,6 +258,7 @@ EOF
 	for name, want := range map[string]string{
 		"openvpn_user":     "apply-service-user",
 		"openvpn_password": "apply-service-password",
+		"profilarr.env":    "PROFILARR_API_KEY=fixture-profilarr-api-key-32-characters",
 	} {
 		path := filepath.Join(runtimeDirectory, name)
 		info, statErr := os.Stat(path)
@@ -298,6 +321,9 @@ EOF
 	if fields := applicationsByName["Sonarr"]; fields["baseUrl"] != "http://sonarr:8989" || fields["prowlarrUrl"] != "http://prowlarr:9696" || fields["apiKey"] != "fixture-sonarr-api-key" {
 		t.Errorf("Prowlarr Sonarr application contract = %v", fields)
 	}
+	if profilarrObservations != 2 {
+		t.Errorf("apply observed Profilarr connections %d times, want startup retry plus successful verification", profilarrObservations)
+	}
 	secondCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
 	secondCommand.Dir = command.Dir
 	secondCommand.Env = command.Env
@@ -307,6 +333,20 @@ EOF
 	}
 	if len(rootFolders) != 1 || len(downloadClients) != 1 || len(seriesRootFolders) != 1 || len(seriesDownloadClients) != 1 || len(indexers) != 1 || len(applications) != 2 {
 		t.Errorf("repeated apply did not converge: movieRoots=%v movieDownloadClients=%v seriesRoots=%v seriesDownloadClients=%v indexers=%v applications=%v", rootFolders, downloadClients, seriesRootFolders, seriesDownloadClients, indexers, applications)
+	}
+
+	profilarrInstances = profilarrInstances[:1]
+	thirdCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
+	thirdCommand.Dir = command.Dir
+	thirdCommand.Env = command.Env
+	thirdOutput, err := thirdCommand.CombinedOutput()
+	if err == nil {
+		t.Fatalf("apply accepted an incomplete Profilarr bootstrap: %s", thirdOutput)
+	}
+	for _, want := range []string{"manual action required", "http://127.0.0.1:" + apiURL.Port(), "http://radarr:7878", "http://sonarr:8989", "rerun media-stack apply"} {
+		if !strings.Contains(string(thirdOutput), want) {
+			t.Errorf("incomplete Profilarr guidance = %q, want %q", thirdOutput, want)
+		}
 	}
 }
 
@@ -329,7 +369,7 @@ func TestApplyRedactsCredentialsFromUnhealthyGluetunFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(binDirectory, "sops"), []byte(`#!/bin/sh
-printf 'nordvpn:\n  openvpn:\n    serviceUsername: failure-service-user\n    servicePassword: failure-service-password\n'
+printf 'nordvpn:\n  openvpn:\n    serviceUsername: failure-service-user\n    servicePassword: failure-service-password\nprofilarr:\n  apiKey: fixture-profilarr-api-key-32-characters\n'
 `), 0o700)
 	writeFile(t, filepath.Join(binDirectory, "docker"), []byte(`#!/bin/sh
 cat >/dev/null

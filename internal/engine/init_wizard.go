@@ -99,7 +99,7 @@ func NewInteractiveInitRequest(workingDirectory, environment, configPath string,
 	if !secretExists {
 		fmt.Fprintln(output, "Use the username and password from the Nord Account manual-setup area.")
 		fmt.Fprintln(output, "These are service credentials, not your Nord account email/password.")
-		fmt.Fprintln(output, "No access token or API key is requested or stored.")
+		fmt.Fprintln(output, "Choose a unique 32-character-or-longer Profilarr API key for this Environment; the CLI stores it only in the SOPS document and uses it to verify the guided connections.")
 		answers.AgeRecipient, err = promptRequired(reader, output, "Age recipient for this environment: ")
 		if err != nil {
 			return InitRequest{}, err
@@ -109,6 +109,10 @@ func NewInteractiveInitRequest(workingDirectory, environment, configPath string,
 			return InitRequest{}, err
 		}
 		answers.ServicePassword, err = promptRequired(reader, output, "NordVPN OpenVPN service password: ")
+		if err != nil {
+			return InitRequest{}, err
+		}
+		answers.ProfilarrAPIKey, err = promptRequired(reader, output, "Profilarr API key (at least 32 characters): ")
 		if err != nil {
 			return InitRequest{}, err
 		}
