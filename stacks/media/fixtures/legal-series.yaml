@@ -1,0 +1,10 @@
+apiVersion: homelab.media-stack/legal-series/v1alpha1
+kind: LegalSeriesFixture
+spec:
+  title: The Lucy Show
+  tvdbId: 103354
+  seasonNumber: 1
+  episodeNumber: 1
+  releaseTitle: The Lucy Show S01E01
+  indexer: Internet Archive
+  timeout: 45m

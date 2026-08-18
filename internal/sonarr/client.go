@@ -190,3 +190,127 @@ func responseError(action, endpoint string, response *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 	return fmt.Errorf("%s Sonarr API %s: HTTP %d: %s", action, endpoint, response.StatusCode, strings.TrimSpace(string(body)))
 }
+
+type EpisodeFile struct {
+	Path string `json:"path"`
+	Size int64  `json:"size"`
+}
+
+func (client *Client) AcquireLegalEpisode(ctx context.Context, tvdbID, seasonNumber, episodeNumber int, releaseTitle, indexer string) (int, int, error) {
+	var seriesItems []struct {
+		ID int `json:"id"`
+	}
+	if err := client.getJSON(ctx, fmt.Sprintf("/api/v3/series?tvdbId=%d", tvdbID), &seriesItems); err != nil {
+		return 0, 0, err
+	}
+	seriesID := 0
+	if len(seriesItems) > 0 {
+		seriesID = seriesItems[0].ID
+	} else {
+		var lookup []map[string]any
+		if err := client.getJSON(ctx, fmt.Sprintf("/api/v3/series/lookup?term=tvdb:%d", tvdbID), &lookup); err != nil {
+			return 0, 0, err
+		}
+		if len(lookup) == 0 {
+			return 0, 0, fmt.Errorf("Sonarr did not find TVDB series %d", tvdbID)
+		}
+		var profiles []struct {
+			ID int `json:"id"`
+		}
+		if err := client.getJSON(ctx, "/api/v3/qualityprofile", &profiles); err != nil {
+			return 0, 0, err
+		}
+		if len(profiles) == 0 {
+			return 0, 0, fmt.Errorf("Sonarr has no quality profile for legal verification")
+		}
+		series := lookup[0]
+		series["qualityProfileId"] = profiles[0].ID
+		series["rootFolderPath"] = seriesLibraryRoot
+		series["monitored"] = true
+		series["seasonFolder"] = true
+		series["seriesType"] = "standard"
+		series["addOptions"] = map[string]any{"searchForMissingEpisodes": false}
+		var created struct {
+			ID int `json:"id"`
+		}
+		if err := client.sendJSONResult(ctx, http.MethodPost, "/api/v3/series", series, &created); err != nil {
+			return 0, 0, err
+		}
+		seriesID = created.ID
+	}
+	if seriesID == 0 {
+		return 0, 0, fmt.Errorf("Sonarr did not provide a series identity for TVDB series %d", tvdbID)
+	}
+
+	var episodes []struct {
+		ID            int `json:"id"`
+		SeasonNumber  int `json:"seasonNumber"`
+		EpisodeNumber int `json:"episodeNumber"`
+	}
+	if err := client.getJSON(ctx, fmt.Sprintf("/api/v3/episode?seriesId=%d", seriesID), &episodes); err != nil {
+		return 0, 0, err
+	}
+	episodeID := 0
+	for _, episode := range episodes {
+		if episode.SeasonNumber == seasonNumber && episode.EpisodeNumber == episodeNumber {
+			episodeID = episode.ID
+			break
+		}
+	}
+	if episodeID == 0 {
+		return 0, 0, fmt.Errorf("Sonarr did not find season %d episode %d for TVDB series %d", seasonNumber, episodeNumber, tvdbID)
+	}
+
+	var releases []json.RawMessage
+	if err := client.getJSON(ctx, fmt.Sprintf("/api/v3/release?episodeId=%d", episodeID), &releases); err != nil {
+		return 0, 0, err
+	}
+	for _, raw := range releases {
+		var release struct {
+			Title   string `json:"title"`
+			Indexer string `json:"indexer"`
+		}
+		if err := json.Unmarshal(raw, &release); err != nil {
+			return 0, 0, fmt.Errorf("decode Sonarr release: %w", err)
+		}
+		if release.Title == releaseTitle && release.Indexer == indexer {
+			if err := client.sendJSON(ctx, http.MethodPost, "/api/v3/release", raw); err != nil {
+				return 0, 0, err
+			}
+			return seriesID, episodeID, nil
+		}
+	}
+	return 0, 0, fmt.Errorf("Sonarr did not discover release %q from %s", releaseTitle, indexer)
+}
+
+func (client *Client) ImportedEpisodeFiles(ctx context.Context, seriesID int) ([]EpisodeFile, error) {
+	var files []EpisodeFile
+	if err := client.getJSON(ctx, fmt.Sprintf("/api/v3/episodefile?seriesId=%d", seriesID), &files); err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+func (client *Client) sendJSONResult(ctx context.Context, method, endpoint string, body, target any) error {
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, method, client.baseURL+endpoint, bytes.NewReader(encoded))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.do(request)
+	if err != nil {
+		return fmt.Errorf("reconcile Sonarr API %s: %w", endpoint, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
+		return responseError("reconcile", endpoint, response)
+	}
+	if err := json.NewDecoder(response.Body).Decode(target); err != nil {
+		return fmt.Errorf("decode Sonarr API %s: %w", endpoint, err)
+	}
+	return nil
+}
