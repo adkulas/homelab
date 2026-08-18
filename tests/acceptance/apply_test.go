@@ -22,6 +22,35 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	var downloadClients []map[string]any
 	var indexers []map[string]any
 	var applications []map[string]any
+	var seriesRootFolders []map[string]any
+	var seriesDownloadClients []map[string]any
+	sonarrAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("X-Api-Key") != "fixture-sonarr-api-key" {
+			http.Error(writer, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		switch request.Method + " " + request.URL.Path {
+		case "GET /api/v3/system/status":
+			_ = json.NewEncoder(writer).Encode(map[string]string{"appName": "Sonarr"})
+		case "GET /api/v3/rootfolder":
+			_ = json.NewEncoder(writer).Encode(seriesRootFolders)
+		case "POST /api/v3/rootfolder":
+			var root map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&root)
+			seriesRootFolders = append(seriesRootFolders, root)
+			writer.WriteHeader(http.StatusCreated)
+		case "GET /api/v3/downloadclient":
+			_ = json.NewEncoder(writer).Encode(seriesDownloadClients)
+		case "POST /api/v3/downloadclient":
+			var client map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&client)
+			seriesDownloadClients = append(seriesDownloadClients, client)
+			writer.WriteHeader(http.StatusCreated)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer sonarrAPI.Close()
 	api := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if strings.HasPrefix(request.URL.Path, "/api/v1/") {
 			if request.Header.Get("X-Api-Key") != "fixture-prowlarr-api-key" {
@@ -119,6 +148,11 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	declared := strings.Replace(string(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml"))), "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "radarr: 17878", "radarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "prowlarr: 19696", "prowlarr: "+apiURL.Port(), 1)
+	sonarrURL, err := url.Parse(sonarrAPI.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared = strings.Replace(declared, "sonarr: 18989", "sonarr: "+sonarrURL.Port(), 1)
 	writeFile(t, configPath, []byte(declared), 0o600)
 	if err := os.Mkdir(filepath.Join(temporary, "secrets"), 0o700); err != nil {
 		t.Fatal(err)
@@ -149,6 +183,8 @@ EOF
 	  "compose -f - logs --no-color qbittorrent") printf 'A temporary password is provided for this session: fixture-temporary-password\n'; exit 0 ;;
 	  "compose -f - up -d radarr") exit 0 ;;
 	  "compose -f - exec -T radarr cat /config/config.xml") printf '<Config><ApiKey>fixture-radarr-api-key</ApiKey></Config>\n'; exit 0 ;;
+	  "compose -f - up -d sonarr") exit 0 ;;
+	  "compose -f - exec -T sonarr cat /config/config.xml") printf '<Config><ApiKey>fixture-sonarr-api-key</ApiKey></Config>\n'; exit 0 ;;
 	  "compose -f - up -d prowlarr") exit 0 ;;
 	  "compose -f - exec -T prowlarr cat /config/config.xml") printf '<Config><ApiKey>fixture-prowlarr-api-key</ApiKey></Config>\n'; exit 0 ;;
 	  "compose -f - ps --format json gluetun")
@@ -175,11 +211,11 @@ EOF
 	if err != nil {
 		t.Fatalf("media-stack apply failed: %v\n%s", err, output)
 	}
-	if !strings.Contains(string(output), "Prepared movie discovery through Prowlarr in the staging Environment.") {
-		t.Errorf("apply output = %q, want completed movie-discovery phase", output)
+	if !strings.Contains(string(output), "Prepared Radarr movie discovery and the Sonarr Series Library in the staging Environment.") {
+		t.Errorf("apply output = %q, want completed Radarr and Sonarr phases", output)
 	}
 
-	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml"
+	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml"
 	if got := strings.TrimSpace(string(readFile(t, dockerLog))); got != wantDocker {
 		t.Errorf("Docker invocation = %q", got)
 	}
@@ -227,6 +263,20 @@ EOF
 	if fields["host"] != "qbittorrent" || fields["port"] != float64(8080) || fields["movieCategory"] != "movies" {
 		t.Errorf("Radarr qBittorrent contract = %v", fields)
 	}
+	if len(seriesRootFolders) != 1 || seriesRootFolders[0]["path"] != "/data/media/series" {
+		t.Errorf("apply did not reconcile the Series Library root folder: %v", seriesRootFolders)
+	}
+	if len(seriesDownloadClients) != 1 {
+		t.Fatalf("apply did not reconcile Sonarr's qBittorrent client: %v", seriesDownloadClients)
+	}
+	seriesFields := map[string]any{}
+	for _, item := range seriesDownloadClients[0]["fields"].([]any) {
+		field := item.(map[string]any)
+		seriesFields[field["name"].(string)] = field["value"]
+	}
+	if seriesFields["host"] != "qbittorrent" || seriesFields["port"] != float64(8080) || seriesFields["tvCategory"] != "series" {
+		t.Errorf("Sonarr qBittorrent contract = %v", seriesFields)
+	}
 	if len(indexers) != 1 || indexers[0]["definitionName"] != "internetarchive" {
 		t.Fatalf("apply did not reconcile the approved Public Torrent Source: %v", indexers)
 	}
@@ -248,8 +298,8 @@ EOF
 	if err != nil {
 		t.Fatalf("repeated media-stack apply failed: %v\n%s", err, secondOutput)
 	}
-	if len(rootFolders) != 1 || len(downloadClients) != 1 || len(indexers) != 1 || len(applications) != 1 {
-		t.Errorf("repeated apply did not converge: roots=%v downloadClients=%v indexers=%v applications=%v", rootFolders, downloadClients, indexers, applications)
+	if len(rootFolders) != 1 || len(downloadClients) != 1 || len(seriesRootFolders) != 1 || len(seriesDownloadClients) != 1 || len(indexers) != 1 || len(applications) != 1 {
+		t.Errorf("repeated apply did not converge: movieRoots=%v movieDownloadClients=%v seriesRoots=%v seriesDownloadClients=%v indexers=%v applications=%v", rootFolders, downloadClients, seriesRootFolders, seriesDownloadClients, indexers, applications)
 	}
 }
 
