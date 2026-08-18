@@ -20,9 +20,10 @@ const (
 )
 
 type VerifyRequest struct {
-	plan             PlanRequest
-	suite            string
-	legalFixturePath string
+	plan                   PlanRequest
+	suite                  string
+	legalFixturePath       string
+	legalSeriesFixturePath string
 }
 
 type VerifyReport struct {
@@ -32,7 +33,7 @@ type VerifyReport struct {
 	Diagnostics   []Diagnostic `json:"diagnostics"`
 }
 
-func NewVerifyRequest(workingDirectory, environment, configPath, suite, legalFixturePath string) (VerifyRequest, error) {
+func NewVerifyRequest(workingDirectory, environment, configPath, suite, legalFixturePath, legalSeriesFixturePath string) (VerifyRequest, error) {
 	plan, err := NewPlanRequest(workingDirectory, environment, configPath)
 	if err != nil {
 		return VerifyRequest{}, err
@@ -40,7 +41,10 @@ func NewVerifyRequest(workingDirectory, environment, configPath, suite, legalFix
 	if legalFixturePath != "" && !filepath.IsAbs(legalFixturePath) {
 		legalFixturePath = filepath.Join(workingDirectory, legalFixturePath)
 	}
-	return VerifyRequest{plan: plan, suite: suite, legalFixturePath: legalFixturePath}, nil
+	if legalSeriesFixturePath != "" && !filepath.IsAbs(legalSeriesFixturePath) {
+		legalSeriesFixturePath = filepath.Join(workingDirectory, legalSeriesFixturePath)
+	}
+	return VerifyRequest{plan: plan, suite: suite, legalFixturePath: legalFixturePath, legalSeriesFixturePath: legalSeriesFixturePath}, nil
 }
 
 func (report VerifyReport) Failed() bool {
@@ -146,7 +150,12 @@ func (engine localEngine) Verify(ctx context.Context, request VerifyRequest) (re
 	}
 	report.add("VERIFY_TUNNEL_RECOVERED", "tunneled qBittorrent egress recovery", "", true)
 	if request.suite == "promotion" {
-		verifyLegalMovie(ctx, plan, declared, request, &report)
+		if request.legalFixturePath != "" {
+			verifyLegalMovie(ctx, plan, declared, request, &report)
+		}
+		if !report.Failed() && request.legalSeriesFixturePath != "" {
+			verifyLegalSeries(ctx, plan, declared, request, &report)
+		}
 	}
 	return report, nil
 }

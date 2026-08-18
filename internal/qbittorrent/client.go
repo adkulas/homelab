@@ -178,12 +178,20 @@ type TorrentFile struct {
 }
 
 func (client *Client) CompletedMovie(ctx context.Context, releaseTitle string) (Torrent, []TorrentFile, bool, error) {
+	return client.completedInCategory(ctx, "movies", releaseTitle)
+}
+
+func (client *Client) CompletedSeries(ctx context.Context, releaseTitle string) (Torrent, []TorrentFile, bool, error) {
+	return client.completedInCategory(ctx, "series", releaseTitle)
+}
+
+func (client *Client) completedInCategory(ctx context.Context, category, releaseTitle string) (Torrent, []TorrentFile, bool, error) {
 	var torrents []Torrent
-	if err := client.getJSON(ctx, "/api/v2/torrents/info?category=movies", &torrents); err != nil {
+	if err := client.getJSON(ctx, "/api/v2/torrents/info?category="+url.QueryEscape(category), &torrents); err != nil {
 		return Torrent{}, nil, false, err
 	}
 	for _, torrent := range torrents {
-		if !strings.EqualFold(torrent.Name, releaseTitle) || torrent.Category != "movies" || torrent.Progress < 1 {
+		if !strings.EqualFold(torrent.Name, releaseTitle) || torrent.Category != category || torrent.Progress < 1 {
 			continue
 		}
 		var files []TorrentFile

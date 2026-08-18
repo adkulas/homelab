@@ -7,7 +7,7 @@ independent Production and Staging Environments so changes can be proven before 
 > [!IMPORTANT]
 > This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, the
 > VPN-confined qBittorrent, Radarr Movie Library, Sonarr Series Library, and Prowlarr Movie and Series Library discovery phases of `apply`; VPN-focused
-> `verify --suite full`; and legal movie acquisition/hardlink proof through `verify --suite promotion` are available now.
+> `verify --suite full`; and legal movie and series-episode acquisition/hardlink proofs through `verify --suite promotion` are available now.
 > Remaining application reconciliation, `backup`, `restore`, playback verification, the other verification suites and
 > artifacts, and `destroy` remain planned. Ubuntu is the authoritative implementation and
 > completion platform. Docker
@@ -210,7 +210,8 @@ media-stack verify --environment staging --suite full --output json
 media-stack verify \
   --environment staging \
   --suite promotion \
-  --legal-fixture stacks/media/fixtures/legal-movie.yaml
+  --legal-fixture stacks/media/fixtures/legal-movie.yaml \
+  --legal-series-fixture stacks/media/fixtures/legal-series.yaml
 ```
 
 The available full-suite phase verifies the Gluetun TUN device and health, resolves an external-IP service from
@@ -220,13 +221,13 @@ qBittorrent in Gluetun's current network namespace, and proves tunneled egress r
 Staging Environment because it deliberately interrupts acquisition. Exit `1` means verification failed; JSON output
 includes stable `VERIFY_*` diagnostics and remedies.
 
-The available Promotion phase then reads the explicit legal fixture, uses Radarr to register its TMDB movie, searches the
-linked Internet Archive source, and grabs only the exact declared release. It waits for the `movies` qBittorrent torrent to
-complete and for Radarr to expose the imported Movie File, then compares the source and Movie Library filesystem identities
-beneath the selected Environment `dataRoot`. `VERIFY_MOVIE_ACQUIRED` and `VERIFY_MOVIE_HARDLINKED` pass only when the full
-path succeeds and both paths resolve to the same inode. The checked-in fixture allows up to 45 minutes for the download and
-import. Run Promotion verification only in a disposable Staging Environment; it adds the fixture movie and retains the
-qBittorrent source for seeding.
+The available Promotion phase reads either or both explicit legal fixtures. It uses Radarr or Sonarr to register the declared
+item, searches the linked Internet Archive source, and grabs only the exact declared release. It waits for the corresponding
+`movies` or `series` qBittorrent torrent to complete and for the Arr application to expose the imported file, then compares
+the source and library filesystem identities beneath the selected Environment `dataRoot`. The `VERIFY_MOVIE_*` and
+`VERIFY_SERIES_EPISODE_*` diagnostics pass only when each requested path succeeds and both paths resolve to the same inode.
+The checked-in fixtures allow up to 45 minutes for download and import. Run Promotion verification only in a disposable
+Staging Environment; it adds the fixture items and retains their qBittorrent sources for seeding.
 
 The smoke and Restore Drill suites, playback verification, and content-addressed Verification Artifacts remain planned.
 
@@ -310,8 +311,9 @@ firewall exceptions as kill-switch workarounds.
 `media-stack verify --environment staging --suite full [--config path] [--output human|json]` compares the public IP
 seen from qBittorrent's shared namespace with a host-side observation, interrupts the tunnel, proves a fresh egress attempt
 fails instead of using the host route, then restores Gluetun and verifies tunneled egress returns.
-`--suite promotion --legal-fixture <path>` runs that proof first, then drives the declared release through Radarr and
-qBittorrent and requires source/imported inode equality. Both suites reject Production because they are disruptive.
+`--suite promotion` runs that proof first, then drives each supplied `--legal-fixture <path>` and
+`--legal-series-fixture <path>` release through its Arr application and qBittorrent and requires source/imported inode
+equality. At least one fixture is required. Both suites reject Production because they are disruptive.
 
 ### Storage and hardlinks
 
@@ -438,6 +440,11 @@ The separate `LegalMovieFixture` document is a versioned verification input, not
 positive `tmdbId` identify the public-domain movie in Radarr; `releaseTitle` and the fixed approved `Internet Archive`
 `indexer` select one exact discovered result; and `timeout` bounds acquisition plus import. Unknown fixture fields and other
 indexers are rejected.
+
+The `LegalSeriesFixture` is likewise a versioned verification input. Its `title` and positive `tvdbId` identify the
+public-domain series in Sonarr; `seasonNumber` and `episodeNumber` select one episode; `releaseTitle` and the approved
+`Internet Archive` indexer select one exact release; and `timeout` bounds acquisition plus import. Unknown fields, invalid
+episode coordinates, and other indexers are rejected.
 
 Container paths, network names, config-volume names, application URLs, qBittorrent categories, restart policy, and logging
 limits are derived rather than exposed as arbitrary YAML. This preserves the shared `/data` and environment-isolation
@@ -567,6 +574,7 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack restore` | Planned | Will preview and safely restore compatible Environment state. It is not accepted by the current binary. |
 | `media-stack verify --environment staging --suite full [--config path] [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, and recovery. Use it after `apply` in Staging; it is deliberately rejected for Production. |
 | `media-stack verify --environment staging --suite promotion --legal-fixture path [--config path] [--output human|json]` | Available through Movie Library hardlink proof | Runs the full VPN proof, registers the fixture movie in Radarr, grabs the exact Internet Archive release into qBittorrent, waits for Radarr import, and proves source/imported inode identity. Use only in a disposable Staging Environment. Playback and Verification Artifact behavior remain planned. |
+| `media-stack verify --environment staging --suite promotion --legal-series-fixture path [--config path] [--output human|json]` | Available through Series Library hardlink proof | Runs the full VPN proof, registers the fixture series and episode in Sonarr, grabs the exact Internet Archive release into qBittorrent, waits for Sonarr import, and proves source/imported inode identity. Supply both legal fixture flags to prove both libraries in one run. Use only in a disposable Staging Environment. |
 | `media-stack destroy` | Planned | Will remove only selected-Environment runtime resources behind explicit safety guards. It is not accepted by the current binary. |
 
 Every currently available command requires an explicit `production` or `staging`; Production is never inferred. A relative
