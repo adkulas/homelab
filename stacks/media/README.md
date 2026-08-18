@@ -5,9 +5,12 @@ episodic television. It is designed for Ubuntu and Docker Desktop with WSL 2, co
 independent Production and Staging Environments so changes can be proven before they affect the household libraries.
 
 > [!IMPORTANT]
-> This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, and the
-> VPN-confined qBittorrent, Radarr Movie Library, and Prowlarr movie-discovery phases of `apply` are available now; remaining application reconciliation, `backup`, `restore`,
-> `verify`, and `destroy` remain planned. Ubuntu is the authoritative implementation and completion platform. Docker
+> This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, the
+> VPN-confined qBittorrent, Radarr Movie Library, Sonarr Series Library, and Prowlarr movie-discovery phases of `apply`; VPN-focused
+> `verify --suite full`; and legal movie acquisition/hardlink proof through `verify --suite promotion` are available now.
+> Remaining application reconciliation, `backup`, `restore`, playback verification, the other verification suites and
+> artifacts, and `destroy` remain planned. Ubuntu is the authoritative implementation and
+> completion platform. Docker
 > Desktop WSL2 compatibility is verified independently and does not block Ubuntu work. Sections below label planned behavior explicitly.
 > The authoritative target design is in the
 > [implementation plan](../../docs/plans/media-stack.md) and
@@ -182,40 +185,49 @@ another catalogue endpoint; a persistent failure exits `1`. The runtime files re
 can remount them after a container restart. After qBittorrent converges, `apply` starts Radarr, reads its generated API key
 from that Environment's `/config/config.xml` into memory, and waits for the supported Radarr v3 API. It reconciles
 `/data/media/movies` as the Movie Library root and a qBittorrent download client at `qbittorrent:8080` with the `movies`
-category. Both applications see the same `/data` paths, so no remote path mapping is created. Repeated reconciliation makes
-no API writes once these values match. It then starts API-ready Prowlarr and reconciles the checked-in `internetarchive`
+category. It then starts Sonarr, reads its generated API key from the selected Environment's `/config/config.xml`, and waits
+for its supported v3 API. It reconciles `/data/media/series` as the Series Library root and a qBittorrent download client at
+`qbittorrent:8080` with the `series` category. qBittorrent and both Arr applications see the same `/data` paths, so no remote
+path mapping is created. Repeated reconciliation makes no API writes once these values match. It then starts API-ready
+Prowlarr and reconciles the checked-in `internetarchive`
 Public Torrent Source plus a full-sync Radarr application link. Prowlarr reaches Radarr at `http://radarr:7878`; its own
 callback URL is `http://prowlarr:9696`. The Internet Archive source is the first entry in the CLI's approved semantic catalog,
 requires no credentials, and supports movie-title search for later legal verification fixtures. Repeating `apply` observes
 both Prowlarr resources through `/api/v1` and makes no writes when they already match. Rerunning `apply` safely replaces the
-runtime VPN files and converges Gluetun, qBittorrent, Radarr, and Prowlarr.
+runtime VPN files and converges Gluetun, qBittorrent, Radarr, Sonarr, and Prowlarr.
 Gluetun alone
 publishes the selected Environment's qBittorrent Web UI port, and its firewall admits only the narrow input port `8080`
 needed for that UI. Its `qbittorrent` application-network alias preserves the internal
 `http://qbittorrent:8080` endpoint without granting qBittorrent an independent route. Later tickets extend `apply` to the
 other services and application reconciliation.
 
-### 5. Verify Staging (planned)
+### 5. Verify Staging VPN behavior and a legal movie import
 
 ```bash
-media-stack verify --environment staging --suite smoke
 media-stack verify --environment staging --suite full
-```
-
-The smoke suite checks rendered topology, isolation, health, APIs, LAN reachability, and internal service discovery. The full
-suite additionally checks storage semantics, configuration convergence, backup sampling, VPN egress, fail-closed behavior,
-and recovery.
-
-A Promotion verification also exercises a repository-declared legal acquisition fixture:
-
-```bash
+media-stack verify --environment staging --suite full --output json
 media-stack verify \
   --environment staging \
   --suite promotion \
   --legal-fixture stacks/media/fixtures/legal-movie.yaml
 ```
 
-Success emits a content-addressed Verification Artifact bound to the exact Declared Configuration and pinned versions.
+The available full-suite phase verifies the Gluetun TUN device and health, resolves an external-IP service from
+qBittorrent's shared namespace, and requires that tunneled address to differ from the host address. It then stops Gluetun,
+requires a fresh qBittorrent-namespace request to fail, restarts Gluetun, waits up to two minutes for health, recreates
+qBittorrent in Gluetun's current network namespace, and proves tunneled egress returns. Cleanup always attempts recovery after an interruption. Run it only in the
+Staging Environment because it deliberately interrupts acquisition. Exit `1` means verification failed; JSON output
+includes stable `VERIFY_*` diagnostics and remedies.
+
+The available Promotion phase then reads the explicit legal fixture, uses Radarr to register its TMDB movie, searches the
+linked Internet Archive source, and grabs only the exact declared release. It waits for the `movies` qBittorrent torrent to
+complete and for Radarr to expose the imported Movie File, then compares the source and Movie Library filesystem identities
+beneath the selected Environment `dataRoot`. `VERIFY_MOVIE_ACQUIRED` and `VERIFY_MOVIE_HARDLINKED` pass only when the full
+path succeeds and both paths resolve to the same inode. The checked-in fixture allows up to 45 minutes for the download and
+import. Run Promotion verification only in a disposable Staging Environment; it adds the fixture movie and retains the
+qBittorrent source for seeding.
+
+The smoke and Restore Drill suites, playback verification, and content-addressed Verification Artifacts remain planned.
 
 ### 6. Create Production and promote the proven change (planned)
 
@@ -294,9 +306,11 @@ application network, preserving the stable internal address `http://qbittorrent:
 qBittorrent another route. The deployed design prohibits host networking, privileged mode, `FIREWALL=off`, and broad LAN
 firewall exceptions as kill-switch workarounds.
 
-`media-stack verify` compares the public IP seen from the shared namespace with a host-side observation, interrupts the
-tunnel, proves a fresh qBittorrent egress attempt fails instead of using the host route, then restores and verifies the
-tunnel.
+`media-stack verify --environment staging --suite full [--config path] [--output human|json]` compares the public IP
+seen from qBittorrent's shared namespace with a host-side observation, interrupts the tunnel, proves a fresh egress attempt
+fails instead of using the host route, then restores Gluetun and verifies tunneled egress returns.
+`--suite promotion --legal-fixture <path>` runs that proof first, then drives the declared release through Radarr and
+qBittorrent and requires source/imported inode equality. Both suites reject Production because they are disruptive.
 
 ### Storage and hardlinks
 
@@ -419,6 +433,11 @@ from silently becoming ineffective configuration.
 | `spec.acquisition.vpn.catalogueUpdateInterval` | `init`, `plan`, `apply` | Must parse as at least `360h`; rendered as `UPDATER_PERIOD`, with `/gluetun` backed by the Environment's persistent named volume. |
 | `spec.acquisition.publicTorrentSources[].id` / `enabled` | `apply` | Selects a semantic source from the CLI's approved catalog. The current catalog contains only `internetarchive`, enabled in the checked-in configuration. Unknown IDs are rejected. |
 
+The separate `LegalMovieFixture` document is a versioned verification input, not Declared Configuration. Its `title` and
+positive `tmdbId` identify the public-domain movie in Radarr; `releaseTitle` and the fixed approved `Internet Archive`
+`indexer` select one exact discovered result; and `timeout` bounds acquisition plus import. Unknown fixture fields and other
+indexers are rejected.
+
 Container paths, network names, config-volume names, application URLs, qBittorrent categories, restart policy, and logging
 limits are derived rather than exposed as arbitrary YAML. This preserves the shared `/data` and environment-isolation
 invariants.
@@ -472,8 +491,9 @@ documented supported interface allows stable creation and storage.
 ## Applying configuration
 
 The available phase validates and renders the selected Environment, materializes Gluetun's runtime secrets, starts Gluetun,
-waits boundedly for health, starts and reconciles qBittorrent in Gluetun's network namespace, then starts Radarr and
-reconciles its Movie Library contract through the supported API. The remaining target order below is planned.
+waits boundedly for health, starts and reconciles qBittorrent in Gluetun's network namespace, then starts Radarr and Sonarr
+and reconciles their Movie Library and Series Library contracts through supported APIs. The remaining target order below is
+planned.
 
 The complete apply order will be:
 
@@ -541,17 +561,18 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
 | `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
-| `media-stack apply --environment production|staging [--config path]` | Available through Prowlarr movie discovery | Decrypts the selected Environment's OpenVPN service credentials into owner-only runtime Compose secret files; starts healthy Gluetun and VPN-confined qBittorrent; reconciles qBittorrent's acquisition policy; prepares Radarr's Movie Library; then starts Prowlarr and reconciles the approved Internet Archive source plus its full-sync Radarr application link. Use it after `doctor`; repeated runs converge without API writes when state already matches. Remaining application startup and reconciliation are planned. |
+| `media-stack apply --environment production|staging [--config path]` | Available through Sonarr preparation and Prowlarr movie discovery | Decrypts the selected Environment's OpenVPN service credentials into owner-only runtime Compose secret files; starts healthy Gluetun and VPN-confined qBittorrent; reconciles qBittorrent's acquisition policy; prepares Radarr's Movie Library and Sonarr's Series Library with path-identical qBittorrent clients; then starts Prowlarr and reconciles the approved Internet Archive source plus its full-sync Radarr application link. Use it after `doctor`; repeated runs converge without API writes when state already matches. Remaining application startup and reconciliation are planned. |
 | `media-stack backup` | Planned | Will create verified, checksummed application-state archives. It is not accepted by the current binary. |
 | `media-stack restore` | Planned | Will preview and safely restore compatible Environment state. It is not accepted by the current binary. |
-| `media-stack verify` | Planned | Will run named operational suites and emit evidence for Promotion. It is not accepted by the current binary. |
+| `media-stack verify --environment staging --suite full [--config path] [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, and recovery. Use it after `apply` in Staging; it is deliberately rejected for Production. |
+| `media-stack verify --environment staging --suite promotion --legal-fixture path [--config path] [--output human|json]` | Available through Movie Library hardlink proof | Runs the full VPN proof, registers the fixture movie in Radarr, grabs the exact Internet Archive release into qBittorrent, waits for Radarr import, and proves source/imported inode identity. Use only in a disposable Staging Environment. Playback and Verification Artifact behavior remain planned. |
 | `media-stack destroy` | Planned | Will remove only selected-Environment runtime resources behind explicit safety guards. It is not accepted by the current binary. |
 
 Every currently available command requires an explicit `production` or `staging`; Production is never inferred. A relative
 `--config` path is resolved from the working directory, while omitting it selects `stacks/media/media-stack.yaml` from the
 repository root.
 
-The current qBittorrent and Radarr apply phases share the renderer with `plan`; later mutation phases will add saved
+The current qBittorrent, Radarr, Sonarr, and Prowlarr apply phases share the renderer with `plan`; later mutation phases will add saved
 Plan Artifacts, Environment locking, confirmation, and volatile safety rechecks. Planned `destroy` will never purge media, torrent payloads,
 backups, secrets, or Declared Configuration.
 

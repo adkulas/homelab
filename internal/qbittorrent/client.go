@@ -162,3 +162,35 @@ func (client *Client) authorize(request *http.Request) {
 		request.AddCookie(client.cookie)
 	}
 }
+
+type Torrent struct {
+	Hash     string  `json:"hash"`
+	Name     string  `json:"name"`
+	Category string  `json:"category"`
+	Progress float64 `json:"progress"`
+	SavePath string  `json:"save_path"`
+}
+
+type TorrentFile struct {
+	Name     string  `json:"name"`
+	Size     int64   `json:"size"`
+	Progress float64 `json:"progress"`
+}
+
+func (client *Client) CompletedMovie(ctx context.Context, releaseTitle string) (Torrent, []TorrentFile, bool, error) {
+	var torrents []Torrent
+	if err := client.getJSON(ctx, "/api/v2/torrents/info?category=movies", &torrents); err != nil {
+		return Torrent{}, nil, false, err
+	}
+	for _, torrent := range torrents {
+		if !strings.EqualFold(torrent.Name, releaseTitle) || torrent.Category != "movies" || torrent.Progress < 1 {
+			continue
+		}
+		var files []TorrentFile
+		if err := client.getJSON(ctx, "/api/v2/torrents/files?hash="+url.QueryEscape(torrent.Hash), &files); err != nil {
+			return Torrent{}, nil, false, err
+		}
+		return torrent, files, true, nil
+	}
+	return Torrent{}, nil, false, nil
+}

@@ -19,6 +19,7 @@ import (
 	"github.com/adkulas/homelab/internal/prowlarr"
 	"github.com/adkulas/homelab/internal/qbittorrent"
 	"github.com/adkulas/homelab/internal/radarr"
+	"github.com/adkulas/homelab/internal/sonarr"
 	"gopkg.in/yaml.v3"
 )
 
@@ -96,6 +97,21 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if _, err := radarrClient.ReconcileMovieLibrary(ctx, password); err != nil {
 		return ApplyReport{}, fmt.Errorf("reconcile Radarr Movie Library: %w", err)
 	}
+	if output, err := runDockerCompose(ctx, plan, "up", "-d", "sonarr"); err != nil {
+		return ApplyReport{}, fmt.Errorf("start Sonarr: %w: %s", err, redactCredentials(output, credentials))
+	}
+	sonarrAPIKey, err := waitForServiceAPIKey(ctx, plan, "sonarr", "Sonarr", 120*time.Second)
+	if err != nil {
+		return ApplyReport{}, err
+	}
+	sonarrAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Sonarr)
+	sonarrClient := sonarr.New("http://"+sonarrAddress, sonarrAPIKey, &http.Client{Timeout: 10 * time.Second})
+	if err := waitForSonarrReady(ctx, sonarrClient, 120*time.Second); err != nil {
+		return ApplyReport{}, err
+	}
+	if _, err := sonarrClient.ReconcileSeriesLibrary(ctx, password); err != nil {
+		return ApplyReport{}, fmt.Errorf("reconcile Sonarr Series Library: %w", err)
+	}
 	if output, err := runDockerCompose(ctx, plan, "up", "-d", "prowlarr"); err != nil {
 		return ApplyReport{}, fmt.Errorf("start Prowlarr: %w: %s", err, redactCredentials(output, credentials))
 	}
@@ -147,6 +163,30 @@ type radarrReadiness interface {
 
 type prowlarrReadiness interface {
 	Ready(context.Context) error
+}
+
+type sonarrReadiness interface {
+	Ready(context.Context) error
+}
+
+func waitForSonarrReady(ctx context.Context, client sonarrReadiness, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	var lastErr error
+	for {
+		if err := client.Ready(ctx); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("Sonarr API did not become ready within %s: %w", timeout, lastErr)
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 func waitForProwlarrReady(ctx context.Context, client prowlarrReadiness, timeout time.Duration) error {

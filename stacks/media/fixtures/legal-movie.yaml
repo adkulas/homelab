@@ -1,0 +1,8 @@
+apiVersion: homelab.media-stack/legal-movie/v1alpha1
+kind: LegalMovieFixture
+spec:
+  title: Night of the Living Dead
+  tmdbId: 10331
+  releaseTitle: Night Of The Living Dead 1968
+  indexer: Internet Archive
+  timeout: 45m
