@@ -17,7 +17,7 @@ const usage = `usage:
   media-stack doctor --environment production|staging [--config path] [--output human|json]
   media-stack plan --environment production|staging [--config path]
   media-stack apply --environment production|staging [--config path]
-  media-stack verify --environment production|staging [--config path] --suite full [--output human|json]`
+  media-stack verify --environment production|staging [--config path] --suite full|promotion [--legal-fixture path] [--output human|json]`
 
 type operationalFailure struct {
 	cause error
@@ -72,6 +72,7 @@ func runVerify(ctx context.Context, arguments []string) error {
 	configPath := flags.String("config", "", "Declared Configuration path")
 	suite := flags.String("suite", "full", "verification suite")
 	output := flags.String("output", "human", "human or json")
+	legalFixture := flags.String("legal-fixture", "", "legal movie fixture for Promotion verification")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -79,10 +80,16 @@ func runVerify(ctx context.Context, arguments []string) error {
 		return fmt.Errorf("environment is required\n%s", usage)
 	}
 	if *environmentName == "production" {
+		if *suite == "promotion" {
+			return fmt.Errorf("Promotion verification is disruptive and requires the Staging Environment")
+		}
 		return fmt.Errorf("full verification is disruptive and requires the Staging Environment")
 	}
-	if *suite != "full" {
-		return fmt.Errorf("suite must be full; other verification suites are not implemented yet")
+	if *suite != "full" && *suite != "promotion" {
+		return fmt.Errorf("suite must be full or promotion")
+	}
+	if *suite == "promotion" && *legalFixture == "" {
+		return fmt.Errorf("Promotion verification requires --legal-fixture")
 	}
 	if *output != "human" && *output != "json" {
 		return fmt.Errorf("output must be human or json")
@@ -91,7 +98,7 @@ func runVerify(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("locate working directory: %w", err)
 	}
-	request, err := engine.NewVerifyRequest(workingDirectory, *environmentName, *configPath, *suite)
+	request, err := engine.NewVerifyRequest(workingDirectory, *environmentName, *configPath, *suite, *legalFixture)
 	if err != nil {
 		return err
 	}

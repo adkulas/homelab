@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,8 +20,9 @@ const (
 )
 
 type VerifyRequest struct {
-	plan  PlanRequest
-	suite string
+	plan             PlanRequest
+	suite            string
+	legalFixturePath string
 }
 
 type VerifyReport struct {
@@ -30,12 +32,15 @@ type VerifyReport struct {
 	Diagnostics   []Diagnostic `json:"diagnostics"`
 }
 
-func NewVerifyRequest(workingDirectory, environment, configPath, suite string) (VerifyRequest, error) {
+func NewVerifyRequest(workingDirectory, environment, configPath, suite, legalFixturePath string) (VerifyRequest, error) {
 	plan, err := NewPlanRequest(workingDirectory, environment, configPath)
 	if err != nil {
 		return VerifyRequest{}, err
 	}
-	return VerifyRequest{plan: plan, suite: suite}, nil
+	if legalFixturePath != "" && !filepath.IsAbs(legalFixturePath) {
+		legalFixturePath = filepath.Join(workingDirectory, legalFixturePath)
+	}
+	return VerifyRequest{plan: plan, suite: suite, legalFixturePath: legalFixturePath}, nil
 }
 
 func (report VerifyReport) Failed() bool {
@@ -140,6 +145,9 @@ func (engine localEngine) Verify(ctx context.Context, request VerifyRequest) (re
 		return report, nil
 	}
 	report.add("VERIFY_TUNNEL_RECOVERED", "tunneled qBittorrent egress recovery", "", true)
+	if request.suite == "promotion" {
+		verifyLegalMovie(ctx, plan, declared, request, &report)
+	}
 	return report, nil
 }
 
