@@ -47,6 +47,27 @@ func TestRestorePreviewsMatchingEnvironmentRestoration(t *testing.T) {
 	}
 }
 
+func TestRestoreDrillPreviewsProductionIntoStagingIsolation(t *testing.T) {
+	backupPath := writeBackupManifest(t, "production")
+	command := restoreCommand(t, "--environment", "staging", "--backup", backupPath, "--confirm", "--as-restore-drill", "--output", "json")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("media-stack restore drill failed: %v\n%s", err, output)
+	}
+	for _, want := range []string{
+		`"environment":"staging"`,
+		`"restoreDrill":true`,
+		`"sourceEnvironment":"production"`,
+		`"acquisitionDisabled":true`,
+		`"integrationsGated":true`,
+		`"preview":"restore drill: replace staging Environment state from production backup with acquisition disabled and integrations gated"`,
+	} {
+		if !strings.Contains(string(output), want) {
+			t.Fatalf("restore drill report missing %s: %s", want, output)
+		}
+	}
+}
+
 func restoreCommand(t *testing.T, arguments ...string) *exec.Cmd {
 	t.Helper()
 	goArguments := append([]string{"run", "../../cmd/media-stack", "restore"}, arguments...)
