@@ -17,6 +17,7 @@ const usage = `usage:
   media-stack doctor --environment production|staging [--config path] [--output human|json]
   media-stack plan --environment production|staging [--config path]
   media-stack apply --environment production|staging [--config path]
+  media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--output human|json]
   media-stack verify --environment production|staging [--config path] --suite full|promotion [--legal-fixture path] [--legal-series-fixture path] [--output human|json]`
 
 type operationalFailure struct {
@@ -56,6 +57,8 @@ func run(ctx context.Context, arguments []string) error {
 		return runPlan(ctx, arguments[1:])
 	case "apply":
 		return runApply(ctx, arguments[1:])
+	case "backup":
+		return runBackup(ctx, arguments[1:])
 	case "verify":
 		return runVerify(ctx, arguments[1:])
 	case "__storage-probe":
@@ -125,6 +128,44 @@ func runVerify(ctx context.Context, arguments []string) error {
 	if report.Failed() {
 		return operationalFailure{}
 	}
+	return nil
+}
+
+func runBackup(ctx context.Context, arguments []string) error {
+	flags := flag.NewFlagSet("backup", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	environmentName := flags.String("environment", "", "Production or Staging Environment")
+	configPath := flags.String("config", "", "Declared Configuration path")
+	label := flags.String("label", "", "optional backup label")
+	protect := flags.Bool("protect", false, "protect backup from retention")
+	output := flags.String("output", "human", "human or json")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	if *environmentName == "" {
+		return fmt.Errorf("environment is required\n%s", usage)
+	}
+	if *output != "human" && *output != "json" {
+		return fmt.Errorf("output must be human or json")
+	}
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("locate working directory: %w", err)
+	}
+	request, err := engine.NewBackupRequest(workingDirectory, *environmentName, *configPath, *label, *protect)
+	if err != nil {
+		return err
+	}
+	report, err := engine.New().Backup(ctx, request)
+	if err != nil {
+		return err
+	}
+	if *output == "json" {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetEscapeHTML(false)
+		return encoder.Encode(report)
+	}
+	fmt.Fprintf(os.Stdout, "Prepared %s backup manifest covering %d mutable service volumes in the %s Environment.\n", report.ProjectName, len(report.Services), report.Environment)
 	return nil
 }
 
