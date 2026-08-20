@@ -47,9 +47,25 @@ func TestRestorePreviewsMatchingEnvironmentRestoration(t *testing.T) {
 	}
 }
 
+func TestRestoreRejectsRestoreDrillWithoutCredentials(t *testing.T) {
+	backupPath := writeBackupManifest(t, "production")
+	command := restoreCommand(t, "--environment", "staging", "--backup", backupPath, "--confirm", "--as-restore-drill")
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("media-stack restore drill unexpectedly succeeded:\n%s", output)
+	}
+	if !strings.Contains(string(output), "restore drill requires --credentials") {
+		t.Fatalf("restore drill credential error = %s", output)
+	}
+}
+
 func TestRestoreDrillPreviewsProductionIntoStagingIsolation(t *testing.T) {
 	backupPath := writeBackupManifest(t, "production")
-	command := restoreCommand(t, "--environment", "staging", "--backup", backupPath, "--confirm", "--as-restore-drill", "--output", "json")
+	credentialsPath := filepath.Join(t.TempDir(), "staging-drill.sops.yaml")
+	if err := os.WriteFile(credentialsPath, []byte("credentials: rotated\n"), 0o600); err != nil {
+		t.Fatalf("write drill credentials: %v", err)
+	}
+	command := restoreCommand(t, "--environment", "staging", "--backup", backupPath, "--confirm", "--as-restore-drill", "--credentials", credentialsPath, "--output", "json")
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("media-stack restore drill failed: %v\n%s", err, output)
@@ -60,7 +76,9 @@ func TestRestoreDrillPreviewsProductionIntoStagingIsolation(t *testing.T) {
 		`"sourceEnvironment":"production"`,
 		`"acquisitionDisabled":true`,
 		`"integrationsGated":true`,
-		`"preview":"restore drill: replace staging Environment state from production backup with acquisition disabled and integrations gated"`,
+		`"credentialsPath":"`,
+		filepath.Base(credentialsPath),
+		`"preview":"restore drill: replace staging Environment state from production backup with acquisition disabled, integrations gated, and credentials overridden from staging-drill.sops.yaml"`,
 	} {
 		if !strings.Contains(string(output), want) {
 			t.Fatalf("restore drill report missing %s: %s", want, output)
