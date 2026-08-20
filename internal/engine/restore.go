@@ -12,10 +12,11 @@ import (
 )
 
 type RestoreRequest struct {
-	plan           PlanRequest
-	backupPath     string
-	confirm        bool
-	asRestoreDrill bool
+	plan            PlanRequest
+	backupPath      string
+	credentialsPath string
+	confirm         bool
+	asRestoreDrill  bool
 }
 
 type RestoreReport struct {
@@ -23,6 +24,7 @@ type RestoreReport struct {
 	Environment         string   `json:"environment"`
 	ProjectName         string   `json:"projectName"`
 	BackupPath          string   `json:"backupPath"`
+	CredentialsPath     string   `json:"credentialsPath,omitempty"`
 	Preview             string   `json:"preview"`
 	RestoreDrill        bool     `json:"restoreDrill"`
 	SourceEnvironment   string   `json:"sourceEnvironment"`
@@ -31,7 +33,7 @@ type RestoreReport struct {
 	Services            []string `json:"services"`
 }
 
-func NewRestoreRequest(workingDirectory, environment, configPath, backupPath string, confirm, asRestoreDrill bool) (RestoreRequest, error) {
+func NewRestoreRequest(workingDirectory, environment, configPath, backupPath, credentialsPath string, confirm, asRestoreDrill bool) (RestoreRequest, error) {
 	plan, err := NewPlanRequest(workingDirectory, environment, configPath)
 	if err != nil {
 		return RestoreRequest{}, err
@@ -39,7 +41,10 @@ func NewRestoreRequest(workingDirectory, environment, configPath, backupPath str
 	if backupPath != "" && !filepath.IsAbs(backupPath) {
 		backupPath = filepath.Join(workingDirectory, backupPath)
 	}
-	return RestoreRequest{plan: plan, backupPath: backupPath, confirm: confirm, asRestoreDrill: asRestoreDrill}, nil
+	if credentialsPath != "" && !filepath.IsAbs(credentialsPath) {
+		credentialsPath = filepath.Join(workingDirectory, credentialsPath)
+	}
+	return RestoreRequest{plan: plan, backupPath: backupPath, credentialsPath: credentialsPath, confirm: confirm, asRestoreDrill: asRestoreDrill}, nil
 }
 
 func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (RestoreReport, error) {
@@ -77,6 +82,9 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 		if backup.Environment != "production" {
 			return RestoreReport{}, fmt.Errorf("restore drill requires a production backup")
 		}
+		if request.credentialsPath == "" {
+			return RestoreReport{}, fmt.Errorf("restore drill requires --credentials")
+		}
 	}
 	environment := declared.Spec.Environments[request.plan.environment]
 	serviceNames := make([]string, 0, len(backup.Services))
@@ -85,13 +93,14 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	}
 	preview := fmt.Sprintf("replace %s Environment state from %s backup", request.plan.environment, backup.Environment)
 	if request.asRestoreDrill {
-		preview = fmt.Sprintf("restore drill: replace %s Environment state from %s backup with acquisition disabled and integrations gated", request.plan.environment, backup.Environment)
+		preview = fmt.Sprintf("restore drill: replace %s Environment state from %s backup with acquisition disabled, integrations gated, and credentials overridden from %s", request.plan.environment, backup.Environment, filepath.Base(request.credentialsPath))
 	}
 	return RestoreReport{
 		SchemaVersion:       backupSchemaVersion,
 		Environment:         request.plan.environment,
 		ProjectName:         environment.ProjectName,
 		BackupPath:          request.backupPath,
+		CredentialsPath:     request.credentialsPath,
 		Preview:             preview,
 		RestoreDrill:        request.asRestoreDrill,
 		SourceEnvironment:   backup.Environment,
