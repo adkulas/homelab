@@ -11,3 +11,7 @@ The canonical default triage labels are used unchanged. See `docs/agents/triage-
 ### Domain docs
 
 This repository uses a single-context domain-doc layout. See `docs/agents/domain.md`.
+
+## Test command
+
+Use `./bin/media-stack test` or `go test ./...` to run the full repository test suite.

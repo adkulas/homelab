@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 
 	"github.com/adkulas/homelab/internal/engine"
 	"github.com/adkulas/homelab/internal/storageprobe"
@@ -19,7 +20,8 @@ const usage = `usage:
   media-stack apply --environment production|staging [--config path]
   media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--output human|json]
   media-stack restore --environment production|staging --backup path [--config path] [--confirm] [--as-restore-drill] [--output human|json]
-  media-stack verify --environment production|staging [--config path] --suite full|promotion [--legal-fixture path] [--legal-series-fixture path] [--output human|json]`
+  media-stack verify --environment production|staging [--config path] --suite full|promotion [--legal-fixture path] [--legal-series-fixture path] [--output human|json]
+  media-stack test [--run pattern]`
 
 type operationalFailure struct {
 	cause error
@@ -64,6 +66,8 @@ func run(ctx context.Context, arguments []string) error {
 		return runRestore(ctx, arguments[1:])
 	case "verify":
 		return runVerify(ctx, arguments[1:])
+	case "test":
+		return runTest(arguments[1:])
 	case "__storage-probe":
 		return runStorageProbe(arguments[1:])
 	default:
@@ -212,6 +216,24 @@ func runRestore(ctx context.Context, arguments []string) error {
 	}
 	fmt.Fprintln(os.Stdout, report.Preview)
 	return nil
+}
+
+func runTest(arguments []string) error {
+	flags := flag.NewFlagSet("test", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	runPattern := flags.String("run", "", "optional go test -run pattern")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	testArgs := []string{"test", "./..."}
+	if *runPattern != "" {
+		testArgs = append(testArgs, "-run", *runPattern)
+	}
+	command := exec.Command("go", testArgs...)
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	command.Stdin = os.Stdin
+	return command.Run()
 }
 
 func runApply(ctx context.Context, arguments []string) error {
