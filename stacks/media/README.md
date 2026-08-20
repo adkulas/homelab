@@ -93,7 +93,7 @@ You also need:
 ### 2. Configure and initialize Staging first
 
 Edit `stacks/media/media-stack.yaml` before the first run. At minimum, choose absolute, non-overlapping `dataRoot` values, Compose
-`projectName` values, secret-file paths, and non-conflicting LAN ports for Production and Staging. Set `runtimeUID` and
+`projectName` values, secret-file paths, and non-conflicting LAN ports for Production and Staging. `dataRoot` is not prompted by `init`; it is a declared path in the checked-in configuration, and `init` provisions that path on disk for the selected Environment. Set `runtimeUID` and
 `runtimeGID` to the numeric identity that should own new data directories; for the current operator, obtain them with:
 
 ```bash
@@ -104,11 +104,13 @@ id -g
 From the repository root, initialize Staging:
 
 ```bash
-./setup.sh --environment staging
+go build -o bin/media-stack ./cmd/media-stack
+./bin/media-stack init --environment staging
 ```
 
-`setup.sh` downloads the pinned `media-stack` Linux binary for amd64 or arm64, verifies its SHA-256 checksum, caches it, and
-runs `media-stack init`. `init` currently prompts for the runtime UID/GID, timezone, NordVPN country, optional P2P category,
+That local build path is the simplest way to start a fresh implementation from the current repository state.
+
+If you prefer the pinned release launcher, `setup.sh` downloads the pinned `media-stack` Linux binary for amd64 or arm64, verifies its SHA-256 checksum, caches it, and runs `media-stack init`. `init` currently prompts for the runtime UID/GID, timezone, NordVPN country, optional P2P category,
 OpenVPN UDP or TCP, Gluetun catalogue interval, age recipient, and NordVPN service credentials. Non-interactive automation can
 supply the same answers explicitly:
 
