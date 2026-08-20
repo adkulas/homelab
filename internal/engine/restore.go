@@ -19,12 +19,16 @@ type RestoreRequest struct {
 }
 
 type RestoreReport struct {
-	SchemaVersion string   `json:"schemaVersion"`
-	Environment   string   `json:"environment"`
-	ProjectName   string   `json:"projectName"`
-	BackupPath    string   `json:"backupPath"`
-	Preview       string   `json:"preview"`
-	Services      []string `json:"services"`
+	SchemaVersion       string   `json:"schemaVersion"`
+	Environment         string   `json:"environment"`
+	ProjectName         string   `json:"projectName"`
+	BackupPath          string   `json:"backupPath"`
+	Preview             string   `json:"preview"`
+	RestoreDrill        bool     `json:"restoreDrill"`
+	SourceEnvironment   string   `json:"sourceEnvironment"`
+	AcquisitionDisabled bool     `json:"acquisitionDisabled"`
+	IntegrationsGated   bool     `json:"integrationsGated"`
+	Services            []string `json:"services"`
 }
 
 func NewRestoreRequest(workingDirectory, environment, configPath, backupPath string, confirm, asRestoreDrill bool) (RestoreRequest, error) {
@@ -66,18 +70,34 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	if backup.Environment != request.plan.environment && !request.asRestoreDrill {
 		return RestoreReport{}, fmt.Errorf("restore requires a backup from the %s Environment", request.plan.environment)
 	}
+	if request.asRestoreDrill {
+		if request.plan.environment != "staging" {
+			return RestoreReport{}, fmt.Errorf("restore drill requires the staging Environment")
+		}
+		if backup.Environment != "production" {
+			return RestoreReport{}, fmt.Errorf("restore drill requires a production backup")
+		}
+	}
 	environment := declared.Spec.Environments[request.plan.environment]
 	serviceNames := make([]string, 0, len(backup.Services))
 	for _, service := range backup.Services {
 		serviceNames = append(serviceNames, service.Name)
 	}
+	preview := fmt.Sprintf("replace %s Environment state from %s backup", request.plan.environment, backup.Environment)
+	if request.asRestoreDrill {
+		preview = fmt.Sprintf("restore drill: replace %s Environment state from %s backup with acquisition disabled and integrations gated", request.plan.environment, backup.Environment)
+	}
 	return RestoreReport{
-		SchemaVersion: backupSchemaVersion,
-		Environment:   request.plan.environment,
-		ProjectName:   environment.ProjectName,
-		BackupPath:    request.backupPath,
-		Preview:       fmt.Sprintf("replace %s Environment state from %s backup", request.plan.environment, backup.Environment),
-		Services:      serviceNames,
+		SchemaVersion:       backupSchemaVersion,
+		Environment:         request.plan.environment,
+		ProjectName:         environment.ProjectName,
+		BackupPath:          request.backupPath,
+		Preview:             preview,
+		RestoreDrill:        request.asRestoreDrill,
+		SourceEnvironment:   backup.Environment,
+		AcquisitionDisabled: request.asRestoreDrill,
+		IntegrationsGated:   request.asRestoreDrill,
+		Services:            serviceNames,
 	}, nil
 }
 
