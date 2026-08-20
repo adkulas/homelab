@@ -30,6 +30,7 @@ type Plan struct {
 type Engine interface {
 	Plan(context.Context, PlanRequest) (Plan, error)
 	Apply(context.Context, ApplyRequest) (ApplyReport, error)
+	Backup(context.Context, BackupRequest) (BackupReport, error)
 	Init(context.Context, InitRequest) (InitReport, error)
 	Doctor(context.Context, DoctorRequest) (DoctorReport, error)
 	Verify(context.Context, VerifyRequest) (VerifyReport, error)
