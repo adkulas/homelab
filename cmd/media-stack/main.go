@@ -18,6 +18,7 @@ const usage = `usage:
   media-stack plan --environment production|staging [--config path]
   media-stack apply --environment production|staging [--config path]
   media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--output human|json]
+  media-stack restore --environment production|staging --backup path [--config path] [--confirm] [--as-restore-drill] [--output human|json]
   media-stack verify --environment production|staging [--config path] --suite full|promotion [--legal-fixture path] [--legal-series-fixture path] [--output human|json]`
 
 type operationalFailure struct {
@@ -59,6 +60,8 @@ func run(ctx context.Context, arguments []string) error {
 		return runApply(ctx, arguments[1:])
 	case "backup":
 		return runBackup(ctx, arguments[1:])
+	case "restore":
+		return runRestore(ctx, arguments[1:])
 	case "verify":
 		return runVerify(ctx, arguments[1:])
 	case "__storage-probe":
@@ -166,6 +169,48 @@ func runBackup(ctx context.Context, arguments []string) error {
 		return encoder.Encode(report)
 	}
 	fmt.Fprintf(os.Stdout, "Prepared %s backup manifest covering %d mutable service volumes in the %s Environment.\n", report.ProjectName, len(report.Services), report.Environment)
+	return nil
+}
+
+func runRestore(ctx context.Context, arguments []string) error {
+	flags := flag.NewFlagSet("restore", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	environmentName := flags.String("environment", "", "Production or Staging Environment")
+	configPath := flags.String("config", "", "Declared Configuration path")
+	backupPath := flags.String("backup", "", "backup manifest path")
+	confirm := flags.Bool("confirm", false, "confirm the restore preview")
+	asRestoreDrill := flags.Bool("as-restore-drill", false, "permit production-to-staging drill restores")
+	output := flags.String("output", "human", "human or json")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	if *environmentName == "" {
+		return fmt.Errorf("environment is required\n%s", usage)
+	}
+	if *backupPath == "" {
+		return fmt.Errorf("backup is required\n%s", usage)
+	}
+	if *output != "human" && *output != "json" {
+		return fmt.Errorf("output must be human or json")
+	}
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("locate working directory: %w", err)
+	}
+	request, err := engine.NewRestoreRequest(workingDirectory, *environmentName, *configPath, *backupPath, *confirm, *asRestoreDrill)
+	if err != nil {
+		return err
+	}
+	report, err := engine.New().Restore(ctx, request)
+	if err != nil {
+		return operationalFailure{cause: err}
+	}
+	if *output == "json" {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetEscapeHTML(false)
+		return encoder.Encode(report)
+	}
+	fmt.Fprintln(os.Stdout, report.Preview)
 	return nil
 }
 
