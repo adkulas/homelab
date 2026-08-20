@@ -31,6 +31,7 @@ type Engine interface {
 	Plan(context.Context, PlanRequest) (Plan, error)
 	Apply(context.Context, ApplyRequest) (ApplyReport, error)
 	Backup(context.Context, BackupRequest) (BackupReport, error)
+	Restore(context.Context, RestoreRequest) (RestoreReport, error)
 	Init(context.Context, InitRequest) (InitReport, error)
 	Doctor(context.Context, DoctorRequest) (DoctorReport, error)
 	Verify(context.Context, VerifyRequest) (VerifyReport, error)
