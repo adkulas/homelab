@@ -20,6 +20,52 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	categories := map[string]map[string]string{}
 	var rootFolders []map[string]any
 	var downloadClients []map[string]any
+	moviePolicyObservations := map[string]int{
+		"qualityprofile":    0,
+		"customformat":      0,
+		"qualitydefinition": 0,
+		"naming":            0,
+		"mediamanagement":   0,
+	}
+	movieQualityProfiles := []map[string]any{
+		{
+			"name":              "HD Bluray + WEB",
+			"upgradeAllowed":    true,
+			"cutoff":            7,
+			"minFormatScore":    0,
+			"cutoffFormatScore": 10000,
+			"items": []any{
+				map[string]any{"quality": map[string]any{"id": 7, "name": "Bluray-1080p"}, "allowed": true},
+				map[string]any{"name": "WEB 1080p", "allowed": true, "items": []any{}},
+				map[string]any{"quality": map[string]any{"id": 6, "name": "Bluray-720p"}, "allowed": true},
+			},
+			"formatItems": []any{
+				map[string]any{"format": 101, "score": 1800},
+				map[string]any{"format": 102, "score": 1700},
+				map[string]any{"format": 103, "score": -10000},
+			},
+		},
+	}
+	movieCustomFormats := []map[string]any{
+		{"id": 101, "name": "HD Bluray Tier 01"},
+		{"id": 102, "name": "WEB Tier 01"},
+		{"id": 103, "name": "BR-DISK"},
+	}
+	movieQualityDefinitions := []map[string]any{
+		{"quality": map[string]any{"name": "Bluray-1080p"}, "minSize": 51, "maxSize": 2000, "preferredSize": 1999},
+		{"quality": map[string]any{"name": "WEBDL-1080p"}, "minSize": 13, "maxSize": 2000, "preferredSize": 1999},
+	}
+	movieNaming := map[string]any{
+		"renameMovies":             true,
+		"standardMovieFormat":      "{Movie CleanTitle} {(Release Year)} [tmdbid-{TmdbId}] - {{Edition Tags}} {[MediaInfo 3D]}{[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}",
+		"movieFolderFormat":        "{Movie CleanTitle} ({Release Year}) [tmdbid-{TmdbId}]",
+		"replaceIllegalCharacters": false,
+		"colonReplacementFormat":   "smart",
+	}
+	movieMediaManagement := map[string]any{
+		"downloadPropersAndRepacks": "doNotPrefer",
+		"enableMediaInfo":           true,
+	}
 	var indexers []map[string]any
 	var applications []map[string]any
 	profilarrInstances := []map[string]any{
@@ -119,6 +165,21 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 				_ = json.NewDecoder(request.Body).Decode(&client)
 				downloadClients = append(downloadClients, client)
 				writer.WriteHeader(http.StatusCreated)
+			case "GET /api/v3/qualityprofile":
+				moviePolicyObservations["qualityprofile"]++
+				_ = json.NewEncoder(writer).Encode(movieQualityProfiles)
+			case "GET /api/v3/customformat":
+				moviePolicyObservations["customformat"]++
+				_ = json.NewEncoder(writer).Encode(movieCustomFormats)
+			case "GET /api/v3/qualitydefinition":
+				moviePolicyObservations["qualitydefinition"]++
+				_ = json.NewEncoder(writer).Encode(movieQualityDefinitions)
+			case "GET /api/v3/config/naming":
+				moviePolicyObservations["naming"]++
+				_ = json.NewEncoder(writer).Encode(movieNaming)
+			case "GET /api/v3/config/mediamanagement":
+				moviePolicyObservations["mediamanagement"]++
+				_ = json.NewEncoder(writer).Encode(movieMediaManagement)
 			default:
 				http.NotFound(writer, request)
 			}
@@ -233,8 +294,8 @@ EOF
 	if err != nil {
 		t.Fatalf("media-stack apply failed: %v\n%s", err, output)
 	}
-	if !strings.Contains(string(output), "Prepared Movie and Series Library discovery through Prowlarr and verified Profilarr's Radarr and Sonarr connections in the staging Environment.") {
-		t.Errorf("apply output = %q, want completed Radarr and Sonarr phases", output)
+	if !strings.Contains(string(output), "Applied the pinned Movie Library policy through Profilarr in the staging Environment.") {
+		t.Errorf("apply output = %q, want completed Movie Library policy", output)
 	}
 
 	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr"
@@ -324,6 +385,11 @@ EOF
 	if profilarrObservations != 2 {
 		t.Errorf("apply observed Profilarr connections %d times, want startup retry plus successful verification", profilarrObservations)
 	}
+	for observation, count := range moviePolicyObservations {
+		if count != 1 {
+			t.Errorf("apply observed Radarr %s %d times, want once", observation, count)
+		}
+	}
 	secondCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
 	secondCommand.Dir = command.Dir
 	secondCommand.Env = command.Env
@@ -335,6 +401,33 @@ EOF
 		t.Errorf("repeated apply did not converge: movieRoots=%v movieDownloadClients=%v seriesRoots=%v seriesDownloadClients=%v indexers=%v applications=%v", rootFolders, downloadClients, seriesRootFolders, seriesDownloadClients, indexers, applications)
 	}
 
+	originalMovieQualityProfiles := movieQualityProfiles
+	movieQualityProfiles = nil
+	policyCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
+	policyCommand.Dir = command.Dir
+	policyCommand.Env = command.Env
+	policyOutput, err := policyCommand.CombinedOutput()
+	if err == nil {
+		t.Fatalf("apply accepted Movie Library policy drift: %s", policyOutput)
+	}
+	for _, want := range []string{
+		"manual action required",
+		"http://127.0.0.1:" + apiURL.Port(),
+		"https://github.com/Dictionarry-Hub/trash-pcd",
+		"9e424382191de7d507efc9806ac3c807793d1c60",
+		"HD Bluray + WEB",
+		"Jellyfin TMDB",
+		"Movie quality definitions",
+		"Default",
+		"run sync",
+		"rerun media-stack apply",
+		"Movie Library policy drift",
+	} {
+		if !strings.Contains(string(policyOutput), want) {
+			t.Errorf("Movie Library policy guidance = %q, want %q", policyOutput, want)
+		}
+	}
+	movieQualityProfiles = originalMovieQualityProfiles
 	profilarrInstances = profilarrInstances[:1]
 	thirdCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
 	thirdCommand.Dir = command.Dir

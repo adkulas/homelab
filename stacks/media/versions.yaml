@@ -9,3 +9,5 @@ images:
   profilarr: ghcr.io/dictionarry-hub/profilarr@sha256:75a43c9c19c70f6e48315d4ed5cef3232d905da8fab397391a2078a5e0fd7ec1
   jellyfin: jellyfin/jellyfin@sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db
   seerr: ghcr.io/seerr-team/seerr@sha256:f4768de5f616248d723e05891f3345a1402123775d03bf0890dbfedc0831bda1
+policy:
+  profilarrPcdRevision: 9e424382191de7d507efc9806ac3c807793d1c60

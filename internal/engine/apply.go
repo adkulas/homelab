@@ -54,6 +54,15 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if err != nil {
 		return ApplyReport{}, err
 	}
+	versions, err := config.LoadVersions(request.plan.versionsPath)
+	if err != nil {
+		return ApplyReport{}, err
+	}
+	policyPath := filepath.Join(filepath.Dir(request.plan.versionsPath), "fixtures", "profilarr-movie-policy.yaml")
+	moviePolicy, err := radarr.LoadMoviePolicy(policyPath, versions.Policy.ProfilarrPCDRevision)
+	if err != nil {
+		return ApplyReport{}, err
+	}
 	environment := declared.Spec.Environments[request.plan.environment]
 	secretPath := environment.SecretsFile
 	if !filepath.IsAbs(secretPath) {
@@ -140,6 +149,17 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	profilarrAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Profilarr)
 	if err := verifyProfilarrBootstrap(ctx, "http://"+profilarrAddress, secrets.ProfilarrKey); err != nil {
 		return ApplyReport{}, err
+	}
+	if err := radarrClient.VerifyMoviePolicy(ctx, moviePolicy); err != nil {
+		return ApplyReport{}, fmt.Errorf("manual action required: open %s, link %s at pinned revision %s, select the %q quality profile, %q naming preset, Movie quality definitions, and %q media-management preset for Radarr, run sync, then rerun media-stack apply: %w",
+			"http://"+profilarrAddress,
+			moviePolicy.Source.Repository,
+			moviePolicy.Source.Revision,
+			moviePolicy.Profile.Name,
+			moviePolicy.Naming.Preset,
+			moviePolicy.MediaManagement.Preset,
+			err,
+		)
 	}
 	return ApplyReport{Environment: request.plan.environment}, nil
 }

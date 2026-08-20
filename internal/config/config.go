@@ -75,6 +75,11 @@ type Versions struct {
 	APIVersion string            `yaml:"apiVersion"`
 	Kind       string            `yaml:"kind"`
 	Images     map[string]string `yaml:"images"`
+	Policy     Policy            `yaml:"policy"`
+}
+
+type Policy struct {
+	ProfilarrPCDRevision string `yaml:"profilarrPcdRevision"`
 }
 
 var digestReference = regexp.MustCompile(`^[^[:space:]@]+@sha256:[a-f0-9]{64}$`)

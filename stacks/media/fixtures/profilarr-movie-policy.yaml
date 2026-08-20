@@ -1,0 +1,46 @@
+apiVersion: homelab.media-stack.policy/v1alpha1
+kind: ProfilarrMoviePolicy
+source:
+  repository: https://github.com/Dictionarry-Hub/trash-pcd
+  revision: 9e424382191de7d507efc9806ac3c807793d1c60
+  manifestVersion: 1.0.37
+profile:
+  name: HD Bluray + WEB
+  upgradesAllowed: true
+  upgradeUntilQuality: Bluray-1080p
+  minimumCustomFormatScore: 0
+  upgradeUntilCustomFormatScore: 10000
+  allowedQualities:
+    - Bluray-1080p
+    - WEB 1080p
+    - Bluray-720p
+  customFormats:
+    - name: HD Bluray Tier 01
+      score: 1800
+    - name: WEB Tier 01
+      score: 1700
+    - name: BR-DISK
+      score: -10000
+qualityDefinitions:
+  - quality: Bluray-1080p
+    minimum: 51
+    maximum: 2000
+    preferred: 1999
+  - quality: WEBDL-1080p
+    minimum: 13
+    maximum: 2000
+    preferred: 1999
+naming:
+  preset: Jellyfin TMDB
+  renameMovies: true
+  standardMovieFormat: "{Movie CleanTitle} {(Release Year)} [tmdbid-{TmdbId}] - {{Edition Tags}} {[MediaInfo 3D]}{[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}"
+  movieFolderFormat: "{Movie CleanTitle} ({Release Year}) [tmdbid-{TmdbId}]"
+  replaceIllegalCharacters: false
+  colonReplacementFormat: smart
+mediaManagement:
+  preset: Default
+  downloadPropersAndRepacks: doNotPrefer
+  enableMediaInfo: true
+deviations:
+  - Select the Jellyfin TMDB naming preset because Jellyfin is the Media Stack playback service.
+  - Sync only the HD Bluray + WEB profile; UHD, remux-heavy, anime, and language-specific profiles are excluded from the first milestone.
