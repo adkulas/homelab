@@ -63,6 +63,11 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if err != nil {
 		return ApplyReport{}, err
 	}
+	seriesPolicyPath := filepath.Join(filepath.Dir(request.plan.versionsPath), "fixtures", "profilarr-series-policy.yaml")
+	seriesPolicy, err := sonarr.LoadSeriesPolicy(seriesPolicyPath, versions.Policy.ProfilarrPCDRevision)
+	if err != nil {
+		return ApplyReport{}, err
+	}
 	environment := declared.Spec.Environments[request.plan.environment]
 	secretPath := environment.SecretsFile
 	if !filepath.IsAbs(secretPath) {
@@ -128,6 +133,18 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if _, err := sonarrClient.ReconcileSeriesLibrary(ctx, password); err != nil {
 		return ApplyReport{}, fmt.Errorf("reconcile Sonarr Series Library: %w", err)
 	}
+	profilarrAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Profilarr)
+	if err := sonarrClient.VerifySeriesPolicy(ctx, seriesPolicy); err != nil {
+		return ApplyReport{}, fmt.Errorf("manual action required: open %s, link %s at pinned revision %s, select the %q quality profile, %q naming preset, Series quality definitions, and %q media-management preset for Sonarr, run sync, then rerun media-stack apply: %w",
+			"http://"+profilarrAddress,
+			seriesPolicy.Source.Repository,
+			seriesPolicy.Source.Revision,
+			seriesPolicy.Profile.Name,
+			seriesPolicy.Naming.Preset,
+			seriesPolicy.MediaManagement.Preset,
+			err,
+		)
+	}
 	if output, err := runDockerCompose(ctx, plan, "up", "-d", "prowlarr"); err != nil {
 		return ApplyReport{}, fmt.Errorf("start Prowlarr: %w: %s", err, redactCredentials(output, credentials))
 	}
@@ -146,7 +163,6 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if output, err := runDockerCompose(ctx, plan, "up", "-d", "profilarr"); err != nil {
 		return ApplyReport{}, fmt.Errorf("start Profilarr: %w: %s", err, redactCredentials(output, credentials))
 	}
-	profilarrAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Profilarr)
 	if err := verifyProfilarrBootstrap(ctx, "http://"+profilarrAddress, secrets.ProfilarrKey); err != nil {
 		return ApplyReport{}, err
 	}

@@ -75,6 +75,52 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	profilarrObservations := 0
 	var seriesRootFolders []map[string]any
 	var seriesDownloadClients []map[string]any
+	seriesPolicyObservations := map[string]int{
+		"qualityprofile":    0,
+		"customformat":      0,
+		"qualitydefinition": 0,
+		"naming":            0,
+		"mediamanagement":   0,
+	}
+	seriesQualityProfiles := []map[string]any{
+		{
+			"name":              "HD Bluray + WEB",
+			"upgradeAllowed":    true,
+			"cutoff":            7,
+			"minFormatScore":    0,
+			"cutoffFormatScore": 10000,
+			"items": []any{
+				map[string]any{"quality": map[string]any{"id": 7, "name": "Bluray-1080p"}, "allowed": true},
+				map[string]any{"name": "WEB 1080p", "allowed": true, "items": []any{}},
+				map[string]any{"quality": map[string]any{"id": 6, "name": "Bluray-720p"}, "allowed": true},
+			},
+			"formatItems": []any{
+				map[string]any{"format": 101, "score": 1800},
+				map[string]any{"format": 102, "score": 1700},
+				map[string]any{"format": 103, "score": -10000},
+			},
+		},
+	}
+	seriesCustomFormats := []map[string]any{
+		{"id": 101, "name": "HD Bluray Tier 01"},
+		{"id": 102, "name": "WEB Tier 01"},
+		{"id": 103, "name": "BR-DISK"},
+	}
+	seriesQualityDefinitions := []map[string]any{
+		{"quality": map[string]any{"name": "Bluray-1080p"}, "minSize": 51, "maxSize": 2000, "preferredSize": 1999},
+		{"quality": map[string]any{"name": "WEBDL-1080p"}, "minSize": 13, "maxSize": 2000, "preferredSize": 1999},
+	}
+	seriesNaming := map[string]any{
+		"renameMovies":             true,
+		"standardMovieFormat":      "{Movie CleanTitle} {(Release Year)} [tmdbid-{TmdbId}] - {{Edition Tags}} {[MediaInfo 3D]}{[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}",
+		"movieFolderFormat":        "{Movie CleanTitle} ({Release Year}) [tmdbid-{TmdbId}]",
+		"replaceIllegalCharacters": false,
+		"colonReplacementFormat":   "smart",
+	}
+	seriesMediaManagement := map[string]any{
+		"downloadPropersAndRepacks": "doNotPrefer",
+		"enableMediaInfo":           true,
+	}
 	sonarrAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("X-Api-Key") != "fixture-sonarr-api-key" {
 			http.Error(writer, "Unauthorized", http.StatusUnauthorized)
@@ -83,6 +129,21 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 		switch request.Method + " " + request.URL.Path {
 		case "GET /api/v3/system/status":
 			_ = json.NewEncoder(writer).Encode(map[string]string{"appName": "Sonarr"})
+		case "GET /api/v3/qualityprofile":
+			seriesPolicyObservations["qualityprofile"]++
+			_ = json.NewEncoder(writer).Encode(seriesQualityProfiles)
+		case "GET /api/v3/customformat":
+			seriesPolicyObservations["customformat"]++
+			_ = json.NewEncoder(writer).Encode(seriesCustomFormats)
+		case "GET /api/v3/qualitydefinition":
+			seriesPolicyObservations["qualitydefinition"]++
+			_ = json.NewEncoder(writer).Encode(seriesQualityDefinitions)
+		case "GET /api/v3/config/naming":
+			seriesPolicyObservations["naming"]++
+			_ = json.NewEncoder(writer).Encode(seriesNaming)
+		case "GET /api/v3/config/mediamanagement":
+			seriesPolicyObservations["mediamanagement"]++
+			_ = json.NewEncoder(writer).Encode(seriesMediaManagement)
 		case "GET /api/v3/rootfolder":
 			_ = json.NewEncoder(writer).Encode(seriesRootFolders)
 		case "POST /api/v3/rootfolder":
@@ -390,6 +451,11 @@ EOF
 			t.Errorf("apply observed Radarr %s %d times, want once", observation, count)
 		}
 	}
+	for observation, count := range seriesPolicyObservations {
+		if count != 1 {
+			t.Errorf("apply observed Sonarr %s %d times, want once", observation, count)
+		}
+	}
 	secondCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
 	secondCommand.Dir = command.Dir
 	secondCommand.Env = command.Env
@@ -402,6 +468,7 @@ EOF
 	}
 
 	originalMovieQualityProfiles := movieQualityProfiles
+	originalSeriesQualityProfiles := seriesQualityProfiles
 	movieQualityProfiles = nil
 	policyCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
 	policyCommand.Dir = command.Dir
@@ -427,7 +494,33 @@ EOF
 			t.Errorf("Movie Library policy guidance = %q, want %q", policyOutput, want)
 		}
 	}
+	seriesQualityProfiles = nil
+	seriesPolicyCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
+	seriesPolicyCommand.Dir = command.Dir
+	seriesPolicyCommand.Env = command.Env
+	seriesPolicyOutput, err := seriesPolicyCommand.CombinedOutput()
+	if err == nil {
+		t.Fatalf("apply accepted Series Library policy drift: %s", seriesPolicyOutput)
+	}
+	for _, want := range []string{
+		"manual action required",
+		"http://127.0.0.1:" + apiURL.Port(),
+		"https://github.com/Dictionarry-Hub/trash-pcd",
+		"9e424382191de7d507efc9806ac3c807793d1c60",
+		"HD Bluray + WEB",
+		"Jellyfin TMDB",
+		"Series quality definitions",
+		"Default",
+		"run sync",
+		"rerun media-stack apply",
+		"Series Library policy drift",
+	} {
+		if !strings.Contains(string(seriesPolicyOutput), want) {
+			t.Errorf("Series Library policy guidance = %q, want %q", seriesPolicyOutput, want)
+		}
+	}
 	movieQualityProfiles = originalMovieQualityProfiles
+	seriesQualityProfiles = originalSeriesQualityProfiles
 	profilarrInstances = profilarrInstances[:1]
 	thirdCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
 	thirdCommand.Dir = command.Dir
