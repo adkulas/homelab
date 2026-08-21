@@ -8,7 +8,7 @@ independent Production and Staging Environments so changes can be proven before 
 > This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, the
 > VPN-confined qBittorrent, Radarr Movie Library, Sonarr Series Library, Prowlarr Movie and Series Library discovery, and guided Profilarr connection phases of `apply`; authenticated Jellyfin Movie and Series Library reconciliation; VPN-focused
 > `verify --suite full`; legal movie and series-episode acquisition, hardlink, and playback proofs through `verify --suite promotion`; and verified application-state archives through `backup` are available now.
-> Remaining Seerr reconciliation, `restore`, the other verification suites and
+> Ordinary matching-Environment state replacement through `restore` is also available. Remaining Seerr reconciliation, Restore Drill execution, the other verification suites and
 > artifacts, and `destroy` remain planned. Ubuntu is the authoritative implementation and
 > completion platform. Docker
 > Desktop WSL2 compatibility is verified independently and does not block Ubuntu work. Sections below label planned behavior explicitly.
@@ -597,6 +597,7 @@ non-disruptive smoke observations. The detailed testing strategy is being resolv
 ```bash
 media-stack backup --environment production --protect --label before-upgrade
 media-stack restore --environment production --backup <backup-id>
+media-stack restore --environment production --backup <backup-id> --confirm
 media-stack restore \
   --environment staging \
   --backup <production-backup-id> \
@@ -621,9 +622,21 @@ Protected backups are never expired by retention. Production and Staging backups
 should preferably live on another disk or NAS. `--now` fixes the backup and retention clock for deterministic verification;
 omit it during ordinary operation.
 
-Ordinary restore only accepts a backup from the same environment. A Restore Drill is the one Production-to-Staging
-exception: it preserves Staging identity, rotates external credentials, starts with acquisition disabled, and gates
-integrations until confirmed. Production Profilarr state embeds Production-specific connections, so the initial design keeps
+Ordinary restore only accepts a complete backup from the same Environment and Compose project. It verifies exact mutable
+service-volume coverage, immutable images, archive paths, sizes, and SHA-256 checksums before printing a replacement preview.
+Without `--confirm`, the preview is printed and the command exits without invoking Docker. After reviewing that output, rerun
+the same command with `--confirm`.
+
+A confirmed restore first creates a protected `before-restore` safety backup without applying retention. It extracts each
+selected archive into a temporary Docker volume, independently compares the recovered file metadata and contents, stops the
+mutable services, reconstructs their canonical volumes, verifies them again, and starts the Compose project with dependency
+handling. Progress and the safety-backup path are atomically recorded under
+`<backupRoot>/.restore-operations/<operation-id>.json`; successful JSON output includes that journal and safety manifest.
+Media and torrent payloads are bind-mounted data and are never replaced by restore.
+
+Restore Drill execution remains planned under the next recovery ticket. The command currently validates and previews the
+Production-to-Staging exception, including its credential override, acquisition-disabled, and integration-gated intent, but
+does not mutate Staging. Production Profilarr state embeds Production-specific connections, so the eventual execution keeps
 Staging's Profilarr state and records Production Profilarr as an explicit drill exclusion.
 
 ## Command reference
@@ -636,7 +649,7 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
 | `media-stack apply --environment production|staging [--config path]` | Available through Jellyfin Movie and Series Library reconciliation | Uses the selected Environment's OpenVPN, Profilarr, and Jellyfin credentials without printing them; starts and reconciles qBittorrent, Radarr, Sonarr, Prowlarr, and Profilarr; then starts Jellyfin, bootstraps or authenticates its administrator, creates both libraries, and disables destructive deletion. An incomplete Profilarr connection still prints the exact UI checklist and exits `1`. |
 | `media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--now RFC3339] [--output human|json]` | Available | Stops only running services with mutable named volumes, archives each volume through a read-only Docker mount, resumes those services, independently verifies every checksum, atomically publishes the selected Environment manifest last, then expires unprotected archives according to `backupRetention`. Use `--protect` for an archive that retention must preserve and `--now` only to fix the clock for deterministic verification. |
-| `media-stack restore` | Planned | Will preview and safely restore compatible Environment state. It is not accepted by the current binary. |
+| `media-stack restore --environment production|staging --backup manifest.json [--config path] [--confirm] [--output human|json]` | Available for matching Environments | Validates complete compatible application-state coverage and checksums, prints the replacement preview before confirmation, then creates a protected safety backup, stages and verifies temporary volumes, replaces mutable state, restarts through Compose dependency handling, and records an operation journal. Omit `--confirm` to preview and cancel safely. Restore Drill execution remains planned. |
 | `media-stack verify --environment staging --suite full [--config path] [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, and recovery. Use it after `apply` in Staging; it is deliberately rejected for Production. |
 | `media-stack verify --environment staging --suite promotion --legal-fixture path [--config path] [--output human|json]` | Available through Movie Library playback proof | Runs the full VPN proof, registers the fixture movie in Radarr, grabs the exact Internet Archive release into qBittorrent, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported path, and requires direct-play readiness. Use only in a disposable Staging Environment. Verification Artifact behavior remains planned. |
 | `media-stack verify --environment staging --suite promotion --legal-series-fixture path [--config path] [--output human|json]` | Available through Series Library playback proof | Runs the full VPN proof, registers the fixture series and episode in Sonarr, grabs the exact Internet Archive release into qBittorrent, waits for Sonarr import, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported episode, and requires direct-play readiness. Supply both legal fixture flags to prove both libraries in one run. Use only in a disposable Staging Environment. |

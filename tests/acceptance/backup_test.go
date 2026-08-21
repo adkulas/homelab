@@ -470,6 +470,20 @@ func fakeDockerPath(t *testing.T, temporary string) string {
 set -eu
 printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
 case "$1" in
+	volume)
+		case "$2" in
+			create)
+				mkdir -p "$FAKE_DOCKER_FIXTURE_ROOT/$3"
+				printf '%s\n' "$3"
+				;;
+			rm)
+				for volume_name in "$@"; do
+					:
+				done
+				rm -rf -- "$FAKE_DOCKER_FIXTURE_ROOT/$volume_name"
+				;;
+		esac
+		;;
   compose)
     case " $* " in
       *" ps --status running --services "*)
@@ -489,6 +503,12 @@ case "$1" in
     exit 1
     ;;
   cp)
+	if [ "$2" = "-" ]; then
+		container="${3%%:*}"
+		mkdir -p "$FAKE_DOCKER_FIXTURE_ROOT/$container"
+		tar -C "$FAKE_DOCKER_FIXTURE_ROOT/$container" -xf -
+		exit 0
+	fi
     container="${2%%:*}"
     if [ "${FAKE_DOCKER_FAIL_CP:-}" = "$container" ]; then
       exit 42

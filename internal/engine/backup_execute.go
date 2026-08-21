@@ -193,8 +193,10 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 		}
 		return BackupReport{}, err
 	}
-	if err := applyPublishedBackupRetention(environment.BackupRoot, request.plan.environment, declared.Spec.Defaults.BackupRetention, generatedAt); err != nil {
-		return BackupReport{}, err
+	if !request.skipRetention {
+		if err := applyPublishedBackupRetention(environment.BackupRoot, request.plan.environment, declared.Spec.Defaults.BackupRetention, generatedAt); err != nil {
+			return BackupReport{}, err
+		}
 	}
 	return report, nil
 }
