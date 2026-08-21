@@ -18,6 +18,7 @@ func TestInitWizardExplainsAndCollectsSupportedOpenVPNChoices(t *testing.T) {
 	configuration = strings.Replace(configuration, "timezone: America/Toronto", `timezone: ""`, 1)
 	configuration = strings.Replace(configuration, "runtimeUID: 1000", "runtimeUID: 0", 1)
 	configuration = strings.Replace(configuration, "runtimeGID: 1000", "runtimeGID: 0", 1)
+	configuration = strings.ReplaceAll(configuration, "hardwareTranscoding: auto", `hardwareTranscoding: ""`)
 	writeFile(t, configPath, []byte(configuration), 0o640)
 	binDirectory := filepath.Join(temporary, "bin")
 	if err := os.Mkdir(binDirectory, 0o700); err != nil {
@@ -46,6 +47,7 @@ func TestInitWizardExplainsAndCollectsSupportedOpenVPNChoices(t *testing.T) {
 		"P2P",              // optional supported category
 		"",                 // default OpenVPN UDP
 		"",                 // default 480h catalogue update
+		"",                 // default automatic hardware detection
 		"age1interactive",  // age recipient
 		"service-user",     // Nord manual-setup username
 		"service-password", // Nord manual-setup password
@@ -68,6 +70,7 @@ func TestInitWizardExplainsAndCollectsSupportedOpenVPNChoices(t *testing.T) {
 		"Jellyfin administrator username",
 		"Jellyfin administrator password",
 		"OpenVPN protocol (udp or tcp) [udp]",
+		"Hardware transcoding (auto or disabled) [auto]",
 	} {
 		if !strings.Contains(humanOutput, guidance) {
 			t.Errorf("wizard output is missing %q:\n%s", guidance, humanOutput)
@@ -84,6 +87,9 @@ func TestInitWizardExplainsAndCollectsSupportedOpenVPNChoices(t *testing.T) {
 
 	var declared struct {
 		Spec struct {
+			Environments map[string]struct {
+				HardwareTranscoding string `yaml:"hardwareTranscoding"`
+			} `yaml:"environments"`
 			Defaults struct {
 				RuntimeUID int `yaml:"runtimeUID"`
 				RuntimeGID int `yaml:"runtimeGID"`
@@ -103,5 +109,8 @@ func TestInitWizardExplainsAndCollectsSupportedOpenVPNChoices(t *testing.T) {
 	}
 	if declared.Spec.Acquisition.VPN.OpenVPNProtocol != "udp" {
 		t.Errorf("default OpenVPN protocol = %q, want udp", declared.Spec.Acquisition.VPN.OpenVPNProtocol)
+	}
+	if got := declared.Spec.Environments["staging"].HardwareTranscoding; got != "auto" {
+		t.Errorf("default hardwareTranscoding = %q, want auto", got)
 	}
 }

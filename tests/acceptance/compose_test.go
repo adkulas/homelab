@@ -420,6 +420,7 @@ type composeService struct {
 	Environment   map[string]string                `json:"environment"`
 	CapAdd        []string                         `json:"cap_add"`
 	Devices       []composeDevice                  `json:"devices"`
+	GroupAdd      []string                         `json:"group_add"`
 	Logging       composeLogging                   `json:"logging"`
 	Restart       string                           `json:"restart"`
 	User          string                           `json:"user"`

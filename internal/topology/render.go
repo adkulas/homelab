@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/adkulas/homelab/internal/config"
+	"github.com/adkulas/homelab/internal/hardware"
 	"gopkg.in/yaml.v3"
 )
 
@@ -54,6 +55,7 @@ type composeService struct {
 	EnvFile     []composeEnvFile                 `yaml:"env_file,omitempty"`
 	CapAdd      []string                         `yaml:"cap_add,omitempty"`
 	Devices     []string                         `yaml:"devices,omitempty"`
+	GroupAdd    []string                         `yaml:"group_add,omitempty"`
 	Restart     string                           `yaml:"restart"`
 	Logging     composeLogging                   `yaml:"logging"`
 	NetworkMode string                           `yaml:"network_mode,omitempty"`
@@ -88,7 +90,7 @@ type composeSecret struct {
 	File string `yaml:"file"`
 }
 
-func Render(defaults config.Defaults, environment config.Environment, vpn config.VPN, images map[string]string, runtimeSecretDirectory string) ([]byte, error) {
+func Render(defaults config.Defaults, environment config.Environment, vpn config.VPN, images map[string]string, runtimeSecretDirectory string, transcoding hardware.Transcoding) ([]byte, error) {
 	if defaults.Timezone == "" {
 		return nil, fmt.Errorf("declared timezone is required")
 	}
@@ -137,6 +139,7 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 		var envFiles []composeEnvFile
 		var capabilities []string
 		var devices []string
+		var groups []string
 		networkMode := ""
 		networks := map[string]composeServiceNetwork{"application": {}}
 		var dependsOn map[string]composeDependency
@@ -167,6 +170,10 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 		if definition.name == "profilarr" {
 			envFiles = []composeEnvFile{{Path: filepath.Join(runtimeSecretDirectory, "profilarr.env"), Required: false}}
 		}
+		if definition.name == "jellyfin" && transcoding.Status == hardware.TranscodingSupported {
+			devices = []string{transcoding.RenderDevice + ":" + transcoding.RenderDevice}
+			groups = []string{strconv.Itoa(transcoding.GroupID)}
+		}
 		project.Services[definition.name] = composeService{
 			Image:       reference,
 			User:        user,
@@ -174,6 +181,7 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 			EnvFile:     envFiles,
 			CapAdd:      capabilities,
 			Devices:     devices,
+			GroupAdd:    groups,
 			Restart:     "unless-stopped",
 			Logging: composeLogging{
 				Driver: "json-file",

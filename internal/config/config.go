@@ -31,11 +31,25 @@ type Defaults struct {
 	LANBindAddress string `yaml:"lanBindAddress"`
 }
 
+// HardwareTranscodingPreference controls whether an Environment detects a hardware overlay.
+type HardwareTranscodingPreference string
+
+const (
+	HardwareTranscodingAuto     HardwareTranscodingPreference = "auto"
+	HardwareTranscodingDisabled HardwareTranscodingPreference = "disabled"
+)
+
+// Valid reports whether the preference is part of the declared configuration contract.
+func (preference HardwareTranscodingPreference) Valid() bool {
+	return preference == HardwareTranscodingAuto || preference == HardwareTranscodingDisabled
+}
+
 type Environment struct {
-	ProjectName string `yaml:"projectName"`
-	DataRoot    string `yaml:"dataRoot"`
-	SecretsFile string `yaml:"secretsFile"`
-	Ports       Ports  `yaml:"ports"`
+	ProjectName         string                        `yaml:"projectName"`
+	DataRoot            string                        `yaml:"dataRoot"`
+	SecretsFile         string                        `yaml:"secretsFile"`
+	HardwareTranscoding HardwareTranscodingPreference `yaml:"hardwareTranscoding"`
+	Ports               Ports                         `yaml:"ports"`
 }
 
 type Acquisition struct {
@@ -114,11 +128,23 @@ func Write(path string, declared MediaStack) error {
 }
 
 func (declared MediaStack) ValidateEnvironment(name string) error {
+	return declared.validateEnvironment(name, false)
+}
+
+func (declared MediaStack) ValidateInitializableEnvironment(name string) error {
+	return declared.validateEnvironment(name, true)
+}
+
+func (declared MediaStack) validateEnvironment(name string, allowMissingHardwarePreference bool) error {
 	if name != "production" && name != "staging" {
 		return fmt.Errorf("environment %q is not production or staging", name)
 	}
 	if _, exists := declared.Spec.Environments[name]; !exists {
 		return fmt.Errorf("environment %q is not declared", name)
+	}
+	preference := declared.Spec.Environments[name].HardwareTranscoding
+	if !preference.Valid() && !(allowMissingHardwarePreference && preference == "") {
+		return fmt.Errorf("environment %q hardwareTranscoding must be auto or disabled", name)
 	}
 	production, productionExists := declared.Spec.Environments["production"]
 	staging, stagingExists := declared.Spec.Environments["staging"]

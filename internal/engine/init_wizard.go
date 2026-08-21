@@ -22,7 +22,7 @@ func NewInteractiveInitRequest(workingDirectory, environment, configPath string,
 	if err != nil {
 		return InitRequest{}, err
 	}
-	if err := declared.ValidateEnvironment(environment); err != nil {
+	if err := declared.ValidateInitializableEnvironment(environment); err != nil {
 		return InitRequest{}, err
 	}
 	secretPath := declared.Spec.Environments[environment].SecretsFile
@@ -32,7 +32,7 @@ func NewInteractiveInitRequest(workingDirectory, environment, configPath string,
 	secretExists := false
 	if _, err := os.Stat(secretPath); err == nil {
 		secretExists = true
-		if initializationComplete(declared) {
+		if initializationComplete(declared, environment) {
 			request.answers = &initAnswers{}
 			return request, nil
 		}
@@ -41,7 +41,7 @@ func NewInteractiveInitRequest(workingDirectory, environment, configPath string,
 	}
 
 	reader := bufio.NewReader(input)
-	answers := answersFromDeclaredConfiguration(declared)
+	answers := answersFromDeclaredConfiguration(declared, environment)
 	identityChanged := false
 	if answers.RuntimeUID <= 0 {
 		answers.RuntimeUID, err = promptNumericIdentity(reader, output, "Runtime UID for intended operator", os.Getuid())
@@ -96,6 +96,13 @@ func NewInteractiveInitRequest(workingDirectory, environment, configPath string,
 			return InitRequest{}, err
 		}
 	}
+	if answers.HardwareTranscoding == "" {
+		preference, promptErr := promptDefault(reader, output, "Hardware transcoding (auto or disabled) [auto]: ", string(config.HardwareTranscodingAuto))
+		if promptErr != nil {
+			return InitRequest{}, promptErr
+		}
+		answers.HardwareTranscoding = config.HardwareTranscodingPreference(preference)
+	}
 	if !secretExists {
 		fmt.Fprintln(output, "Use the username and password from the Nord Account manual-setup area.")
 		fmt.Fprintln(output, "These are service credentials, not your Nord account email/password.")
@@ -130,7 +137,7 @@ func NewInteractiveInitRequest(workingDirectory, environment, configPath string,
 	return request, nil
 }
 
-func answersFromDeclaredConfiguration(declared config.MediaStack) initAnswers {
+func answersFromDeclaredConfiguration(declared config.MediaStack, environment string) initAnswers {
 	vpn := declared.Spec.Acquisition.VPN
 	answers := initAnswers{
 		RuntimeUID:              declared.Spec.Defaults.RuntimeUID,
@@ -138,6 +145,7 @@ func answersFromDeclaredConfiguration(declared config.MediaStack) initAnswers {
 		Timezone:                declared.Spec.Defaults.Timezone,
 		OpenVPNProtocol:         vpn.OpenVPNProtocol,
 		CatalogueUpdateInterval: vpn.CatalogueUpdateInterval,
+		HardwareTranscoding:     declared.Spec.Environments[environment].HardwareTranscoding,
 	}
 	if len(vpn.Server.Countries) == 1 {
 		answers.Country = vpn.Server.Countries[0]

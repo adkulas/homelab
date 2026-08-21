@@ -11,6 +11,7 @@ spec:
             projectName: media-production
             dataRoot: /srv/media/production
             secretsFile: secrets/production.sops.yaml
+            hardwareTranscoding: auto
             ports:
                 qbittorrent: 8080
                 prowlarr: 9696
@@ -23,6 +24,7 @@ spec:
             projectName: media-staging
             dataRoot: /srv/media/staging
             secretsFile: secrets/staging.sops.yaml
+            hardwareTranscoding: auto
             ports:
                 qbittorrent: 18080
                 prowlarr: 19696
