@@ -480,12 +480,20 @@ case "$1" in
 				for volume_name in "$@"; do
 					:
 				done
+				case "$volume_name" in
+					media-*)
+						[ -z "${FAKE_DOCKER_COMPOSE_DOWN_MARKER:-}" ] || [ -e "$FAKE_DOCKER_COMPOSE_DOWN_MARKER" ] || exit 43
+						;;
+				esac
 				rm -rf -- "$FAKE_DOCKER_FIXTURE_ROOT/$volume_name"
 				;;
 		esac
 		;;
   compose)
     case " $* " in
+	  *" down "*)
+		[ -z "${FAKE_DOCKER_COMPOSE_DOWN_MARKER:-}" ] || touch "$FAKE_DOCKER_COMPOSE_DOWN_MARKER"
+		;;
       *" ps --status running --services "*)
         printf '%s\n' gluetun qbittorrent prowlarr sonarr radarr profilarr jellyfin seerr
         ;;
@@ -505,6 +513,10 @@ case "$1" in
   cp)
 	if [ "$2" = "-" ]; then
 		container="${3%%:*}"
+		if [ "${FAKE_DOCKER_FAIL_RESTORE_VOLUME:-}" = "$container" ] && [ ! -e "${FAKE_DOCKER_FAIL_ONCE_MARKER:-/nonexistent}" ]; then
+			touch "$FAKE_DOCKER_FAIL_ONCE_MARKER"
+			exit 42
+		fi
 		mkdir -p "$FAKE_DOCKER_FIXTURE_ROOT/$container"
 		tar -C "$FAKE_DOCKER_FIXTURE_ROOT/$container" -xf -
 		exit 0

@@ -34,6 +34,7 @@ type RestoreReport struct {
 	AcquisitionDisabled  bool     `json:"acquisitionDisabled"`
 	IntegrationsGated    bool     `json:"integrationsGated"`
 	Services             []string `json:"services"`
+	PreviewPath          string   `json:"previewPath,omitempty"`
 	Completed            bool     `json:"completed"`
 	SafetyBackupPath     string   `json:"safetyBackupPath,omitempty"`
 	OperationJournalPath string   `json:"operationJournalPath,omitempty"`
@@ -131,6 +132,11 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 		IntegrationsGated:   request.asRestoreDrill,
 		Services:            serviceNames,
 	}
+	previewPath, err := prepareOrConfirmRestorePreview(environment.BackupRoot, backupFile, report, request.confirm)
+	if err != nil {
+		return RestoreReport{}, err
+	}
+	report.PreviewPath = previewPath
 	if !request.confirm {
 		return report, ErrRestoreConfirmationRequired
 	}

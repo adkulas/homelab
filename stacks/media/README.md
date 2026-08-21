@@ -624,13 +624,18 @@ omit it during ordinary operation.
 
 Ordinary restore only accepts a complete backup from the same Environment and Compose project. It verifies exact mutable
 service-volume coverage, immutable images, archive paths, sizes, and SHA-256 checksums before printing a replacement preview.
-Without `--confirm`, the preview is printed and the command exits without invoking Docker. After reviewing that output, rerun
-the same command with `--confirm`.
+Without `--confirm`, the preview is printed, persisted under `<backupRoot>/.restore-previews/`, and the command exits without
+invoking Docker. After reviewing that output, rerun the unchanged command with `--confirm`. Confirmation consumes the exact
+content-addressed preview; a direct `--confirm` or any changed manifest, Environment, project, or service inventory is rejected
+and must be previewed again.
 
 A confirmed restore first creates a protected `before-restore` safety backup without applying retention. It extracts each
-selected archive into a temporary Docker volume, independently compares the recovered file metadata and contents, stops the
-mutable services, reconstructs their canonical volumes, verifies them again, and starts the Compose project with dependency
-handling. Progress and the safety-backup path are atomically recorded under
+selected archive into a temporary Docker volume and independently compares the recovered file metadata and contents. It then
+removes the stopped Compose containers so Docker releases their named-volume references, reconstructs each canonical volume
+from its verified staging volume, verifies it again, and starts the Compose project with dependency handling. Services remain
+down throughout replacement, so partial state is never exposed through their public interfaces. Any replacement or startup
+failure rebuilds every canonical volume from the protected safety backup before services restart. Progress, rollback status,
+and the safety-backup path are atomically recorded under
 `<backupRoot>/.restore-operations/<operation-id>.json`; successful JSON output includes that journal and safety manifest.
 Media and torrent payloads are bind-mounted data and are never replaced by restore.
 
@@ -649,7 +654,7 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
 | `media-stack apply --environment production|staging [--config path]` | Available through Jellyfin Movie and Series Library reconciliation | Uses the selected Environment's OpenVPN, Profilarr, and Jellyfin credentials without printing them; starts and reconciles qBittorrent, Radarr, Sonarr, Prowlarr, and Profilarr; then starts Jellyfin, bootstraps or authenticates its administrator, creates both libraries, and disables destructive deletion. An incomplete Profilarr connection still prints the exact UI checklist and exits `1`. |
 | `media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--now RFC3339] [--output human|json]` | Available | Stops only running services with mutable named volumes, archives each volume through a read-only Docker mount, resumes those services, independently verifies every checksum, atomically publishes the selected Environment manifest last, then expires unprotected archives according to `backupRetention`. Use `--protect` for an archive that retention must preserve and `--now` only to fix the clock for deterministic verification. |
-| `media-stack restore --environment production|staging --backup manifest.json [--config path] [--confirm] [--output human|json]` | Available for matching Environments | Validates complete compatible application-state coverage and checksums, prints the replacement preview before confirmation, then creates a protected safety backup, stages and verifies temporary volumes, replaces mutable state, restarts through Compose dependency handling, and records an operation journal. Omit `--confirm` to preview and cancel safely. Restore Drill execution remains planned. |
+| `media-stack restore --environment production|staging --backup manifest.json [--config path] [--confirm] [--output human|json]` | Available for matching Environments | Validates complete compatible application-state coverage and checksums and persists the exact preview. Rerun unchanged with `--confirm` to create a protected safety backup, stage and verify temporary volumes, transactionally replace mutable state, restart through Compose dependency handling, and record an operation journal; failures roll back before services restart. Restore Drill execution remains planned. |
 | `media-stack verify --environment staging --suite full [--config path] [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, and recovery. Use it after `apply` in Staging; it is deliberately rejected for Production. |
 | `media-stack verify --environment staging --suite promotion --legal-fixture path [--config path] [--output human|json]` | Available through Movie Library playback proof | Runs the full VPN proof, registers the fixture movie in Radarr, grabs the exact Internet Archive release into qBittorrent, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported path, and requires direct-play readiness. Use only in a disposable Staging Environment. Verification Artifact behavior remains planned. |
 | `media-stack verify --environment staging --suite promotion --legal-series-fixture path [--config path] [--output human|json]` | Available through Series Library playback proof | Runs the full VPN proof, registers the fixture series and episode in Sonarr, grabs the exact Internet Archive release into qBittorrent, waits for Sonarr import, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported episode, and requires direct-play readiness. Supply both legal fixture flags to prove both libraries in one run. Use only in a disposable Staging Environment. |

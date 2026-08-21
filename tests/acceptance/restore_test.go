@@ -97,6 +97,23 @@ func TestRestorePreviewsReplacementBeforeCancellation(t *testing.T) {
 	}
 }
 
+func TestRestoreRejectsConfirmationWithoutAnUnchangedPreview(t *testing.T) {
+	temporary := t.TempDir()
+	configPath, manifestPath, fixtureRoot := createRestorableBackup(t, temporary, "staging")
+	command := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath, "--confirm")
+	command.Env = restoreEnvironment(t, temporary, fixtureRoot)
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("media-stack restore bypassed preview-before-confirmation:\n%s", output)
+	}
+	if !strings.Contains(string(output), "run restore without --confirm first") {
+		t.Fatalf("restore preview prerequisite error = %s", output)
+	}
+	if _, err := os.Stat(filepath.Join(temporary, "restore-docker.log")); err == nil {
+		t.Fatalf("unpreviewed restore invoked Docker")
+	}
+}
+
 func TestRestoreReplacesMutableStateAndRecordsRecoveryOperation(t *testing.T) {
 	temporary := t.TempDir()
 	configPath, manifestPath, fixtureRoot := createRestorableBackup(t, temporary, "staging")
@@ -107,6 +124,14 @@ func TestRestoreReplacesMutableStateAndRecordsRecoveryOperation(t *testing.T) {
 		}
 	}
 
+	preview := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath, "--output", "json")
+	preview.Env = restoreEnvironment(t, temporary, fixtureRoot)
+	if output, err := preview.CombinedOutput(); err == nil || !strings.Contains(string(output), "restore requires --confirm") {
+		t.Fatalf("media-stack restore did not produce the required preview:\n%s", output)
+	}
+	if err := os.Remove(filepath.Join(temporary, "restore-docker.log")); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("reset restore Docker log: %v", err)
+	}
 	command := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath, "--confirm", "--output", "json")
 	command.Env = restoreEnvironment(t, temporary, fixtureRoot)
 	output, err := command.CombinedOutput()
@@ -148,9 +173,60 @@ func TestRestoreReplacesMutableStateAndRecordsRecoveryOperation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read restore Docker calls: %v", err)
 	}
-	for _, want := range []string{"compose", "stop", "volume create", "volume rm", "up -d"} {
+	for _, want := range []string{"compose", "down", "volume create", "volume rm", "up -d"} {
 		if !strings.Contains(string(dockerCalls), want) {
 			t.Fatalf("restore Docker calls omit %q:\n%s", want, dockerCalls)
+		}
+	}
+}
+
+func TestRestoreRollsBackPartialReplacementFromSafetyBackup(t *testing.T) {
+	temporary := t.TempDir()
+	configPath, manifestPath, fixtureRoot := createRestorableBackup(t, temporary, "staging")
+	for _, serviceName := range backupFixtureServiceNames {
+		path := filepath.Join(fixtureRoot, "media-staging_"+serviceName+"-config", "identity.txt")
+		if err := os.WriteFile(path, []byte("pre-restore-"+serviceName+"\n"), 0o600); err != nil {
+			t.Fatalf("write pre-restore %s state: %v", serviceName, err)
+		}
+	}
+	preview := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath)
+	preview.Env = restoreEnvironment(t, temporary, fixtureRoot)
+	if output, err := preview.CombinedOutput(); err == nil || !strings.Contains(string(output), "restore requires --confirm") {
+		t.Fatalf("media-stack restore did not produce rollback test preview:\n%s", output)
+	}
+
+	marker := filepath.Join(temporary, "restore-failed-once")
+	command := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath, "--confirm")
+	command.Env = append(restoreEnvironment(t, temporary, fixtureRoot),
+		"FAKE_DOCKER_FAIL_RESTORE_VOLUME=media-staging_radarr-config",
+		"FAKE_DOCKER_FAIL_ONCE_MARKER="+marker,
+	)
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("media-stack restore unexpectedly hid replacement failure:\n%s", output)
+	}
+	if !strings.Contains(string(output), "replace radarr mutable volume") {
+		t.Fatalf("restore replacement error = %s", output)
+	}
+	journals, err := filepath.Glob(filepath.Join(temporary, "backups", "staging", ".restore-operations", "*.json"))
+	if err != nil || len(journals) != 1 {
+		t.Fatalf("restore journals = %#v (%v)", journals, err)
+	}
+	journal, err := os.ReadFile(journals[0])
+	if err != nil {
+		t.Fatalf("read rollback journal: %v", err)
+	}
+	if !strings.Contains(string(journal), `"status": "rolled-back"`) {
+		t.Fatalf("restore did not record successful rollback: %s", journal)
+	}
+	for _, serviceName := range backupFixtureServiceNames {
+		path := filepath.Join(fixtureRoot, "media-staging_"+serviceName+"-config", "identity.txt")
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read rolled-back %s state: %v", serviceName, err)
+		}
+		if string(contents) != "pre-restore-"+serviceName+"\n" {
+			t.Fatalf("rolled-back %s state = %q", serviceName, contents)
 		}
 	}
 }
@@ -189,6 +265,11 @@ func TestRestoreDrillPreviewsProductionIntoStagingIsolation(t *testing.T) {
 	credentialsPath := filepath.Join(temporary, "staging-drill.sops.yaml")
 	if err := os.WriteFile(credentialsPath, []byte("credentials: rotated\n"), 0o600); err != nil {
 		t.Fatalf("write drill credentials: %v", err)
+	}
+	preview := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", backupPath, "--as-restore-drill", "--credentials", credentialsPath)
+	preview.Env = restoreEnvironment(t, temporary, fixtureRoot)
+	if output, err := preview.CombinedOutput(); err == nil || !strings.Contains(string(output), "restore requires --confirm") {
+		t.Fatalf("media-stack restore drill did not produce the required preview:\n%s", output)
 	}
 	command := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", backupPath, "--confirm", "--as-restore-drill", "--credentials", credentialsPath, "--output", "json")
 	command.Env = restoreEnvironment(t, temporary, fixtureRoot)
@@ -251,5 +332,6 @@ func restoreEnvironment(t *testing.T, temporary, fixtureRoot string) []string {
 		"PATH="+fakeDockerPath(t, temporary)+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"FAKE_DOCKER_FIXTURE_ROOT="+fixtureRoot,
 		"FAKE_DOCKER_LOG="+filepath.Join(temporary, "restore-docker.log"),
+		"FAKE_DOCKER_COMPOSE_DOWN_MARKER="+filepath.Join(temporary, "compose-down"),
 	)
 }
