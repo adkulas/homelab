@@ -32,10 +32,11 @@ type Defaults struct {
 }
 
 type Environment struct {
-	ProjectName string `yaml:"projectName"`
-	DataRoot    string `yaml:"dataRoot"`
-	SecretsFile string `yaml:"secretsFile"`
-	Ports       Ports  `yaml:"ports"`
+	ProjectName         string `yaml:"projectName"`
+	DataRoot            string `yaml:"dataRoot"`
+	SecretsFile         string `yaml:"secretsFile"`
+	HardwareTranscoding string `yaml:"hardwareTranscoding"`
+	Ports               Ports  `yaml:"ports"`
 }
 
 type Acquisition struct {
@@ -119,6 +120,10 @@ func (declared MediaStack) ValidateEnvironment(name string) error {
 	}
 	if _, exists := declared.Spec.Environments[name]; !exists {
 		return fmt.Errorf("environment %q is not declared", name)
+	}
+	preference := declared.Spec.Environments[name].HardwareTranscoding
+	if preference != "auto" && preference != "disabled" {
+		return fmt.Errorf("environment %q hardwareTranscoding must be auto or disabled", name)
 	}
 	production, productionExists := declared.Spec.Environments["production"]
 	staging, stagingExists := declared.Spec.Environments["staging"]

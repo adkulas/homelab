@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/adkulas/homelab/internal/config"
+	"github.com/adkulas/homelab/internal/hardware"
 	"github.com/adkulas/homelab/internal/topology"
 )
 
@@ -84,12 +85,17 @@ func (localEngine) Plan(ctx context.Context, request PlanRequest) (Plan, error) 
 		return Plan{}, err
 	}
 	environment := declared.Spec.Environments[request.environment]
+	transcoding := hardware.Transcoding{}
+	if environment.HardwareTranscoding == "auto" {
+		transcoding = hardware.DetectTranscoding()
+	}
 	compose, err := topology.Render(
 		declared.Spec.Defaults,
 		environment,
 		declared.Spec.Acquisition.VPN,
 		versions.Images,
 		runtimeSecretDirectory(environment.ProjectName),
+		transcoding,
 	)
 	if err != nil {
 		return Plan{}, err

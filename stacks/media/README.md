@@ -163,7 +163,29 @@ does not start the stack.
 
 The current `plan` implementation validates Declared Configuration and pinned images, then writes the selected Environment
 Compose model to standard output. It is useful for reviewing project scoping, ports, runtime identity, mounts, secrets,
-restart policy, and bounded logging. It does not yet observe applications, create a saved Plan Artifact, or mutate the host.
+restart policy, bounded logging, and optional hardware transcoding. An Environment with `hardwareTranscoding: auto` receives
+the `/dev/dri/renderD128` Jellyfin device mapping and the host render device's numeric group ID when that Linux DRM render
+node is available. Set `hardwareTranscoding: disabled` to retain the portable base topology even on a supported host.
+Unsupported hosts also retain the portable topology without a device mapping or supplemental group.
+
+Validate hardware acceleration on the actual target host after applying the rendered topology:
+
+```bash
+test -c /dev/dri/renderD128
+media-stack plan --environment staging > staging-compose.yaml
+docker compose -f staging-compose.yaml config --quiet
+media-stack apply --environment staging
+docker compose -f staging-compose.yaml exec jellyfin \
+  /usr/lib/jellyfin-ffmpeg/vainfo --display drm --device /dev/dri/renderD128
+```
+
+The `vainfo` command must list the host's supported codec profiles without a device or permission error. In Jellyfin's
+Dashboard, open **Playback > Transcoding**, select VA-API with `/dev/dri/renderD128`, and enable only profiles reported by
+`vainfo`. Finally, force a transcode from a client by selecting a lower playback quality; the active session must report
+transcoding and its FFmpeg log must show the VA-API device. This live check is required because schema-valid Compose proves
+the device contract, but only the target GPU, kernel, and driver can prove codec execution.
+
+`plan` does not yet observe applications, create a saved Plan Artifact, or mutate the host.
 Shell redirection is used above because `--out` is not implemented yet.
 
 ### 4. Start VPN-confined qBittorrent and prepare library discovery
