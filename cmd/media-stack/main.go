@@ -168,14 +168,14 @@ func runBackup(ctx context.Context, arguments []string) error {
 	}
 	report, err := engine.New().Backup(ctx, request)
 	if err != nil {
-		return err
+		return operationalFailure{cause: err}
 	}
 	if *output == "json" {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetEscapeHTML(false)
 		return encoder.Encode(report)
 	}
-	fmt.Fprintf(os.Stdout, "Prepared %s backup manifest covering %d mutable service volumes in the %s Environment.\n", report.ProjectName, len(report.Services), report.Environment)
+	fmt.Fprintf(os.Stdout, "Created verified %s backup at %s covering %d mutable service volumes in the %s Environment.\n", report.ProjectName, report.ManifestPath, len(report.Services), report.Environment)
 	return nil
 }
 

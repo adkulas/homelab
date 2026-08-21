@@ -48,6 +48,7 @@ type Environment struct {
 	ProjectName         string                        `yaml:"projectName"`
 	DataRoot            string                        `yaml:"dataRoot"`
 	SecretsFile         string                        `yaml:"secretsFile"`
+	BackupRoot          string                        `yaml:"backupRoot,omitempty"`
 	HardwareTranscoding HardwareTranscodingPreference `yaml:"hardwareTranscoding"`
 	Ports               Ports                         `yaml:"ports"`
 }
@@ -162,12 +163,42 @@ func (declared MediaStack) validateEnvironment(name string, allowMissingHardware
 	return nil
 }
 
+func (declared MediaStack) ValidateBackupEnvironment(name string) error {
+	if err := declared.ValidateEnvironment(name); err != nil {
+		return err
+	}
+	production := declared.Spec.Environments["production"]
+	staging := declared.Spec.Environments["staging"]
+	if !filepath.IsAbs(production.BackupRoot) || !filepath.IsAbs(staging.BackupRoot) {
+		return fmt.Errorf("Production and Staging backup roots must be absolute")
+	}
+	productionRoot := filepath.Clean(production.BackupRoot)
+	stagingRoot := filepath.Clean(staging.BackupRoot)
+	if pathContains(productionRoot, stagingRoot) || pathContains(stagingRoot, productionRoot) {
+		return fmt.Errorf("Production and Staging backup roots must not overlap: %q and %q", productionRoot, stagingRoot)
+	}
+	dataRoots := []string{filepath.Clean(production.DataRoot), filepath.Clean(staging.DataRoot)}
+	backupRoots := []string{productionRoot, stagingRoot}
+	for _, dataRoot := range dataRoots {
+		for _, backupRoot := range backupRoots {
+			if pathsOverlap(dataRoot, backupRoot) {
+				return fmt.Errorf("backup roots must not overlap Production or Staging data roots: %q and %q", backupRoot, dataRoot)
+			}
+		}
+	}
+	return nil
+}
+
 func pathContains(parent, candidate string) bool {
 	relative, err := filepath.Rel(parent, candidate)
 	if err != nil {
 		return false
 	}
 	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
+}
+
+func pathsOverlap(first, second string) bool {
+	return pathContains(first, second) || pathContains(second, first)
 }
 
 func LoadVersions(path string) (Versions, error) {
