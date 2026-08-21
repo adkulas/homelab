@@ -220,16 +220,24 @@ func runRestore(ctx context.Context, arguments []string) error {
 		return err
 	}
 	report, err := engine.New().Restore(ctx, request)
-	if err != nil {
-		return operationalFailure{cause: err}
-	}
-	if *output == "json" {
+	writeReport := func() error {
+		if *output != "json" {
+			fmt.Fprintln(os.Stdout, report.HumanSummary())
+			return nil
+		}
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetEscapeHTML(false)
 		return encoder.Encode(report)
 	}
-	fmt.Fprintln(os.Stdout, report.Preview)
-	return nil
+	if errors.Is(err, engine.ErrRestoreConfirmationRequired) {
+		if writeErr := writeReport(); writeErr != nil {
+			return writeErr
+		}
+	}
+	if err != nil {
+		return operationalFailure{cause: err}
+	}
+	return writeReport()
 }
 
 func runTest(arguments []string) error {

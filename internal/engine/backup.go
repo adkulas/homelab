@@ -14,10 +14,11 @@ import (
 const backupSchemaVersion = "homelab.media-stack/backup/v1alpha1"
 
 type BackupRequest struct {
-	plan        PlanRequest
-	label       string
-	protect     bool
-	generatedAt time.Time
+	plan          PlanRequest
+	label         string
+	protect       bool
+	generatedAt   time.Time
+	skipRetention bool
 }
 
 type BackupArchive struct {
