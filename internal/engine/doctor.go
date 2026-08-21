@@ -85,6 +85,7 @@ func (localEngine) Doctor(ctx context.Context, request DoctorRequest) (DoctorRep
 	add("DEPENDENCY_COMPOSE_UNAVAILABLE", "Docker Compose", "Install or enable the Docker Compose v2 plugin.", runQuiet(ctx, "docker", "compose", "version"))
 	add("DEPENDENCY_SOPS_UNAVAILABLE", "SOPS", "Install SOPS and ensure it is on PATH.", runQuiet(ctx, "sops", "--version"))
 	add("DEPENDENCY_AGE_UNAVAILABLE", "age", "Install age and ensure it is on PATH.", runQuiet(ctx, "age", "--version"))
+	report.Diagnostics = append(report.Diagnostics, doctorHardwareTranscodingDiagnostic(ctx, request.environment, environment.HardwareTranscoding, versions.Images["jellyfin"]))
 	add("SECRET_DECRYPT_FAILED", "selected Environment secret decryption", "Install the matching age identity and verify the SOPS document can be decrypted.", runQuiet(ctx, "sops", "decrypt", "--output-type", "yaml", secretPath))
 	image := versions.Images["gluetun"]
 	add("PREFLIGHT_TUN_UNAVAILABLE", "/dev/net/tun in the pinned Gluetun image", "Enable the TUN device for Docker and rerun doctor.", runDockerProbeQuiet(ctx, "--device", "/dev/net/tun", "--entrypoint", "/bin/sh", image, "-c", "test -c /dev/net/tun"))

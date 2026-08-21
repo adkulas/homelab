@@ -111,7 +111,7 @@ go build -o bin/media-stack ./cmd/media-stack
 That local build path is the simplest way to start a fresh implementation from the current repository state.
 
 If you prefer the pinned release launcher, `setup.sh` downloads the pinned `media-stack` Linux binary for amd64 or arm64, verifies its SHA-256 checksum, caches it, and runs `media-stack init`. `init` currently prompts for the runtime UID/GID, timezone, NordVPN country, optional P2P category,
-OpenVPN UDP or TCP, Gluetun catalogue interval, age recipient, and NordVPN service credentials. Non-interactive automation can
+OpenVPN UDP or TCP, Gluetun catalogue interval, hardware transcoding preference, age recipient, and NordVPN service credentials. Non-interactive automation can
 supply the same answers explicitly:
 
 ```bash
@@ -153,8 +153,9 @@ docker compose -f staging-compose.yaml config --quiet
 ```
 
 `doctor` checks the supported Linux/WSL platform, Docker Engine, Compose, SOPS, age, decryption of the selected Environment
-secret, `/dev/net/tun`, `NET_ADMIN`, and whether the pinned Gluetun catalogue accepts the declared NordVPN filters. It also
-runs disposable probes from the pinned qBittorrent, Radarr, and Sonarr images as the declared runtime UID/GID, using their
+secret, `/dev/net/tun`, `NET_ADMIN`, and whether the pinned Gluetun catalogue accepts the declared NordVPN filters. For
+`hardwareTranscoding: auto`, it reports a missing render node as an optional skip and uses the pinned Jellyfin image to
+prove that a detected node is usable; invalid devices or container access fail with a remedy. A disabled preference is reported as an explicit skip. Doctor also runs disposable probes from the pinned qBittorrent, Radarr, and Sonarr images as the declared runtime UID/GID, using their
 actual `/data/torrents` or `/data` bind-mount shapes. Those probes verify write permission, same-device layout, hardlink
 creation and inode identity, atomic rename, filesystem events, and cleanup. Human output explains each result; JSON provides
 stable diagnostic records and remedies for automation. Each disposable Docker probe has a two-minute deadline and disables
@@ -172,6 +173,7 @@ Validate hardware acceleration on the actual target host after applying the rend
 
 ```bash
 test -c /dev/dri/renderD128
+media-stack doctor --environment staging
 media-stack plan --environment staging > staging-compose.yaml
 docker compose -f staging-compose.yaml config --quiet
 media-stack apply --environment staging
@@ -447,6 +449,7 @@ from silently becoming ineffective configuration.
 | `spec.environments.<name>.projectName` | `plan`, `apply` | Compose project name; scopes networks, runtime secret paths, and config volumes independently for Production and Staging. |
 | `spec.environments.<name>.dataRoot` | `init`, `plan` | Absolute host root provisioned by `init`; mounted as the selected Environment `/data` seam. The other Environment root is never rendered. |
 | `spec.environments.<name>.secretsFile` | `init`, `doctor`, `apply`, Promotion verification | Environment-specific SOPS document written by `init`; `doctor` proves it can be decrypted, `apply` uses its OpenVPN, Profilarr, and Jellyfin credentials while materializing only runtime values required by containers, and Promotion verification authenticates to Jellyfin. `plan` never decrypts it. |
+| `spec.environments.<name>.hardwareTranscoding` | `init`, `doctor`, `plan` | Must be `auto` or `disabled`. `auto` detects and validates `/dev/dri/renderD128`; supported hosts add the Jellyfin device and numeric render group, while missing hardware keeps the portable topology. `disabled` always keeps the portable topology. |
 | `spec.environments.<name>.ports.qbittorrent` | `plan` | Host port published on Gluetun for the qBittorrent Web UI target `8080`; qBittorrent has no direct published port. |
 | `spec.environments.<name>.ports.prowlarr` | `plan` | Host port for Prowlarr target `9696`. |
 | `spec.environments.<name>.ports.sonarr` | `plan` | Host port for Sonarr target `8989`. |

@@ -33,6 +33,7 @@ type initAnswers struct {
 	ServerCategory          string `yaml:"serverCategory"`
 	OpenVPNProtocol         string `yaml:"openvpnProtocol"`
 	CatalogueUpdateInterval string `yaml:"catalogueUpdateInterval"`
+	HardwareTranscoding     string `yaml:"hardwareTranscoding"`
 	AgeRecipient            string `yaml:"ageRecipient"`
 	ServiceUsername         string `yaml:"serviceUsername"`
 	ServicePassword         string `yaml:"servicePassword"`
@@ -71,10 +72,10 @@ func (localEngine) Init(ctx context.Context, request InitRequest) (InitReport, e
 	if err != nil {
 		return InitReport{}, err
 	}
-	if err := declared.ValidateEnvironment(request.environment); err != nil {
+	if err := declared.ValidateInitializableEnvironment(request.environment); err != nil {
 		return InitReport{}, err
 	}
-	configurationAlreadyComplete := initializationComplete(declared)
+	configurationAlreadyComplete := initializationComplete(declared, request.environment)
 
 	environment := declared.Spec.Environments[request.environment]
 	secretsPath := environment.SecretsFile
@@ -101,6 +102,9 @@ func (localEngine) Init(ctx context.Context, request InitRequest) (InitReport, e
 		if err != nil {
 			return InitReport{}, err
 		}
+	}
+	if answers.HardwareTranscoding == "" {
+		answers.HardwareTranscoding = environment.HardwareTranscoding
 	}
 	if err := validateInitAnswers(answers, !secretExists); err != nil {
 		return InitReport{}, err
@@ -130,6 +134,8 @@ func (localEngine) Init(ctx context.Context, request InitRequest) (InitReport, e
 	if answers.ServerCategory != "" {
 		declared.Spec.Acquisition.VPN.Server.Categories = []string{answers.ServerCategory}
 	}
+	environment.HardwareTranscoding = answers.HardwareTranscoding
+	declared.Spec.Environments[request.environment] = environment
 	if err := config.Write(request.configPath, declared); err != nil {
 		return InitReport{}, err
 	}
@@ -172,6 +178,9 @@ func validateInitAnswers(answers initAnswers, requireSecrets bool) error {
 	}
 	if answers.OpenVPNProtocol != "udp" && answers.OpenVPNProtocol != "tcp" {
 		return fmt.Errorf("openvpnProtocol must be udp or tcp")
+	}
+	if answers.HardwareTranscoding != "auto" && answers.HardwareTranscoding != "disabled" {
+		return fmt.Errorf("hardwareTranscoding must be auto or disabled")
 	}
 	interval, err := time.ParseDuration(answers.CatalogueUpdateInterval)
 	if err != nil || interval < 360*time.Hour {

@@ -17,25 +17,28 @@ func TestDetectTranscodingFixtures(t *testing.T) {
 			lookup: func(string) (renderDevice, error) {
 				return renderDevice{mode: fs.ModeDevice | fs.ModeCharDevice, groupID: 109}, nil
 			},
-			want: Transcoding{RenderDevice: defaultRenderDevice, GroupID: 109},
+			want: Transcoding{Status: StatusSupported, RenderDevice: defaultRenderDevice, GroupID: 109},
 		},
 		{
 			name: "missing render device",
 			lookup: func(string) (renderDevice, error) {
 				return renderDevice{}, fs.ErrNotExist
 			},
+			want: Transcoding{Status: StatusMissing},
 		},
 		{
 			name: "path is not a character device",
 			lookup: func(string) (renderDevice, error) {
 				return renderDevice{mode: 0o644, groupID: 109}, nil
 			},
+			want: Transcoding{Status: StatusUnusable},
 		},
 		{
 			name: "device metadata cannot be read",
 			lookup: func(string) (renderDevice, error) {
 				return renderDevice{}, errors.New("permission denied")
 			},
+			want: Transcoding{Status: StatusUnusable},
 		},
 	}
 

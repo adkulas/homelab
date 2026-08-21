@@ -6,10 +6,13 @@ import (
 	"github.com/adkulas/homelab/internal/config"
 )
 
-func initializationComplete(declared config.MediaStack) bool {
+func initializationComplete(declared config.MediaStack, environmentName string) bool {
 	defaults := declared.Spec.Defaults
 	vpn := declared.Spec.Acquisition.VPN
 	if defaults.RuntimeUID <= 0 || defaults.RuntimeGID <= 0 || defaults.Timezone == "" {
+		return false
+	}
+	if declared.Spec.Environments[environmentName].HardwareTranscoding == "" {
 		return false
 	}
 	if _, err := time.LoadLocation(defaults.Timezone); err != nil {

@@ -115,6 +115,14 @@ func Write(path string, declared MediaStack) error {
 }
 
 func (declared MediaStack) ValidateEnvironment(name string) error {
+	return declared.validateEnvironment(name, false)
+}
+
+func (declared MediaStack) ValidateInitializableEnvironment(name string) error {
+	return declared.validateEnvironment(name, true)
+}
+
+func (declared MediaStack) validateEnvironment(name string, allowMissingHardwarePreference bool) error {
 	if name != "production" && name != "staging" {
 		return fmt.Errorf("environment %q is not production or staging", name)
 	}
@@ -122,7 +130,7 @@ func (declared MediaStack) ValidateEnvironment(name string) error {
 		return fmt.Errorf("environment %q is not declared", name)
 	}
 	preference := declared.Spec.Environments[name].HardwareTranscoding
-	if preference != "auto" && preference != "disabled" {
+	if preference != "auto" && preference != "disabled" && !(allowMissingHardwarePreference && preference == "") {
 		return fmt.Errorf("environment %q hardwareTranscoding must be auto or disabled", name)
 	}
 	production, productionExists := declared.Spec.Environments["production"]
