@@ -264,6 +264,7 @@ func runApply(ctx context.Context, arguments []string) error {
 		return operationalFailure{cause: err}
 	}
 	fmt.Fprintf(os.Stdout, "Applied the pinned Movie Library policy through Profilarr in the %s Environment.\n", report.Environment)
+	fmt.Fprintf(os.Stdout, "Applied the pinned Series Library policy through Profilarr in the %s Environment.\n", report.Environment)
 	return nil
 }
 

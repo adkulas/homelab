@@ -133,18 +133,6 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if _, err := sonarrClient.ReconcileSeriesLibrary(ctx, password); err != nil {
 		return ApplyReport{}, fmt.Errorf("reconcile Sonarr Series Library: %w", err)
 	}
-	profilarrAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Profilarr)
-	if err := sonarrClient.VerifySeriesPolicy(ctx, seriesPolicy); err != nil {
-		return ApplyReport{}, fmt.Errorf("manual action required: open %s, link %s at pinned revision %s, select the %q quality profile, %q naming preset, Series quality definitions, and %q media-management preset for Sonarr, run sync, then rerun media-stack apply: %w",
-			"http://"+profilarrAddress,
-			seriesPolicy.Source.Repository,
-			seriesPolicy.Source.Revision,
-			seriesPolicy.Profile.Name,
-			seriesPolicy.Naming.Preset,
-			seriesPolicy.MediaManagement.Preset,
-			err,
-		)
-	}
 	if output, err := runDockerCompose(ctx, plan, "up", "-d", "prowlarr"); err != nil {
 		return ApplyReport{}, fmt.Errorf("start Prowlarr: %w: %s", err, redactCredentials(output, credentials))
 	}
@@ -160,6 +148,7 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if _, err := prowlarrClient.ReconcileLibraryDiscovery(ctx, apiKey, sonarrAPIKey); err != nil {
 		return ApplyReport{}, fmt.Errorf("reconcile Prowlarr library discovery: %w", err)
 	}
+	profilarrAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Profilarr)
 	if output, err := runDockerCompose(ctx, plan, "up", "-d", "profilarr"); err != nil {
 		return ApplyReport{}, fmt.Errorf("start Profilarr: %w: %s", err, redactCredentials(output, credentials))
 	}
@@ -174,6 +163,17 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 			moviePolicy.Profile.Name,
 			moviePolicy.Naming.Preset,
 			moviePolicy.MediaManagement.Preset,
+			err,
+		)
+	}
+	if err := sonarrClient.VerifySeriesPolicy(ctx, seriesPolicy); err != nil {
+		return ApplyReport{}, fmt.Errorf("manual action required: open %s, link %s at pinned revision %s, select the %q quality profile, %q naming preset, Series quality definitions, and %q media-management preset for Sonarr, run sync, then rerun media-stack apply: %w",
+			"http://"+profilarrAddress,
+			seriesPolicy.Source.Repository,
+			seriesPolicy.Source.Revision,
+			seriesPolicy.Profile.Name,
+			seriesPolicy.Naming.Preset,
+			seriesPolicy.MediaManagement.Preset,
 			err,
 		)
 	}
