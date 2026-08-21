@@ -10,6 +10,7 @@ spec:
         production:
             projectName: media-production
             dataRoot: /srv/media/production
+            backupRoot: /mnt/backups/media/production
             secretsFile: secrets/production.sops.yaml
             hardwareTranscoding: auto
             ports:
@@ -23,6 +24,7 @@ spec:
         staging:
             projectName: media-staging
             dataRoot: /srv/media/staging
+            backupRoot: /mnt/backups/media/staging
             secretsFile: secrets/staging.sops.yaml
             hardwareTranscoding: auto
             ports:

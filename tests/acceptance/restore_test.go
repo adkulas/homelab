@@ -96,13 +96,8 @@ func restoreCommand(t *testing.T, arguments ...string) *exec.Cmd {
 
 func writeBackupManifest(t *testing.T, environment string) string {
 	t.Helper()
-	command := backupCommand(t, "--environment", environment, "--output", "json")
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("prepare backup manifest: %v\n%s", err, output)
-	}
 	path := filepath.Join(t.TempDir(), "backup.json")
-	if err := os.WriteFile(path, output, 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"schemaVersion":"homelab.media-stack/backup/v1alpha1","environment":"`+environment+`","services":[]}`), 0o600); err != nil {
 		t.Fatalf("write backup manifest: %v", err)
 	}
 	return path

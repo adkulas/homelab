@@ -48,6 +48,7 @@ type Environment struct {
 	ProjectName         string                        `yaml:"projectName"`
 	DataRoot            string                        `yaml:"dataRoot"`
 	SecretsFile         string                        `yaml:"secretsFile"`
+	BackupRoot          string                        `yaml:"backupRoot,omitempty"`
 	HardwareTranscoding HardwareTranscodingPreference `yaml:"hardwareTranscoding"`
 	Ports               Ports                         `yaml:"ports"`
 }
@@ -158,6 +159,26 @@ func (declared MediaStack) validateEnvironment(name string, allowMissingHardware
 	stagingRoot := filepath.Clean(staging.DataRoot)
 	if pathContains(productionRoot, stagingRoot) || pathContains(stagingRoot, productionRoot) {
 		return fmt.Errorf("Production and Staging data roots must not overlap: %q and %q", productionRoot, stagingRoot)
+	}
+	return nil
+}
+
+func (declared MediaStack) ValidateBackupEnvironment(name string) error {
+	if err := declared.ValidateEnvironment(name); err != nil {
+		return err
+	}
+	production := declared.Spec.Environments["production"]
+	staging := declared.Spec.Environments["staging"]
+	if !filepath.IsAbs(production.BackupRoot) || !filepath.IsAbs(staging.BackupRoot) {
+		return fmt.Errorf("Production and Staging backup roots must be absolute")
+	}
+	productionRoot := filepath.Clean(production.BackupRoot)
+	stagingRoot := filepath.Clean(staging.BackupRoot)
+	if pathContains(productionRoot, stagingRoot) || pathContains(stagingRoot, productionRoot) {
+		return fmt.Errorf("Production and Staging backup roots must not overlap: %q and %q", productionRoot, stagingRoot)
+	}
+	if pathContains(filepath.Clean(production.DataRoot), productionRoot) || pathContains(filepath.Clean(staging.DataRoot), stagingRoot) {
+		return fmt.Errorf("backup roots must be outside their Environment data roots")
 	}
 	return nil
 }

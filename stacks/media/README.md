@@ -7,8 +7,8 @@ independent Production and Staging Environments so changes can be proven before 
 > [!IMPORTANT]
 > This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, the
 > VPN-confined qBittorrent, Radarr Movie Library, Sonarr Series Library, Prowlarr Movie and Series Library discovery, and guided Profilarr connection phases of `apply`; authenticated Jellyfin Movie and Series Library reconciliation; VPN-focused
-> `verify --suite full`; and legal movie and series-episode acquisition, hardlink, and playback proofs through `verify --suite promotion` are available now.
-> Remaining Seerr reconciliation, `backup`, `restore`, the other verification suites and
+> `verify --suite full`; legal movie and series-episode acquisition, hardlink, and playback proofs through `verify --suite promotion`; and verified application-state archives through `backup` are available now.
+> Remaining Seerr reconciliation, `restore`, the other verification suites and
 > artifacts, and `destroy` remain planned. Ubuntu is the authoritative implementation and
 > completion platform. Docker
 > Desktop WSL2 compatibility is verified independently and does not block Ubuntu work. Sections below label planned behavior explicitly.
@@ -85,16 +85,18 @@ age-keygen -y ~/.config/sops/age/keys.txt
 You also need:
 
 - a native Linux or WSL filesystem for active downloads and libraries;
-- a separate backup location for later backup tickets;
+- separate, access-controlled Production and Staging backup locations, preferably on another disk or NAS;
 - `/dev/net/tun` and permission for Docker to grant Gluetun `NET_ADMIN`; and
 - NordVPN OpenVPN **service credentials** from the Nord Account manual-setup area. These are not the Nord account email and
   password, and the stack does not need a Nord access token.
 
 ### 2. Configure and initialize Staging first
 
-Edit `stacks/media/media-stack.yaml` before the first run. At minimum, choose absolute, non-overlapping `dataRoot` values, Compose
-`projectName` values, secret-file paths, and non-conflicting LAN ports for Production and Staging. `dataRoot` is not prompted by `init`; it is a declared path in the checked-in configuration, and `init` provisions that path on disk for the selected Environment. Set `runtimeUID` and
-`runtimeGID` to the numeric identity that should own new data directories; for the current operator, obtain them with:
+Edit `stacks/media/media-stack.yaml` before the first run. At minimum, choose absolute, non-overlapping `dataRoot` and
+`backupRoot` values, Compose `projectName` values, secret-file paths, and non-conflicting LAN ports for Production and
+Staging. Each `backupRoot` must also be outside its Environment's `dataRoot`. `dataRoot` is not prompted by `init`; it is a declared path in the checked-in configuration, and `init` provisions it.
+The `backup` command creates `backupRoot` with private permissions. Set `runtimeUID` and `runtimeGID` to the numeric
+identity that should own new data directories; for the current operator, obtain them with:
 
 ```bash
 id -u
@@ -605,6 +607,11 @@ A backup quiesces services when required, archives every mutable service configu
 writes a versioned manifest last. Media and incomplete downloads are deliberately excluded: repository configuration and
 application-state backups reconstruct the stack, while media protection is a separate storage policy.
 
+The command writes `<backupRoot>/<backup-id>/manifest.json` and one tar archive per rendered named volume under
+`archives/`. The manifest records Environment and Compose-project identity, the Declared Configuration and checked-in
+version digests, immutable service images, Docker volume and mount identities, archive paths, sizes, SHA-256 checksums, and
+the consistency method. A failed run remains under `.incomplete-<backup-id>` without a manifest and cannot be restored.
+
 The initial retention policy keeps 7 daily, 4 weekly, and 6 monthly archives. Protected and Promotion-referenced backups are
 never expired by retention. Production and Staging backups use separate namespaces; the backup root should preferably live
 on another disk or NAS.
@@ -623,7 +630,7 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
 | `media-stack apply --environment production|staging [--config path]` | Available through Jellyfin Movie and Series Library reconciliation | Uses the selected Environment's OpenVPN, Profilarr, and Jellyfin credentials without printing them; starts and reconciles qBittorrent, Radarr, Sonarr, Prowlarr, and Profilarr; then starts Jellyfin, bootstraps or authenticates its administrator, creates both libraries, and disables destructive deletion. An incomplete Profilarr connection still prints the exact UI checklist and exits `1`. |
-| `media-stack backup` | Planned | Will create verified, checksummed application-state archives. It is not accepted by the current binary. |
+| `media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--output human|json]` | Available | Stops only running services with mutable named volumes, archives each volume through a read-only Docker mount, resumes those services, independently verifies every checksum, then atomically publishes the selected Environment's manifest last. Use `--protect` for an archive that retention must preserve. |
 | `media-stack restore` | Planned | Will preview and safely restore compatible Environment state. It is not accepted by the current binary. |
 | `media-stack verify --environment staging --suite full [--config path] [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, and recovery. Use it after `apply` in Staging; it is deliberately rejected for Production. |
 | `media-stack verify --environment staging --suite promotion --legal-fixture path [--config path] [--output human|json]` | Available through Movie Library playback proof | Runs the full VPN proof, registers the fixture movie in Radarr, grabs the exact Internet Archive release into qBittorrent, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported path, and requires direct-play readiness. Use only in a disposable Staging Environment. Verification Artifact behavior remains planned. |
