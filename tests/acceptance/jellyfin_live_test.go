@@ -16,7 +16,7 @@ import (
 	"github.com/adkulas/homelab/internal/jellyfin"
 )
 
-func TestDisposableJellyfinServesImportedMovieReadOnly(t *testing.T) {
+func TestDisposableJellyfinServesImportedMediaReadOnly(t *testing.T) {
 	if os.Getenv("MEDIA_STACK_LIVE_JELLYFIN") != "1" {
 		t.Skip("set MEDIA_STACK_LIVE_JELLYFIN=1 to run the pinned disposable Jellyfin acceptance test")
 	}
@@ -29,25 +29,31 @@ func TestDisposableJellyfinServesImportedMovieReadOnly(t *testing.T) {
 	configDirectory := filepath.Join(temporary, "config")
 	cacheDirectory := filepath.Join(temporary, "cache")
 	movieDirectory := filepath.Join(temporary, "media", "movies")
-	for _, directory := range []string{configDirectory, cacheDirectory, movieDirectory} {
+	seriesDirectory := filepath.Join(temporary, "media", "series", "The Lucy Show", "Season 01")
+	for _, directory := range []string{configDirectory, cacheDirectory, movieDirectory, seriesDirectory} {
 		if err := os.MkdirAll(directory, 0o750); err != nil {
 			t.Fatal(err)
 		}
 	}
 	moviePath := filepath.Join(movieDirectory, "legal-fixture.mp4")
-	generate := exec.Command("docker", "run", "--rm", "--entrypoint", "/usr/lib/jellyfin-ffmpeg/ffmpeg",
-		"--volume", movieDirectory+":/fixture", image,
-		"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=1",
-		"-c:v", "libx264", "-pix_fmt", "yuv420p", "/fixture/legal-fixture.mp4")
-	if output, err := generate.CombinedOutput(); err != nil {
-		t.Fatalf("generate legal movie fixture: %v\n%s", err, output)
-	}
-	if _, err := os.Stat(moviePath); err != nil {
-		t.Fatal(err)
+	episodePath := filepath.Join(seriesDirectory, "The Lucy Show - S01E01.mp4")
+	for _, fixture := range []struct {
+		directory   string
+		path        string
+		description string
+	}{{movieDirectory, moviePath, "movie"}, {seriesDirectory, episodePath, "series episode"}} {
+		generate := exec.Command("docker", "run", "--rm", "--entrypoint", "/usr/lib/jellyfin-ffmpeg/ffmpeg",
+			"--volume", fixture.directory+":/fixture", image,
+			"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=1",
+			"-c:v", "libx264", "-pix_fmt", "yuv420p", "/fixture/"+filepath.Base(fixture.path))
+		if output, err := generate.CombinedOutput(); err != nil {
+			t.Fatalf("generate legal %s fixture: %v\n%s", fixture.description, err, output)
+		}
 	}
 
 	containerName := fmt.Sprintf("media-stack-jellyfin-acceptance-%d", os.Getpid())
 	start := exec.Command("docker", "run", "--detach", "--rm", "--name", containerName,
+		"--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 		"--publish", "127.0.0.1::8096",
 		"--volume", configDirectory+":/config",
 		"--volume", cacheDirectory+":/cache",
@@ -69,10 +75,13 @@ func TestDisposableJellyfinServesImportedMovieReadOnly(t *testing.T) {
 	credentials := jellyfin.Credentials{Username: "household", Password: "fixture-jellyfin-password"}
 	deadline := time.Now().Add(2 * time.Minute)
 	pollJellyfin(t, deadline, "reconcile disposable Jellyfin", func() (bool, error) {
-		return true, client.ReconcileMovieLibrary(context.Background(), credentials)
+		return true, client.ReconcileLibraries(context.Background(), credentials)
 	})
 	pollJellyfin(t, deadline, "discover the legal movie with direct-play readiness", func() (bool, error) {
 		return client.MoviePlaybackReady(context.Background(), credentials, "/data/media/movies/legal-fixture.mp4")
+	})
+	pollJellyfin(t, deadline, "discover the legal series episode with direct-play readiness", func() (bool, error) {
+		return client.EpisodePlaybackReady(context.Background(), credentials, "/data/media/series/The Lucy Show/Season 01/The Lucy Show - S01E01.mp4")
 	})
 	deletionDisabled, err := client.DestructiveDeletionDisabled(context.Background(), credentials)
 	if err != nil {

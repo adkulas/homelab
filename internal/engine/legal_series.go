@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/adkulas/homelab/internal/config"
+	"github.com/adkulas/homelab/internal/jellyfin"
 	"github.com/adkulas/homelab/internal/qbittorrent"
 	"github.com/adkulas/homelab/internal/sonarr"
 	"gopkg.in/yaml.v3"
@@ -134,6 +135,7 @@ func verifyLegalSeries(ctx context.Context, plan Plan, declared config.MediaStac
 				sourceInfo, statErr := os.Stat(sourcePath)
 				if statErr == nil && os.SameFile(sourceInfo, importInfo) {
 					report.add("VERIFY_SERIES_EPISODE_HARDLINKED", "qBittorrent source and Series Library inode identity", "", true)
+					verifyJellyfinSeriesEpisodePlayback(ctx, declared, request, episodeFile.Path, deadline, report)
 					return
 				}
 			}
@@ -144,6 +146,40 @@ func verifyLegalSeries(ctx context.Context, plan Plan, declared config.MediaStac
 		}
 		if !waitForMoviePoll(ctx, deadline) {
 			report.add("VERIFY_SERIES_EPISODE_IMPORT_FAILED", "Series Library hardlink import", ctx.Err().Error(), false)
+			return
+		}
+	}
+}
+
+func verifyJellyfinSeriesEpisodePlayback(ctx context.Context, declared config.MediaStack, request VerifyRequest, episodePath string, deadline time.Time, report *VerifyReport) {
+	environment := declared.Spec.Environments[request.plan.environment]
+	secretsPath := environment.SecretsFile
+	if !filepath.IsAbs(secretsPath) {
+		secretsPath = filepath.Join(filepath.Dir(request.plan.configPath), secretsPath)
+	}
+	secrets, err := decryptEnvironmentSecrets(ctx, secretsPath)
+	if err != nil {
+		report.add("VERIFY_SERIES_EPISODE_AUTH_FAILED", "authenticated Jellyfin Series Library access", err.Error(), false)
+		return
+	}
+	address := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Jellyfin)
+	client := jellyfin.New("http://"+address, &http.Client{Timeout: 10 * time.Second})
+	for {
+		ready, observeErr := client.EpisodePlaybackReady(ctx, secrets.Jellyfin, episodePath)
+		if observeErr != nil {
+			report.add("VERIFY_SERIES_EPISODE_PLAYBACK_FAILED", "authenticated Jellyfin series episode playback", observeErr.Error(), false)
+			return
+		}
+		if ready {
+			report.add("VERIFY_SERIES_EPISODE_PLAYBACK_READY", "authenticated Jellyfin Series Library discovery and direct playback", "", true)
+			return
+		}
+		if time.Now().After(deadline) {
+			report.add("VERIFY_SERIES_EPISODE_PLAYBACK_FAILED", "authenticated Jellyfin series episode playback", "Wait for Jellyfin to scan the Series Library and confirm direct playback is available, then retry.", false)
+			return
+		}
+		if !waitForMoviePoll(ctx, deadline) {
+			report.add("VERIFY_SERIES_EPISODE_PLAYBACK_FAILED", "authenticated Jellyfin series episode playback", ctx.Err().Error(), false)
 			return
 		}
 	}
