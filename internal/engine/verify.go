@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -27,10 +28,12 @@ type VerifyRequest struct {
 }
 
 type VerifyReport struct {
-	SchemaVersion string       `json:"schemaVersion"`
-	Environment   string       `json:"environment"`
-	Suite         string       `json:"suite"`
-	Diagnostics   []Diagnostic `json:"diagnostics"`
+	SchemaVersion  string       `json:"schemaVersion"`
+	Environment    string       `json:"environment"`
+	Suite          string       `json:"suite"`
+	ConfigDigest   string       `json:"configDigest"`
+	VersionsDigest string       `json:"versionsDigest"`
+	Diagnostics    []Diagnostic `json:"diagnostics"`
 }
 
 func NewVerifyRequest(workingDirectory, environment, configPath, suite, legalFixturePath, legalSeriesFixturePath string) (VerifyRequest, error) {
@@ -57,10 +60,17 @@ func (report VerifyReport) Failed() bool {
 }
 
 func (engine localEngine) Verify(ctx context.Context, request VerifyRequest) (report VerifyReport, returnError error) {
-	report = VerifyReport{SchemaVersion: verifySchemaVersion, Environment: request.plan.environment, Suite: request.suite}
 	declared, err := config.Load(request.plan.configPath)
 	if err != nil {
 		return report, err
+	}
+	versions, err := config.LoadVersions(request.plan.versionsPath)
+	if err != nil {
+		return report, err
+	}
+	report = VerifyReport{SchemaVersion: verifySchemaVersion, Environment: request.plan.environment, Suite: request.suite, ConfigDigest: fileDigest(request.plan.configPath), VersionsDigest: fileDigest(request.plan.versionsPath)}
+	if report.ConfigDigest == "" || report.VersionsDigest == "" {
+		return report, fmt.Errorf("calculate verification digests")
 	}
 	if err := declared.ValidateEnvironment(request.plan.environment); err != nil {
 		return report, err
@@ -68,10 +78,6 @@ func (engine localEngine) Verify(ctx context.Context, request VerifyRequest) (re
 	if len(declared.Spec.Acquisition.VPN.Server.Countries) == 0 {
 		report.add("VERIFY_SERVER_SELECTION_EMPTY", "VPN server selection", "Declare at least one NordVPN server country.", false)
 		return report, nil
-	}
-	versions, err := config.LoadVersions(request.plan.versionsPath)
-	if err != nil {
-		return report, err
 	}
 	if !runQuiet(ctx, "docker", "run", "--rm", "--device", "/dev/net/tun", "--entrypoint", "/bin/sh", versions.Images["gluetun"], "-c", "test -c /dev/net/tun") {
 		report.add("VERIFY_TUN_UNAVAILABLE", "Gluetun TUN device", "Enable /dev/net/tun for the selected Environment and rerun apply.", false)
@@ -205,6 +211,14 @@ func namespacePublicIP(ctx context.Context, plan Plan) (net.IP, error) {
 		return nil, err
 	}
 	return parsePublicIP(output)
+}
+
+func fileDigest(path string) string {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return checksum(contents)
 }
 
 func parsePublicIP(output []byte) (net.IP, error) {

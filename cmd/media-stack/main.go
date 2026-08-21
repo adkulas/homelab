@@ -18,6 +18,7 @@ const usage = `usage:
   media-stack doctor --environment production|staging [--config path] [--output human|json]
   media-stack plan --environment production|staging [--config path]
   media-stack apply --environment production|staging [--config path]
+  media-stack promote --environment production [--config path] --verification path --backup path [--output human|json]
   media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--output human|json]
   media-stack restore --environment production|staging --backup path [--config path] [--confirm] [--as-restore-drill] [--credentials path] [--output human|json]
   media-stack verify --environment production|staging [--config path] --suite full|promotion [--legal-fixture path] [--legal-series-fixture path] [--output human|json]
@@ -60,6 +61,8 @@ func run(ctx context.Context, arguments []string) error {
 		return runPlan(ctx, arguments[1:])
 	case "apply":
 		return runApply(ctx, arguments[1:])
+	case "promote":
+		return runPromote(ctx, arguments[1:])
 	case "backup":
 		return runBackup(ctx, arguments[1:])
 	case "restore":
@@ -261,6 +264,50 @@ func runApply(ctx context.Context, arguments []string) error {
 		return operationalFailure{cause: err}
 	}
 	fmt.Fprintf(os.Stdout, "Applied the pinned Movie Library policy through Profilarr in the %s Environment.\n", report.Environment)
+	return nil
+}
+
+func runPromote(ctx context.Context, arguments []string) error {
+	flags := flag.NewFlagSet("promote", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	environmentName := flags.String("environment", "", "Production Environment")
+	configPath := flags.String("config", "", "Declared Configuration path")
+	verificationPath := flags.String("verification", "", "verification artifact path")
+	backupPath := flags.String("backup", "", "backup manifest path")
+	output := flags.String("output", "human", "human or json")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	if *environmentName == "" {
+		return fmt.Errorf("environment is required\n%s", usage)
+	}
+	if *environmentName != "production" {
+		return fmt.Errorf("promotion requires the production Environment")
+	}
+	if *verificationPath == "" || *backupPath == "" {
+		return fmt.Errorf("promotion requires --verification and --backup")
+	}
+	if *output != "human" && *output != "json" {
+		return fmt.Errorf("output must be human or json")
+	}
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("locate working directory: %w", err)
+	}
+	request, err := engine.NewPromoteRequest(workingDirectory, *environmentName, *configPath, *verificationPath, *backupPath)
+	if err != nil {
+		return err
+	}
+	report, err := engine.New().Promote(ctx, request)
+	if err != nil {
+		return operationalFailure{cause: err}
+	}
+	if *output == "json" {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetEscapeHTML(false)
+		return encoder.Encode(report)
+	}
+	fmt.Fprintln(os.Stdout, report.Preview)
 	return nil
 }
 
