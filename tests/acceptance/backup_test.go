@@ -493,6 +493,10 @@ case "$1" in
     case " $* " in
 	  *" down "*)
 		[ -z "${FAKE_DOCKER_COMPOSE_DOWN_MARKER:-}" ] || touch "$FAKE_DOCKER_COMPOSE_DOWN_MARKER"
+		if [ -n "${FAKE_DOCKER_FAIL_COMPOSE_DOWN_ONCE_MARKER:-}" ] && [ ! -e "$FAKE_DOCKER_FAIL_COMPOSE_DOWN_ONCE_MARKER" ]; then
+			touch "$FAKE_DOCKER_FAIL_COMPOSE_DOWN_ONCE_MARKER"
+			exit 45
+		fi
 		;;
 	  *" up -d "*)
 		[ -z "${FAKE_DOCKER_COMPOSE_DOWN_MARKER:-}" ] || rm -f "$FAKE_DOCKER_COMPOSE_DOWN_MARKER"
@@ -523,6 +527,9 @@ case "$1" in
 	fi
 	if [ "$2" = "-" ]; then
 		container="${3%%:*}"
+		if [ "${FAKE_DOCKER_FAIL_RESTORE_VOLUME_ALWAYS:-}" = "$container" ]; then
+			exit 42
+		fi
 		if [ "${FAKE_DOCKER_KILL_ON_RESTORE_VOLUME:-}" = "$container" ] && [ ! -e "${FAKE_DOCKER_KILL_ONCE_MARKER:-/nonexistent}" ]; then
 			touch "$FAKE_DOCKER_KILL_ONCE_MARKER"
 			kill -9 "$PPID"

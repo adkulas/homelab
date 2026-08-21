@@ -634,7 +634,7 @@ selected archive into a temporary Docker volume with UID/GID ownership preserved
 removes the stopped Compose containers so Docker releases their named-volume references, reconstructs each canonical volume
 from its verified staging volume, verifies it again, and starts the Compose project with dependency handling. Services remain
 down throughout replacement, so partial state is never exposed through their public interfaces. Any replacement or startup
-failure first removes partial Compose containers, then rebuilds every canonical volume from the protected safety backup before services restart. If the CLI or host is interrupted during the replacement window, the next restore invocation consumes the operation journal, removes orphaned helper containers, and completes the same safety-backup rollback before it creates a new preview. Progress, rollback status,
+failure first removes partial Compose containers, then rebuilds every canonical volume from the protected safety backup before services restart. If the CLI or host is interrupted after shutdown begins, the next restore invocation consumes the operation journal, revalidates the safety-backup coverage and checksums, removes orphaned helper containers, and completes the same safety-backup rollback before it creates a new preview. Progress, rollback status,
 and the safety-backup path are atomically recorded under
 `<backupRoot>/.restore-operations/<operation-id>.json`; successful JSON output includes that journal and safety manifest.
 Media and torrent payloads are bind-mounted data and are never replaced by restore.

@@ -445,3 +445,56 @@ func assertLatestRestoreJournalStatus(t *testing.T, temporary, status string) {
 		t.Fatalf("restore journal status is not %s: %s", status, journal)
 	}
 }
+func TestRestoreRollsBackPartiallyFailedComposeShutdown(t *testing.T) {
+	temporary := t.TempDir()
+	configPath, manifestPath, fixtureRoot := createRestorableBackup(t, temporary, "staging")
+	writeRestoreFixtureState(t, fixtureRoot, "pre-shutdown-failure-")
+	preview := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath)
+	preview.Env = restoreEnvironment(t, temporary, fixtureRoot)
+	if output, err := preview.CombinedOutput(); err == nil || !strings.Contains(string(output), "restore requires --confirm") {
+		t.Fatalf("media-stack restore did not produce shutdown rollback preview:\n%s", output)
+	}
+
+	marker := filepath.Join(temporary, "compose-down-failed-once")
+	command := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath, "--confirm")
+	command.Env = append(restoreEnvironment(t, temporary, fixtureRoot),
+		"FAKE_DOCKER_FAIL_COMPOSE_DOWN_ONCE_MARKER="+marker,
+	)
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("media-stack restore unexpectedly hid shutdown failure:\n%s", output)
+	}
+	if !strings.Contains(string(output), "remove service containers for restore") {
+		t.Fatalf("restore shutdown error = %s", output)
+	}
+	assertLatestRestoreJournalStatus(t, temporary, "rolled-back")
+	assertRestoreFixtureState(t, fixtureRoot, "pre-shutdown-failure-")
+}
+
+func TestRestoreDoesNotStartServicesAfterIncompleteRollback(t *testing.T) {
+	temporary := t.TempDir()
+	configPath, manifestPath, fixtureRoot := createRestorableBackup(t, temporary, "staging")
+	writeRestoreFixtureState(t, fixtureRoot, "pre-incomplete-rollback-")
+	preview := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath)
+	preview.Env = restoreEnvironment(t, temporary, fixtureRoot)
+	if output, err := preview.CombinedOutput(); err == nil || !strings.Contains(string(output), "restore requires --confirm") {
+		t.Fatalf("media-stack restore did not produce incomplete rollback preview:\n%s", output)
+	}
+
+	command := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath, "--confirm")
+	command.Env = append(restoreEnvironment(t, temporary, fixtureRoot),
+		"FAKE_DOCKER_FAIL_RESTORE_VOLUME_ALWAYS=media-staging_radarr-config",
+	)
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("media-stack restore unexpectedly hid incomplete rollback:\n%s", output)
+	}
+	assertLatestRestoreJournalStatus(t, temporary, "rollback-failed")
+	dockerCalls, err := os.ReadFile(filepath.Join(temporary, "restore-docker.log"))
+	if err != nil {
+		t.Fatalf("read restore Docker calls: %v", err)
+	}
+	if strings.Contains(string(dockerCalls), " up -d") {
+		t.Fatalf("restore exposed incomplete rollback state by starting services:\n%s", dockerCalls)
+	}
+}

@@ -22,6 +22,7 @@ type restoreOperationStatus string
 
 const (
 	restorePreparing      restoreOperationStatus = "preparing"
+	restoreStopping       restoreOperationStatus = "stopping"
 	restoreReplacing      restoreOperationStatus = "replacing"
 	restoreStarting       restoreOperationStatus = "starting"
 	restoreRollingBack    restoreOperationStatus = "rolling-back"
@@ -127,8 +128,9 @@ func (engine localEngine) executeRestore(ctx context.Context, request RestoreReq
 			_ = os.Remove(composePath)
 		}
 	}()
-	if err := runCompose(ctx, composePath, report.ProjectName, "down"); err != nil {
-		return RestoreReport{}, fmt.Errorf("remove service containers for restore: %w", err)
+	operation.Status = restoreStopping
+	if err := writeRestoreOperation(journalPath, operation); err != nil {
+		return RestoreReport{}, err
 	}
 	stackDown := true
 	defer func() {
@@ -152,6 +154,9 @@ func (engine localEngine) executeRestore(ctx context.Context, request RestoreReq
 			returnErr = errors.Join(returnErr, journalErr)
 		}
 	}()
+	if err := runCompose(ctx, composePath, report.ProjectName, "down"); err != nil {
+		return RestoreReport{}, fmt.Errorf("remove service containers for restore: %w", err)
+	}
 	operation.Status = restoreReplacing
 	if err := writeRestoreOperation(journalPath, operation); err != nil {
 		return RestoreReport{}, err
@@ -277,6 +282,12 @@ func copyAndVerifyDockerVolume(ctx context.Context, sourceVolume, targetVolume, 
 
 func rollbackRestore(ctx context.Context, composePath, projectName string, safety BackupReport, sources []backupSource) error {
 	var rollbackErr error
+	if err := validateRestoreCoverage(safety.Services, sources, false); err != nil {
+		return fmt.Errorf("verify safety backup coverage: %w", err)
+	}
+	if err := verifyBackupArchives(filepath.Dir(safety.ManifestPath), safety.Services); err != nil {
+		return fmt.Errorf("verify safety backup checksums: %w", err)
+	}
 	if err := runCompose(ctx, composePath, projectName, "down"); err != nil {
 		return fmt.Errorf("remove partial service containers before rollback: %w", err)
 	}
@@ -303,10 +314,13 @@ func rollbackRestore(ctx context.Context, composePath, projectName string, safet
 			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore %s safety archive: %w", service.Name, err))
 		}
 	}
-	if err := runCompose(ctx, composePath, projectName, "up", "-d"); err != nil {
-		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restart services after rollback: %w", err))
+	if rollbackErr != nil {
+		return rollbackErr
 	}
-	return rollbackErr
+	if err := runCompose(ctx, composePath, projectName, "up", "-d"); err != nil {
+		return fmt.Errorf("restart services after rollback: %w", err)
+	}
+	return nil
 }
 
 func createDockerVolumeContainer(ctx context.Context, volume, mount, image string) (string, error) {
@@ -531,7 +545,7 @@ func recoverInterruptedRestores(ctx context.Context, backupRoot, environment, pr
 				return err
 			}
 			continue
-		case restoreReplacing, restoreStarting, restoreRollingBack, restoreRollbackFailed:
+		case restoreStopping, restoreReplacing, restoreStarting, restoreRollingBack, restoreRollbackFailed:
 		default:
 			return fmt.Errorf("restore operation %q has unsupported status %q", operation.ID, operation.Status)
 		}
