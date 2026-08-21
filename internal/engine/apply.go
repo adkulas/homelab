@@ -21,6 +21,7 @@ import (
 	"github.com/adkulas/homelab/internal/prowlarr"
 	"github.com/adkulas/homelab/internal/qbittorrent"
 	"github.com/adkulas/homelab/internal/radarr"
+	"github.com/adkulas/homelab/internal/seerr"
 	"github.com/adkulas/homelab/internal/sonarr"
 	"gopkg.in/yaml.v3"
 )
@@ -187,9 +188,40 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if err := waitForJellyfinLibraries(ctx, jellyfinClient, secrets.Jellyfin, 120*time.Second); err != nil {
 		return ApplyReport{}, err
 	}
+	if output, err := runDockerCompose(ctx, plan, "up", "-d", "seerr"); err != nil {
+		return ApplyReport{}, fmt.Errorf("start Seerr: %w: %s", err, redactCredentials(output, credentials))
+	}
+	seerrAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Seerr)
+	seerrClient, err := seerr.New("http://"+seerrAddress, &http.Client{Timeout: 10 * time.Second})
+	if err != nil {
+		return ApplyReport{}, err
+	}
+	seerrCredentials := seerr.Credentials{Username: secrets.Jellyfin.Username, Password: secrets.Jellyfin.Password}
+	if err := waitForSeerrAuthentication(ctx, seerrClient, seerrCredentials, 120*time.Second); err != nil {
+		return ApplyReport{}, err
+	}
 	return ApplyReport{Environment: request.plan.environment}, nil
 }
 
+func waitForSeerrAuthentication(ctx context.Context, client *seerr.Client, credentials seerr.Credentials, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	var lastErr error
+	for {
+		if err := client.ReconcileAuthentication(ctx, credentials); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("Seerr API did not become ready within %s: %w", timeout, lastErr)
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
 func waitForJellyfinLibraries(ctx context.Context, client *jellyfin.Client, credentials jellyfin.Credentials, timeout time.Duration) error {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
