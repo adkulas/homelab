@@ -23,6 +23,7 @@ type restoreOperationStatus string
 const (
 	restorePreparing      restoreOperationStatus = "preparing"
 	restoreReplacing      restoreOperationStatus = "replacing"
+	restoreStarting       restoreOperationStatus = "starting"
 	restoreRollingBack    restoreOperationStatus = "rolling-back"
 	restoreRolledBack     restoreOperationStatus = "rolled-back"
 	restoreRollbackFailed restoreOperationStatus = "rollback-failed"
@@ -37,6 +38,7 @@ type restoreOperation struct {
 	Environment        string                 `json:"environment"`
 	SourceManifestPath string                 `json:"sourceManifestPath"`
 	SafetyBackupPath   string                 `json:"safetyBackupPath"`
+	ComposePath        string                 `json:"composePath,omitempty"`
 	TemporaryVolumes   []string               `json:"temporaryVolumes"`
 	ReplacedServices   []string               `json:"replacedServices"`
 	Failure            string                 `json:"failure,omitempty"`
@@ -60,6 +62,7 @@ func (engine localEngine) executeRestore(ctx context.Context, request RestoreReq
 	if err := os.MkdirAll(journalDirectory, 0o700); err != nil {
 		return RestoreReport{}, fmt.Errorf("create restore operation journal directory: %w", err)
 	}
+	composePath := filepath.Join(journalDirectory, operationID+"-compose.yaml")
 	journalPath := filepath.Join(journalDirectory, operationID+".json")
 	operation := restoreOperation{
 		SchemaVersion:      "homelab.media-stack/restore-operation/v1alpha1",
@@ -68,6 +71,7 @@ func (engine localEngine) executeRestore(ctx context.Context, request RestoreReq
 		Environment:        request.plan.environment,
 		SourceManifestPath: request.backupPath,
 		SafetyBackupPath:   safety.ManifestPath,
+		ComposePath:        composePath,
 	}
 	if err := writeRestoreOperation(journalPath, operation); err != nil {
 		return RestoreReport{}, err
@@ -115,11 +119,14 @@ func (engine localEngine) executeRestore(ctx context.Context, request RestoreReq
 		}
 	}
 
-	composePath := filepath.Join(journalDirectory, operationID+"-compose.yaml")
 	if err := os.WriteFile(composePath, compose, 0o600); err != nil {
 		return RestoreReport{}, fmt.Errorf("write restore Compose plan: %w", err)
 	}
-	defer os.Remove(composePath)
+	defer func() {
+		if operation.Status != restoreRollbackFailed {
+			_ = os.Remove(composePath)
+		}
+	}()
 	if err := runCompose(ctx, composePath, report.ProjectName, "down"); err != nil {
 		return RestoreReport{}, fmt.Errorf("remove service containers for restore: %w", err)
 	}
@@ -161,6 +168,10 @@ func (engine localEngine) executeRestore(ctx context.Context, request RestoreReq
 		if err := writeRestoreOperation(journalPath, operation); err != nil {
 			return RestoreReport{}, err
 		}
+	}
+	operation.Status = restoreStarting
+	if err := writeRestoreOperation(journalPath, operation); err != nil {
+		return RestoreReport{}, err
 	}
 	if err := runCompose(ctx, composePath, report.ProjectName, "up", "-d"); err != nil {
 		return RestoreReport{}, fmt.Errorf("start restored services in dependency order: %w", err)
@@ -219,14 +230,14 @@ func copyAndVerifyDockerVolume(ctx context.Context, sourceVolume, targetVolume, 
 		}
 	}()
 
-	sourceCommand := exec.CommandContext(ctx, "docker", "cp", sourceContainer+":/source/.", "-")
+	sourceCommand := exec.CommandContext(ctx, "docker", "cp", "--archive", sourceContainer+":/source/.", "-")
 	stream, err := sourceCommand.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("stream staged volume: %w", err)
 	}
 	var sourceStderr bytes.Buffer
 	sourceCommand.Stderr = &sourceStderr
-	targetCommand := exec.CommandContext(ctx, "docker", "cp", "-", targetContainer+":/target")
+	targetCommand := exec.CommandContext(ctx, "docker", "cp", "--archive", "-", targetContainer+":/target")
 	targetCommand.Stdin = stream
 	var targetStderr bytes.Buffer
 	targetCommand.Stderr = &targetStderr
@@ -266,11 +277,18 @@ func copyAndVerifyDockerVolume(ctx context.Context, sourceVolume, targetVolume, 
 
 func rollbackRestore(ctx context.Context, composePath, projectName string, safety BackupReport, sources []backupSource) error {
 	var rollbackErr error
+	if err := runCompose(ctx, composePath, projectName, "down"); err != nil {
+		return fmt.Errorf("remove partial service containers before rollback: %w", err)
+	}
 	root := filepath.Dir(safety.ManifestPath)
 	for _, source := range sources {
 		service, archivePath, err := restoreServiceArchive(root, safety.Services, source.serviceName)
 		if err != nil {
 			rollbackErr = errors.Join(rollbackErr, err)
+			continue
+		}
+		if err := removeDockerVolumeContainers(ctx, source.dockerVolume); err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("remove containers attached to partial %s volume during rollback: %w", service.Name, err))
 			continue
 		}
 		if err := removeDockerVolume(ctx, source.dockerVolume); err != nil {
@@ -344,7 +362,7 @@ func restoreAndVerifyDockerVolume(ctx context.Context, volume, image, archivePat
 			_ = removeDockerContainer(context.WithoutCancel(ctx), containerID)
 		}
 	}()
-	command := exec.CommandContext(ctx, "docker", "cp", "-", containerID+":/target")
+	command := exec.CommandContext(ctx, "docker", "cp", "--archive", "-", containerID+":/target")
 	command.Stdin = archive
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
@@ -385,7 +403,7 @@ func dockerVolumeContentDigest(ctx context.Context, volume, image string) (strin
 			_ = removeDockerContainer(context.WithoutCancel(ctx), containerID)
 		}
 	}()
-	command := exec.CommandContext(ctx, "docker", "cp", containerID+":/source/.", "-")
+	command := exec.CommandContext(ctx, "docker", "cp", "--archive", containerID+":/source/.", "-")
 	stdout, err := command.StdoutPipe()
 	if err != nil {
 		return "", fmt.Errorf("capture restored volume: %w", err)
@@ -474,4 +492,119 @@ func writeRestoreOperation(path string, operation restoreOperation) error {
 		return fmt.Errorf("publish restore operation journal: %w", err)
 	}
 	return nil
+}
+func recoverInterruptedRestores(ctx context.Context, backupRoot, environment, projectName string, sources []backupSource) error {
+	journalDirectory := filepath.Join(backupRoot, ".restore-operations")
+	entries, err := os.ReadDir(journalDirectory)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read restore operation journals: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		journalPath := filepath.Join(journalDirectory, entry.Name())
+		contents, err := os.ReadFile(journalPath)
+		if err != nil {
+			return fmt.Errorf("read restore operation journal %q: %w", journalPath, err)
+		}
+		var operation restoreOperation
+		if err := json.Unmarshal(contents, &operation); err != nil {
+			return fmt.Errorf("decode restore operation journal %q: %w", journalPath, err)
+		}
+		if operation.Environment != environment {
+			continue
+		}
+		switch operation.Status {
+		case restoreCompleted, restoreRolledBack, restoreFailed:
+			continue
+		case restorePreparing:
+			if err := cleanupTemporaryRestoreVolumes(ctx, operation.TemporaryVolumes); err != nil {
+				return err
+			}
+			operation.Status = restoreFailed
+			operation.Failure = "recovered interruption before mutable state replacement"
+			if err := writeRestoreOperation(journalPath, operation); err != nil {
+				return err
+			}
+			continue
+		case restoreReplacing, restoreStarting, restoreRollingBack, restoreRollbackFailed:
+		default:
+			return fmt.Errorf("restore operation %q has unsupported status %q", operation.ID, operation.Status)
+		}
+
+		composePath := operation.ComposePath
+		if composePath == "" {
+			composePath = filepath.Join(journalDirectory, operation.ID+"-compose.yaml")
+		}
+		if filepath.Dir(filepath.Clean(composePath)) != filepath.Clean(journalDirectory) {
+			return fmt.Errorf("restore operation %q has unsafe Compose path", operation.ID)
+		}
+		safetyBytes, err := os.ReadFile(operation.SafetyBackupPath)
+		if err != nil {
+			return fmt.Errorf("read safety backup for restore operation %q: %w", operation.ID, err)
+		}
+		var safety BackupReport
+		if err := json.Unmarshal(safetyBytes, &safety); err != nil {
+			return fmt.Errorf("decode safety backup for restore operation %q: %w", operation.ID, err)
+		}
+		if !safety.Complete || safety.Environment != environment || safety.ProjectName != projectName {
+			return fmt.Errorf("restore operation %q has an incompatible safety backup", operation.ID)
+		}
+		operation.Status = restoreRollingBack
+		operation.Failure = "recovering interrupted restore"
+		if err := writeRestoreOperation(journalPath, operation); err != nil {
+			return err
+		}
+		recoveryErr := rollbackRestore(context.WithoutCancel(ctx), composePath, projectName, safety, sources)
+		recoveryErr = errors.Join(recoveryErr, cleanupTemporaryRestoreVolumes(context.WithoutCancel(ctx), operation.TemporaryVolumes))
+		if recoveryErr != nil {
+			operation.Status = restoreRollbackFailed
+			operation.Failure = recoveryErr.Error()
+			if journalErr := writeRestoreOperation(journalPath, operation); journalErr != nil {
+				recoveryErr = errors.Join(recoveryErr, journalErr)
+			}
+			return recoveryErr
+		}
+		operation.Status = restoreRolledBack
+		operation.Failure = "recovered interruption from verified safety backup"
+		if err := writeRestoreOperation(journalPath, operation); err != nil {
+			return err
+		}
+		if err := os.Remove(composePath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove recovered restore Compose plan: %w", err)
+		}
+	}
+	return nil
+}
+
+func cleanupTemporaryRestoreVolumes(ctx context.Context, volumes []string) error {
+	var cleanupErr error
+	for _, volume := range volumes {
+		if err := removeDockerVolumeContainers(ctx, volume); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+			continue
+		}
+		if err := removeDockerVolume(ctx, volume); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
+	}
+	return cleanupErr
+}
+
+func removeDockerVolumeContainers(ctx context.Context, volume string) error {
+	output, err := exec.CommandContext(ctx, "docker", "ps", "--all", "--quiet", "--filter", "volume="+volume).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("find containers attached to Docker volume %q: %w: %s", volume, err, bytes.TrimSpace(output))
+	}
+	var removeErr error
+	for _, containerID := range strings.Fields(string(output)) {
+		if err := removeDockerContainer(ctx, containerID); err != nil {
+			removeErr = errors.Join(removeErr, err)
+		}
+	}
+	return removeErr
 }

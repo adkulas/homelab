@@ -173,7 +173,7 @@ func TestRestoreReplacesMutableStateAndRecordsRecoveryOperation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read restore Docker calls: %v", err)
 	}
-	for _, want := range []string{"compose", "down", "volume create", "volume rm", "up -d"} {
+	for _, want := range []string{"compose", "down", "volume create", "volume rm", "cp --archive", "up -d"} {
 		if !strings.Contains(string(dockerCalls), want) {
 			t.Fatalf("restore Docker calls omit %q:\n%s", want, dockerCalls)
 		}
@@ -334,4 +334,114 @@ func restoreEnvironment(t *testing.T, temporary, fixtureRoot string) []string {
 		"FAKE_DOCKER_LOG="+filepath.Join(temporary, "restore-docker.log"),
 		"FAKE_DOCKER_COMPOSE_DOWN_MARKER="+filepath.Join(temporary, "compose-down"),
 	)
+}
+func TestRestoreRollsBackWhenDependencyStartupPartiallyFails(t *testing.T) {
+	temporary := t.TempDir()
+	configPath, manifestPath, fixtureRoot := createRestorableBackup(t, temporary, "staging")
+	writeRestoreFixtureState(t, fixtureRoot, "pre-startup-failure-")
+	preview := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath)
+	preview.Env = restoreEnvironment(t, temporary, fixtureRoot)
+	if output, err := preview.CombinedOutput(); err == nil || !strings.Contains(string(output), "restore requires --confirm") {
+		t.Fatalf("media-stack restore did not produce startup rollback preview:\n%s", output)
+	}
+
+	marker := filepath.Join(temporary, "compose-up-failed-once")
+	command := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath, "--confirm")
+	command.Env = append(restoreEnvironment(t, temporary, fixtureRoot),
+		"FAKE_DOCKER_FAIL_COMPOSE_UP_ONCE_MARKER="+marker,
+	)
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("media-stack restore unexpectedly hid startup failure:\n%s", output)
+	}
+	if !strings.Contains(string(output), "start restored services in dependency order") {
+		t.Fatalf("restore startup error = %s", output)
+	}
+	assertLatestRestoreJournalStatus(t, temporary, "rolled-back")
+	assertRestoreFixtureState(t, fixtureRoot, "pre-startup-failure-")
+
+	dockerCalls, err := os.ReadFile(filepath.Join(temporary, "restore-docker.log"))
+	if err != nil {
+		t.Fatalf("read restore Docker calls: %v", err)
+	}
+	if strings.Count(string(dockerCalls), " down") < 2 || strings.Count(string(dockerCalls), " up -d") < 2 {
+		t.Fatalf("rollback did not remove partial startup containers before replacing volumes:\n%s", dockerCalls)
+	}
+}
+
+func TestRestoreRecoversKilledReplacementFromOperationJournal(t *testing.T) {
+	temporary := t.TempDir()
+	configPath, manifestPath, fixtureRoot := createRestorableBackup(t, temporary, "staging")
+	writeRestoreFixtureState(t, fixtureRoot, "pre-interruption-")
+	preview := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath)
+	preview.Env = restoreEnvironment(t, temporary, fixtureRoot)
+	if output, err := preview.CombinedOutput(); err == nil || !strings.Contains(string(output), "restore requires --confirm") {
+		t.Fatalf("media-stack restore did not produce interruption preview:\n%s", output)
+	}
+
+	marker := filepath.Join(temporary, "restore-killed-once")
+	command := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath, "--confirm")
+	command.Env = append(restoreEnvironment(t, temporary, fixtureRoot),
+		"FAKE_DOCKER_KILL_ON_RESTORE_VOLUME=media-staging_radarr-config",
+		"FAKE_DOCKER_KILL_ONCE_MARKER="+marker,
+	)
+	if output, err := command.CombinedOutput(); err == nil {
+		t.Fatalf("media-stack restore unexpectedly survived injected process death:\n%s", output)
+	}
+
+	recoverCommand := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath)
+	recoverCommand.Env = restoreEnvironment(t, temporary, fixtureRoot)
+	recoveryOutput, err := recoverCommand.CombinedOutput()
+	if err == nil || !strings.Contains(string(recoveryOutput), "restore requires --confirm") {
+		t.Fatalf("next restore did not recover and return a fresh preview: %v\n%s", err, recoveryOutput)
+	}
+	assertLatestRestoreJournalStatus(t, temporary, "rolled-back")
+	assertRestoreFixtureState(t, fixtureRoot, "pre-interruption-")
+
+	dockerCalls, err := os.ReadFile(filepath.Join(temporary, "restore-docker.log"))
+	if err != nil {
+		t.Fatalf("read restore Docker calls: %v", err)
+	}
+	if !strings.Contains(string(dockerCalls), "ps --all --quiet --filter volume=") {
+		t.Fatalf("interruption recovery did not remove orphaned helper containers:\n%s", dockerCalls)
+	}
+}
+
+func writeRestoreFixtureState(t *testing.T, fixtureRoot, prefix string) {
+	t.Helper()
+	for _, serviceName := range backupFixtureServiceNames {
+		path := filepath.Join(fixtureRoot, "media-staging_"+serviceName+"-config", "identity.txt")
+		if err := os.WriteFile(path, []byte(prefix+serviceName+"\n"), 0o600); err != nil {
+			t.Fatalf("write pre-restore %s state: %v", serviceName, err)
+		}
+	}
+}
+
+func assertRestoreFixtureState(t *testing.T, fixtureRoot, prefix string) {
+	t.Helper()
+	for _, serviceName := range backupFixtureServiceNames {
+		path := filepath.Join(fixtureRoot, "media-staging_"+serviceName+"-config", "identity.txt")
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read recovered %s state: %v", serviceName, err)
+		}
+		if string(contents) != prefix+serviceName+"\n" {
+			t.Fatalf("recovered %s state = %q", serviceName, contents)
+		}
+	}
+}
+
+func assertLatestRestoreJournalStatus(t *testing.T, temporary, status string) {
+	t.Helper()
+	journals, err := filepath.Glob(filepath.Join(temporary, "backups", "staging", ".restore-operations", "*.json"))
+	if err != nil || len(journals) != 1 {
+		t.Fatalf("restore journals = %#v (%v)", journals, err)
+	}
+	journal, err := os.ReadFile(journals[0])
+	if err != nil {
+		t.Fatalf("read restore journal: %v", err)
+	}
+	if !strings.Contains(string(journal), `"status": "`+status+`"`) {
+		t.Fatalf("restore journal status is not %s: %s", status, journal)
+	}
 }

@@ -74,6 +74,9 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	if err != nil {
 		return RestoreReport{}, err
 	}
+	if err := recoverInterruptedRestores(ctx, environment.BackupRoot, request.plan.environment, environment.ProjectName, sources); err != nil {
+		return RestoreReport{}, fmt.Errorf("recover interrupted restore: %w", err)
+	}
 	backupFile, err := os.ReadFile(request.backupPath)
 	if err != nil {
 		return RestoreReport{}, fmt.Errorf("read backup manifest: %w", err)
