@@ -322,6 +322,63 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 		}
 	}))
 	defer jellyfinAPI.Close()
+	seerrInitialized := false
+	seerrLocalPassword := ""
+	seerrMain := map[string]any{"localLogin": false, "mediaServerLogin": false, "newPlexLogin": false, "defaultPermissions": float64(0), "mediaServerType": float64(4)}
+	seerrJellyfin := map[string]any{"ip": "jellyfin", "port": float64(8096), "externalHostname": "", "jellyfinForgotPasswordUrl": ""}
+	seerrWrites := 0
+	seerrAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.Method + " " + request.URL.Path {
+		case "GET /api/v1/settings/public":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"initialized": seerrInitialized, "mediaServerType": seerrMain["mediaServerType"]})
+		case "POST /api/v1/auth/jellyfin":
+			var body map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			if body["username"] != "household" || body["password"] != "fixture-jellyfin-password" {
+				t.Errorf("Seerr Jellyfin authentication = %#v", body)
+			}
+			http.SetCookie(writer, &http.Cookie{Name: "connect.sid", Value: "apply-seerr-session", Path: "/"})
+			seerrMain["mediaServerType"] = float64(2)
+			_ = json.NewEncoder(writer).Encode(map[string]any{"id": 1, "email": "household", "permissions": 2})
+		case "POST /api/v1/auth/local":
+			var body map[string]string
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			if body["email"] != "household" || body["password"] != seerrLocalPassword || seerrLocalPassword == "" {
+				http.Error(writer, "Access denied", http.StatusForbidden)
+				return
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{"id": 1, "email": "household", "permissions": 2})
+		case "GET /api/v1/settings/main":
+			_ = json.NewEncoder(writer).Encode(seerrMain)
+		case "POST /api/v1/settings/main":
+			seerrWrites++
+			_ = json.NewDecoder(request.Body).Decode(&seerrMain)
+			_ = json.NewEncoder(writer).Encode(seerrMain)
+		case "GET /api/v1/settings/jellyfin":
+			_ = json.NewEncoder(writer).Encode(seerrJellyfin)
+		case "POST /api/v1/settings/jellyfin":
+			seerrWrites++
+			_ = json.NewDecoder(request.Body).Decode(&seerrJellyfin)
+			_ = json.NewEncoder(writer).Encode(seerrJellyfin)
+		case "POST /api/v1/user/1/settings/password":
+			seerrWrites++
+			var body map[string]string
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			seerrLocalPassword = body["newPassword"]
+			writer.WriteHeader(http.StatusNoContent)
+		case "POST /api/v1/settings/initialize":
+			seerrWrites++
+			seerrInitialized = true
+			_ = json.NewEncoder(writer).Encode(map[string]any{"initialized": true})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer seerrAPI.Close()
+	seerrURL, err := url.Parse(seerrAPI.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
 	jellyfinURL, err := url.Parse(jellyfinAPI.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -335,6 +392,7 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	declared = strings.Replace(declared, "prowlarr: 19696", "prowlarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "profilarr: 16868", "profilarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "jellyfin: 18096", "jellyfin: "+jellyfinURL.Port(), 1)
+	declared = strings.Replace(declared, "seerr: 15055", "seerr: "+seerrURL.Port(), 1)
 	sonarrURL, err := url.Parse(sonarrAPI.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -381,6 +439,7 @@ EOF
 	  "compose -f - exec -T prowlarr cat /config/config.xml") printf '<Config><ApiKey>fixture-prowlarr-api-key</ApiKey></Config>\n'; exit 0 ;;
 	  "compose -f - up -d profilarr") exit 0 ;;
 	  "compose -f - up -d jellyfin") exit 0 ;;
+	  "compose -f - up -d seerr") exit 0 ;;
 	  "compose -f - ps --format json gluetun")
 	    count=0
 	    [ -f "$APPLY_HEALTH_COUNT" ] && count=$(cat "$APPLY_HEALTH_COUNT")
@@ -412,7 +471,7 @@ EOF
 		t.Errorf("apply output = %q, want completed Series Library policy", output)
 	}
 
-	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr\ncompose -f - up -d jellyfin"
+	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr\ncompose -f - up -d jellyfin\ncompose -f - up -d seerr"
 	if got := strings.TrimSpace(string(readFile(t, dockerLog))); got != wantDocker {
 		t.Errorf("Docker invocation = %q", got)
 	}
@@ -503,6 +562,12 @@ EOF
 	if jellyfinPolicy["EnableContentDeletion"] != false || jellyfinPolicyWrites != 1 {
 		t.Errorf("apply did not disable destructive Jellyfin deletion: policy=%v writes=%d", jellyfinPolicy, jellyfinPolicyWrites)
 	}
+	if !seerrInitialized || seerrMain["localLogin"] != true || seerrMain["mediaServerLogin"] != true || seerrMain["newPlexLogin"] != true || seerrMain["defaultPermissions"] != float64(32) {
+		t.Errorf("apply did not reconcile Seerr authentication: initialized=%t main=%v", seerrInitialized, seerrMain)
+	}
+	if seerrLocalPassword != "fixture-jellyfin-password" {
+		t.Error("apply did not preserve an emergency local Seerr administrator")
+	}
 	if profilarrObservations != 2 {
 		t.Errorf("apply observed Profilarr connections %d times, want startup retry plus successful verification", profilarrObservations)
 	}
@@ -516,6 +581,7 @@ EOF
 			t.Errorf("apply observed Sonarr %s %d times, want once", observation, count)
 		}
 	}
+	seerrWritesAfterFirstRun := seerrWrites
 	secondCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
 	secondCommand.Dir = command.Dir
 	secondCommand.Env = command.Env
@@ -525,6 +591,9 @@ EOF
 	}
 	if len(rootFolders) != 1 || len(downloadClients) != 1 || len(seriesRootFolders) != 1 || len(seriesDownloadClients) != 1 || len(indexers) != 1 || len(applications) != 2 || len(jellyfinLibraries) != 2 || jellyfinPolicyWrites != 1 {
 		t.Errorf("repeated apply did not converge: movieRoots=%v movieDownloadClients=%v seriesRoots=%v seriesDownloadClients=%v indexers=%v applications=%v", rootFolders, downloadClients, seriesRootFolders, seriesDownloadClients, indexers, applications)
+	}
+	if seerrWrites != seerrWritesAfterFirstRun {
+		t.Errorf("repeated apply made %d Seerr policy writes, want none", seerrWrites-seerrWritesAfterFirstRun)
 	}
 
 	originalMovieQualityProfiles := movieQualityProfiles

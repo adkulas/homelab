@@ -6,9 +6,9 @@ independent Production and Staging Environments so changes can be proven before 
 
 > [!IMPORTANT]
 > This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, the
-> VPN-confined qBittorrent, Radarr Movie Library, Sonarr Series Library, Prowlarr Movie and Series Library discovery, and guided Profilarr connection phases of `apply`; authenticated Jellyfin Movie and Series Library reconciliation; VPN-focused
+> VPN-confined qBittorrent, Radarr Movie Library, Sonarr Series Library, Prowlarr Movie and Series Library discovery, guided Profilarr connections, authenticated Jellyfin Movie and Series Library reconciliation, and Seerr household authentication phases of `apply`; VPN-focused
 > `verify --suite full`; legal movie and series-episode acquisition, hardlink, and playback proofs through `verify --suite promotion`; and verified application-state archives through `backup` are available now.
-> Ordinary matching-Environment state replacement through `restore` is also available. Remaining Seerr reconciliation, Restore Drill execution, the other verification suites and
+> Ordinary matching-Environment state replacement through `restore` is also available. Restore Drill execution, the other verification suites and
 > artifacts, and `destroy` remain planned. Ubuntu is the authoritative implementation and
 > completion platform. Docker
 > Desktop WSL2 compatibility is verified independently and does not block Ubuntu work. Sections below label planned behavior explicitly.
@@ -547,7 +547,10 @@ documented supported interface allows stable creation and storage.
 The available phase validates and renders the selected Environment, materializes runtime secrets, starts Gluetun,
 waits boundedly for health, starts and reconciles qBittorrent in Gluetun's network namespace, then starts Radarr and Sonarr
 and reconciles their Movie Library and Series Library contracts through supported APIs. It then prepares Prowlarr discovery,
-starts Profilarr, and verifies its connections through `GET /api/v1/arr/instances`. It then starts Jellyfin, completes first-run setup when needed, authenticates, creates the Movie Library at `/data/media/movies` and Series Library at `/data/media/series`, and disables both global and per-library destructive deletion while preserving unrelated libraries and user policy. Repeated apply makes no Jellyfin writes after convergence.
+starts Profilarr, and verifies its connections through `GET /api/v1/arr/instances`. It starts Jellyfin, completes first-run
+setup when needed, authenticates, creates both Libraries, and disables destructive deletion. Finally, it starts Seerr and
+uses Seerr's supported API to enable new household Jellyfin sign-in with request-only default permission, keep local sign-in
+enabled, set the Jellyfin administrator's local password, and verify both login paths. Repeated apply makes no policy writes after convergence.
 
 On the first run, `apply` reports `manual action required` until the operator opens the selected Environment's Profilarr UI
 and adds exactly these enabled connections:
@@ -588,9 +591,11 @@ application cannot provide it; a later run observes current state and safely res
 | `promotion` | Full plus legal discovery, acquisition, hardlink import, authenticated Jellyfin discovery, and direct-play readiness |
 | `restore-drill` | Recovered state, isolation, rotated credentials, disabled acquisition, and gated integrations |
 
-Disruptive checks are confined to disposable resources or Staging and restore any perturbed state. Run `MEDIA_STACK_LIVE_JELLYFIN=1 go test ./tests/acceptance -run TestDisposableJellyfinServesImportedMovieReadOnly` to launch the pinned image with temporary state and prove authenticated discovery, direct-play readiness, and read-only media access against a real Jellyfin API. Production permits only
-non-disruptive smoke observations. The detailed testing strategy is being resolved in the
-[testing Wayfinder map](https://github.com/adkulas/homelab/issues/37).
+Disruptive checks are confined to disposable resources or Staging and restore any perturbed state. Run `MEDIA_STACK_LIVE_JELLYFIN=1 go test ./tests/acceptance -run TestDisposableJellyfinServesImportedMovieReadOnly` to prove authenticated discovery, direct-play readiness, and read-only media access against a real Jellyfin API. Run
+`MEDIA_STACK_LIVE_SEERR=1 go test ./tests/acceptance -run TestDisposableSeerrAuthenticatesHouseholdAndEmergencyLocalUsers`
+to launch the pinned Jellyfin and Seerr images, prove household Jellyfin sign-in, stop Jellyfin, and prove emergency local
+administrator sign-in remains available. Production permits only non-disruptive smoke observations. The detailed testing
+strategy is being resolved in the [testing Wayfinder map](https://github.com/adkulas/homelab/issues/37).
 
 ## Backups, restore, and Restore Drills
 
@@ -652,7 +657,7 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
 | `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
-| `media-stack apply --environment production|staging [--config path]` | Available through Jellyfin Movie and Series Library reconciliation | Uses the selected Environment's OpenVPN, Profilarr, and Jellyfin credentials without printing them; starts and reconciles qBittorrent, Radarr, Sonarr, Prowlarr, and Profilarr; then starts Jellyfin, bootstraps or authenticates its administrator, creates both libraries, and disables destructive deletion. An incomplete Profilarr connection still prints the exact UI checklist and exits `1`. |
+| `media-stack apply --environment production|staging [--config path]` | Available through Seerr household authentication | Uses the selected Environment's OpenVPN, Profilarr, and Jellyfin credentials without printing them; reconciles qBittorrent, Radarr, Sonarr, Prowlarr, Profilarr, and Jellyfin, then starts Seerr, enables new Jellyfin users with request-only default permission, and preserves the Jellyfin administrator as an emergency local Seerr administrator. An incomplete Profilarr connection still prints the exact UI checklist and exits `1`. |
 | `media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--now RFC3339] [--output human|json]` | Available | Stops only running services with mutable named volumes, archives each volume through a read-only Docker mount, resumes those services, independently verifies every checksum, atomically publishes the selected Environment manifest last, then expires unprotected archives according to `backupRetention`. Use `--protect` for an archive that retention must preserve and `--now` only to fix the clock for deterministic verification. |
 | `media-stack restore --environment production|staging --backup manifest.json [--config path] [--confirm] [--output human|json]` | Available for matching Environments | Validates complete compatible application-state coverage and checksums and persists the exact preview. Rerun unchanged with `--confirm` to create a protected safety backup, stage and verify temporary volumes, transactionally replace mutable state, restart through Compose dependency handling, and record an operation journal; failures roll back before services restart. Restore Drill execution remains planned. |
 | `media-stack verify --environment staging --suite full [--config path] [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, and recovery. Use it after `apply` in Staging; it is deliberately rejected for Production. |
@@ -664,7 +669,7 @@ Every currently available command requires an explicit `production` or `staging`
 `--config` path is resolved from the working directory, while omitting it selects `stacks/media/media-stack.yaml` from the
 repository root.
 
-The current qBittorrent, Radarr, Sonarr, Prowlarr, Profilarr, and Jellyfin apply phases share the renderer with `plan`; later mutation phases will add saved
+The current qBittorrent, Radarr, Sonarr, Prowlarr, Profilarr, Jellyfin, and Seerr apply phases share the renderer with `plan`; later mutation phases will add saved
 Plan Artifacts, Environment locking, confirmation, and volatile safety rechecks. Planned `destroy` will never purge media, torrent payloads,
 backups, secrets, or Declared Configuration.
 
