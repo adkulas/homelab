@@ -9,18 +9,19 @@ import (
 
 const defaultRenderDevice = "/dev/dri/renderD128"
 
-// Transcoding describes the host resources that Jellyfin needs for VA-API.
-// The zero value means that the portable topology should be rendered.
-type Status string
+// TranscodingStatus classifies the detected Linux DRM render node.
+type TranscodingStatus string
 
 const (
-	StatusSupported Status = "supported"
-	StatusMissing   Status = "missing"
-	StatusUnusable  Status = "unusable"
+	TranscodingSupported TranscodingStatus = "supported"
+	TranscodingMissing   TranscodingStatus = "missing"
+	TranscodingUnusable  TranscodingStatus = "unusable"
 )
 
+// Transcoding describes the host resources that Jellyfin needs for VA-API.
+// The zero value means that the portable topology should be rendered.
 type Transcoding struct {
-	Status       Status
+	Status       TranscodingStatus
 	RenderDevice string
 	GroupID      int
 }
@@ -41,12 +42,12 @@ func DetectTranscoding() Transcoding {
 func detectTranscoding(lookup renderDeviceLookup) Transcoding {
 	device, err := lookup(defaultRenderDevice)
 	if errors.Is(err, fs.ErrNotExist) {
-		return Transcoding{Status: StatusMissing}
+		return Transcoding{Status: TranscodingMissing}
 	}
 	if err != nil || device.mode&fs.ModeDevice == 0 || device.mode&fs.ModeCharDevice == 0 {
-		return Transcoding{Status: StatusUnusable}
+		return Transcoding{Status: TranscodingUnusable}
 	}
-	return Transcoding{Status: StatusSupported, RenderDevice: defaultRenderDevice, GroupID: device.groupID}
+	return Transcoding{Status: TranscodingSupported, RenderDevice: defaultRenderDevice, GroupID: device.groupID}
 }
 
 func inspectRenderDevice(path string) (renderDevice, error) {

@@ -4,14 +4,15 @@ import (
 	"context"
 	"strconv"
 
+	"github.com/adkulas/homelab/internal/config"
 	"github.com/adkulas/homelab/internal/hardware"
 )
 
 type hardwareProbe func(hardware.Transcoding) bool
 
-func doctorHardwareTranscodingDiagnostic(ctx context.Context, environment, preference, jellyfinImage string) Diagnostic {
-	detection := hardware.Transcoding{Status: hardware.StatusMissing}
-	if preference == "auto" {
+func doctorHardwareTranscodingDiagnostic(ctx context.Context, environment string, preference config.HardwareTranscodingPreference, jellyfinImage string) Diagnostic {
+	detection := hardware.Transcoding{Status: hardware.TranscodingMissing}
+	if preference == config.HardwareTranscodingAuto {
 		detection = hardware.DetectTranscoding()
 	}
 	return hardwareTranscodingDiagnostic(environment, preference, detection, func(detected hardware.Transcoding) bool {
@@ -25,27 +26,27 @@ func doctorHardwareTranscodingDiagnostic(ctx context.Context, environment, prefe
 	})
 }
 
-func hardwareTranscodingDiagnostic(environment, preference string, detection hardware.Transcoding, probe hardwareProbe) Diagnostic {
+func hardwareTranscodingDiagnostic(environment string, preference config.HardwareTranscodingPreference, detection hardware.Transcoding, probe hardwareProbe) Diagnostic {
 	diagnostic := Diagnostic{
 		Environment: environment,
 		Subject:     "optional Jellyfin hardware transcoding",
 		Severity:    "info",
 	}
-	if preference == "disabled" {
+	if preference == config.HardwareTranscodingDisabled {
 		diagnostic.Code = "PREFLIGHT_HARDWARE_TRANSCODING_DISABLED"
 		diagnostic.Status = "skip"
 		diagnostic.Explanation = "hardware transcoding is disabled for the selected Environment"
 		diagnostic.Remedy = "Set hardwareTranscoding to auto to detect a supported Linux DRM render node."
 		return diagnostic
 	}
-	if detection.Status == hardware.StatusMissing {
+	if detection.Status == hardware.TranscodingMissing {
 		diagnostic.Code = "PREFLIGHT_HARDWARE_TRANSCODING_UNAVAILABLE"
 		diagnostic.Status = "skip"
 		diagnostic.Explanation = "/dev/dri/renderD128 is absent; plan will retain the portable topology"
 		diagnostic.Remedy = "No action is required, or expose a supported Intel or AMD DRM render node to enable acceleration."
 		return diagnostic
 	}
-	if detection.Status != hardware.StatusSupported || !probe(detection) {
+	if detection.Status != hardware.TranscodingSupported || !probe(detection) {
 		diagnostic.Code = "PREFLIGHT_HARDWARE_TRANSCODING_UNUSABLE"
 		diagnostic.Status = "fail"
 		diagnostic.Severity = "error"

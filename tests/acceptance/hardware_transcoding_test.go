@@ -20,7 +20,7 @@ func TestDetectedHardwareTranscodingOverlayIsComposeValid(t *testing.T) {
 		config.VPN{},
 		versions.Images,
 		"/run/media-stack/media-staging",
-		hardware.Transcoding{Status: hardware.StatusSupported, RenderDevice: "/dev/dri/renderD128", GroupID: 109},
+		hardware.Transcoding{Status: hardware.TranscodingSupported, RenderDevice: "/dev/dri/renderD128", GroupID: 109},
 	)
 	if err != nil {
 		t.Fatalf("render supported hardware overlay: %v", err)

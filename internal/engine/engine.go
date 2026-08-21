@@ -86,7 +86,7 @@ func (localEngine) Plan(ctx context.Context, request PlanRequest) (Plan, error) 
 	}
 	environment := declared.Spec.Environments[request.environment]
 	transcoding := hardware.Transcoding{}
-	if environment.HardwareTranscoding == "auto" {
+	if environment.HardwareTranscoding == config.HardwareTranscodingAuto {
 		transcoding = hardware.DetectTranscoding()
 	}
 	compose, err := topology.Render(

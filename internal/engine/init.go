@@ -26,20 +26,20 @@ type InitReport struct {
 }
 
 type initAnswers struct {
-	RuntimeUID              int    `yaml:"runtimeUID"`
-	RuntimeGID              int    `yaml:"runtimeGID"`
-	Timezone                string `yaml:"timezone"`
-	Country                 string `yaml:"country"`
-	ServerCategory          string `yaml:"serverCategory"`
-	OpenVPNProtocol         string `yaml:"openvpnProtocol"`
-	CatalogueUpdateInterval string `yaml:"catalogueUpdateInterval"`
-	HardwareTranscoding     string `yaml:"hardwareTranscoding"`
-	AgeRecipient            string `yaml:"ageRecipient"`
-	ServiceUsername         string `yaml:"serviceUsername"`
-	ServicePassword         string `yaml:"servicePassword"`
-	ProfilarrAPIKey         string `yaml:"profilarrAPIKey"`
-	JellyfinUsername        string `yaml:"jellyfinUsername"`
-	JellyfinPassword        string `yaml:"jellyfinPassword"`
+	RuntimeUID              int                                  `yaml:"runtimeUID"`
+	RuntimeGID              int                                  `yaml:"runtimeGID"`
+	Timezone                string                               `yaml:"timezone"`
+	Country                 string                               `yaml:"country"`
+	ServerCategory          string                               `yaml:"serverCategory"`
+	OpenVPNProtocol         string                               `yaml:"openvpnProtocol"`
+	CatalogueUpdateInterval string                               `yaml:"catalogueUpdateInterval"`
+	HardwareTranscoding     config.HardwareTranscodingPreference `yaml:"hardwareTranscoding"`
+	AgeRecipient            string                               `yaml:"ageRecipient"`
+	ServiceUsername         string                               `yaml:"serviceUsername"`
+	ServicePassword         string                               `yaml:"servicePassword"`
+	ProfilarrAPIKey         string                               `yaml:"profilarrAPIKey"`
+	JellyfinUsername        string                               `yaml:"jellyfinUsername"`
+	JellyfinPassword        string                               `yaml:"jellyfinPassword"`
 }
 
 func NewInitRequest(workingDirectory, environment, configPath, answersPath string) (InitRequest, error) {
@@ -179,7 +179,7 @@ func validateInitAnswers(answers initAnswers, requireSecrets bool) error {
 	if answers.OpenVPNProtocol != "udp" && answers.OpenVPNProtocol != "tcp" {
 		return fmt.Errorf("openvpnProtocol must be udp or tcp")
 	}
-	if answers.HardwareTranscoding != "auto" && answers.HardwareTranscoding != "disabled" {
+	if !answers.HardwareTranscoding.Valid() {
 		return fmt.Errorf("hardwareTranscoding must be auto or disabled")
 	}
 	interval, err := time.ParseDuration(answers.CatalogueUpdateInterval)

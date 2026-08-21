@@ -19,7 +19,7 @@ func TestRenderAppliesDetectedHardwareTranscodingOverlay(t *testing.T) {
 	}{
 		{
 			name:        "supported host",
-			transcoding: hardware.Transcoding{Status: hardware.StatusSupported, RenderDevice: "/dev/dri/renderD128", GroupID: 109},
+			transcoding: hardware.Transcoding{Status: hardware.TranscodingSupported, RenderDevice: "/dev/dri/renderD128", GroupID: 109},
 			wantDevices: []string{"/dev/dri/renderD128:/dev/dri/renderD128"},
 			wantGroups:  []string{"109"},
 		},

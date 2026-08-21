@@ -97,10 +97,11 @@ func NewInteractiveInitRequest(workingDirectory, environment, configPath string,
 		}
 	}
 	if answers.HardwareTranscoding == "" {
-		answers.HardwareTranscoding, err = promptDefault(reader, output, "Hardware transcoding (auto or disabled) [auto]: ", "auto")
-		if err != nil {
-			return InitRequest{}, err
+		preference, promptErr := promptDefault(reader, output, "Hardware transcoding (auto or disabled) [auto]: ", string(config.HardwareTranscodingAuto))
+		if promptErr != nil {
+			return InitRequest{}, promptErr
 		}
+		answers.HardwareTranscoding = config.HardwareTranscodingPreference(preference)
 	}
 	if !secretExists {
 		fmt.Fprintln(output, "Use the username and password from the Nord Account manual-setup area.")

@@ -170,7 +170,7 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 		if definition.name == "profilarr" {
 			envFiles = []composeEnvFile{{Path: filepath.Join(runtimeSecretDirectory, "profilarr.env"), Required: false}}
 		}
-		if definition.name == "jellyfin" && transcoding.Status == hardware.StatusSupported {
+		if definition.name == "jellyfin" && transcoding.Status == hardware.TranscodingSupported {
 			devices = []string{transcoding.RenderDevice + ":" + transcoding.RenderDevice}
 			groups = []string{strconv.Itoa(transcoding.GroupID)}
 		}
