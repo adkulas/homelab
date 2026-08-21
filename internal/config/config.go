@@ -177,8 +177,14 @@ func (declared MediaStack) ValidateBackupEnvironment(name string) error {
 	if pathContains(productionRoot, stagingRoot) || pathContains(stagingRoot, productionRoot) {
 		return fmt.Errorf("Production and Staging backup roots must not overlap: %q and %q", productionRoot, stagingRoot)
 	}
-	if pathContains(filepath.Clean(production.DataRoot), productionRoot) || pathContains(filepath.Clean(staging.DataRoot), stagingRoot) {
-		return fmt.Errorf("backup roots must be outside their Environment data roots")
+	dataRoots := []string{filepath.Clean(production.DataRoot), filepath.Clean(staging.DataRoot)}
+	backupRoots := []string{productionRoot, stagingRoot}
+	for _, dataRoot := range dataRoots {
+		for _, backupRoot := range backupRoots {
+			if pathsOverlap(dataRoot, backupRoot) {
+				return fmt.Errorf("backup roots must not overlap Production or Staging data roots: %q and %q", backupRoot, dataRoot)
+			}
+		}
 	}
 	return nil
 }
@@ -189,6 +195,10 @@ func pathContains(parent, candidate string) bool {
 		return false
 	}
 	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
+}
+
+func pathsOverlap(first, second string) bool {
+	return pathContains(first, second) || pathContains(second, first)
 }
 
 func LoadVersions(path string) (Versions, error) {

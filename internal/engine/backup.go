@@ -50,16 +50,23 @@ type BackupReport struct {
 	Services           []BackupService `json:"services"`
 }
 
+type backupConsistencyMethod string
+
+const (
+	readOnlyVolumeArchive         backupConsistencyMethod = "read-only-volume-archive"
+	quiescedReadOnlyVolumeArchive backupConsistencyMethod = "compose-stop+read-only-volume-archive"
+)
+
 type BackupService struct {
-	Name              string `json:"name"`
-	Volume            string `json:"volume"`
-	DockerVolume      string `json:"dockerVolume"`
-	MountPath         string `json:"mountPath"`
-	Image             string `json:"image"`
-	ArchivePath       string `json:"archivePath"`
-	ChecksumSHA256    string `json:"checksumSHA256"`
-	ConsistencyMethod string `json:"consistencyMethod"`
-	SizeBytes         int64  `json:"sizeBytes"`
+	Name              string                  `json:"name"`
+	Volume            string                  `json:"volume"`
+	DockerVolume      string                  `json:"dockerVolume"`
+	MountPath         string                  `json:"mountPath"`
+	Image             string                  `json:"image"`
+	ArchivePath       string                  `json:"archivePath"`
+	ChecksumSHA256    string                  `json:"checksumSHA256"`
+	ConsistencyMethod backupConsistencyMethod `json:"consistencyMethod"`
+	SizeBytes         int64                   `json:"sizeBytes"`
 }
 
 func NewBackupRequest(workingDirectory, environment, configPath, label string, protect bool) (BackupRequest, error) {

@@ -127,9 +127,9 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 		if err != nil {
 			return BackupReport{}, err
 		}
-		method := "read-only-volume-archive"
+		method := readOnlyVolumeArchive
 		if running[source.serviceName] {
-			method = "compose-stop+" + method
+			method = quiescedReadOnlyVolumeArchive
 		}
 		services = append(services, BackupService{
 			Name:              source.serviceName,
@@ -185,9 +185,22 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 		return BackupReport{}, fmt.Errorf("atomically publish backup: %w", err)
 	}
 	if err := verifyPublishedBackup(report); err != nil {
+		if quarantineErr := quarantinePublishedBackup(finalPath, incompletePath); quarantineErr != nil {
+			return BackupReport{}, errors.Join(err, quarantineErr)
+		}
 		return BackupReport{}, err
 	}
 	return report, nil
+}
+
+func quarantinePublishedBackup(finalPath, incompletePath string) error {
+	if err := os.Rename(finalPath, incompletePath); err != nil {
+		return fmt.Errorf("quarantine invalid published backup: %w", err)
+	}
+	if err := os.Remove(filepath.Join(incompletePath, "manifest.json")); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove invalid published manifest: %w", err)
+	}
+	return nil
 }
 
 func backupSources(compose []byte, projectName string) ([]backupSource, error) {
@@ -353,10 +366,19 @@ func verifyPublishedBackup(report BackupReport) error {
 	if err != nil {
 		return fmt.Errorf("verify published manifest: %w", err)
 	}
-	if !json.Valid(manifest) {
-		return fmt.Errorf("verify published manifest: invalid JSON")
+	var published BackupReport
+	if err := json.Unmarshal(manifest, &published); err != nil {
+		return fmt.Errorf("verify published manifest: decode: %w", err)
 	}
-	return verifyBackupArchives(filepath.Dir(report.ManifestPath), report.Services)
+	expected, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return fmt.Errorf("verify published manifest: encode expected document: %w", err)
+	}
+	expected = append(expected, '\n')
+	if !bytes.Equal(manifest, expected) {
+		return fmt.Errorf("verify published manifest: document differs from completed backup report")
+	}
+	return verifyBackupArchives(filepath.Dir(report.ManifestPath), published.Services)
 }
 
 func backupID(generatedAt time.Time) (string, error) {
