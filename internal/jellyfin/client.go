@@ -11,7 +11,10 @@ import (
 	"strings"
 )
 
-const movieLibraryPath = "/data/media/movies"
+const (
+	movieLibraryPath  = "/data/media/movies"
+	seriesLibraryPath = "/data/media/series"
+)
 
 type Credentials struct {
 	Username string
@@ -40,7 +43,7 @@ func New(baseURL string, httpClient *http.Client) *Client {
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: httpClient}
 }
 
-func (client *Client) ReconcileMovieLibrary(ctx context.Context, credentials Credentials) error {
+func (client *Client) ReconcileLibraries(ctx context.Context, credentials Credentials) error {
 	if credentials.Username == "" || credentials.Password == "" {
 		return fmt.Errorf("Jellyfin username and password are required")
 	}
@@ -52,16 +55,18 @@ func (client *Client) ReconcileMovieLibrary(ctx context.Context, credentials Cre
 	}
 	if !publicInfo.StartupWizardCompleted {
 		steps := []struct {
-			path string
-			body any
+			method string
+			path   string
+			body   any
 		}{
-			{"/Startup/Configuration", map[string]any{"UICulture": "en-US", "MetadataCountryCode": "US", "PreferredMetadataLanguage": "en"}},
-			{"/Startup/User", map[string]string{"Name": credentials.Username, "Password": credentials.Password}},
-			{"/Startup/RemoteAccess", map[string]bool{"EnableRemoteAccess": false, "EnableAutomaticPortMapping": false}},
-			{"/Startup/Complete", map[string]any{}},
+			{http.MethodPost, "/Startup/Configuration", map[string]any{"UICulture": "en-US", "MetadataCountryCode": "US", "PreferredMetadataLanguage": "en"}},
+			{http.MethodGet, "/Startup/User", nil},
+			{http.MethodPost, "/Startup/User", map[string]string{"Name": credentials.Username, "Password": credentials.Password}},
+			{http.MethodPost, "/Startup/RemoteAccess", map[string]bool{"EnableRemoteAccess": false, "EnableAutomaticPortMapping": false}},
+			{http.MethodPost, "/Startup/Complete", map[string]any{}},
 		}
 		for _, step := range steps {
-			if err := client.doJSON(ctx, http.MethodPost, step.path, step.body, "", nil); err != nil {
+			if err := client.doJSON(ctx, step.method, step.path, step.body, "", nil); err != nil {
 				return fmt.Errorf("complete Jellyfin startup at %s: %w", step.path, err)
 			}
 		}
@@ -78,20 +83,30 @@ func (client *Client) ReconcileMovieLibrary(ctx context.Context, credentials Cre
 	if err := client.doJSON(ctx, http.MethodGet, "/Library/VirtualFolders", nil, auth.AccessToken, &libraries); err != nil {
 		return fmt.Errorf("observe Jellyfin libraries: %w", err)
 	}
-	found := false
-	for _, library := range libraries {
-		if library.Name != "Movie Library" {
-			continue
-		}
-		if library.CollectionType != "movies" || len(library.Locations) != 1 || library.Locations[0] != movieLibraryPath {
-			return fmt.Errorf("Jellyfin Movie Library must use only %s", movieLibraryPath)
-		}
-		found = true
+	desiredLibraries := []struct {
+		name           string
+		collectionType string
+		path           string
+	}{
+		{name: "Movie Library", collectionType: "movies", path: movieLibraryPath},
+		{name: "Series Library", collectionType: "tvshows", path: seriesLibraryPath},
 	}
-	if !found {
-		query := url.Values{"name": {"Movie Library"}, "collectionType": {"movies"}, "paths": {movieLibraryPath}, "refreshLibrary": {"true"}}
-		if err := client.doJSON(ctx, http.MethodPost, "/Library/VirtualFolders?"+query.Encode(), nil, auth.AccessToken, nil); err != nil {
-			return fmt.Errorf("create Jellyfin Movie Library: %w", err)
+	for _, desired := range desiredLibraries {
+		found := false
+		for _, library := range libraries {
+			if library.Name != desired.name {
+				continue
+			}
+			if library.CollectionType != desired.collectionType || len(library.Locations) != 1 || library.Locations[0] != desired.path {
+				return fmt.Errorf("Jellyfin %s must use only %s", desired.name, desired.path)
+			}
+			found = true
+		}
+		if !found {
+			query := url.Values{"name": {desired.name}, "collectionType": {desired.collectionType}, "paths": {desired.path}, "refreshLibrary": {"true"}}
+			if err := client.doJSON(ctx, http.MethodPost, "/Library/VirtualFolders?"+query.Encode(), nil, auth.AccessToken, nil); err != nil {
+				return fmt.Errorf("create Jellyfin %s: %w", desired.name, err)
+			}
 		}
 	}
 	users, err := client.users(ctx, auth.AccessToken)
@@ -143,11 +158,19 @@ func deletionDisabled(policy map[string]any) bool {
 }
 
 func (client *Client) MoviePlaybackReady(ctx context.Context, credentials Credentials, moviePath string) (bool, error) {
+	return client.playbackReady(ctx, credentials, "Movie", moviePath)
+}
+
+func (client *Client) EpisodePlaybackReady(ctx context.Context, credentials Credentials, episodePath string) (bool, error) {
+	return client.playbackReady(ctx, credentials, "Episode", episodePath)
+}
+
+func (client *Client) playbackReady(ctx context.Context, credentials Credentials, itemType, mediaPath string) (bool, error) {
 	auth, err := client.authenticate(ctx, credentials)
 	if err != nil {
 		return false, err
 	}
-	query := url.Values{"Recursive": {"true"}, "IncludeItemTypes": {"Movie"}, "Fields": {"Path"}}
+	query := url.Values{"Recursive": {"true"}, "IncludeItemTypes": {itemType}, "Fields": {"Path"}}
 	var items struct {
 		Items []struct {
 			ID   string `json:"Id"`
@@ -155,10 +178,10 @@ func (client *Client) MoviePlaybackReady(ctx context.Context, credentials Creden
 		} `json:"Items"`
 	}
 	if err := client.doJSON(ctx, http.MethodGet, "/Users/"+url.PathEscape(auth.User.ID)+"/Items?"+query.Encode(), nil, auth.AccessToken, &items); err != nil {
-		return false, fmt.Errorf("discover imported movie through Jellyfin: %w", err)
+		return false, fmt.Errorf("discover imported %s through Jellyfin: %w", strings.ToLower(itemType), err)
 	}
 	for _, item := range items.Items {
-		if item.Path != moviePath {
+		if item.Path != mediaPath {
 			continue
 		}
 		var playback struct {
@@ -172,7 +195,7 @@ func (client *Client) MoviePlaybackReady(ctx context.Context, credentials Creden
 			return false, fmt.Errorf("inspect Jellyfin playback readiness: %w", err)
 		}
 		for _, source := range playback.MediaSources {
-			if source.Path == moviePath && source.SupportsDirectPlay {
+			if source.Path == mediaPath && source.SupportsDirectPlay {
 				return true, nil
 			}
 		}

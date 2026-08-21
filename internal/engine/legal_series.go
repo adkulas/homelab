@@ -101,7 +101,7 @@ func verifyLegalSeries(ctx context.Context, plan Plan, declared config.MediaStac
 			report.add("VERIFY_SERIES_EPISODE_ACQUISITION_FAILED", "legal series episode acquisition", "Wait for the declared legal release to complete in qBittorrent, then retry.", false)
 			return
 		}
-		if !waitForMoviePoll(ctx, deadline) {
+		if !waitForMediaPoll(ctx, deadline) {
 			report.add("VERIFY_SERIES_EPISODE_ACQUISITION_FAILED", "legal series episode acquisition", ctx.Err().Error(), false)
 			return
 		}
@@ -134,6 +134,7 @@ func verifyLegalSeries(ctx context.Context, plan Plan, declared config.MediaStac
 				sourceInfo, statErr := os.Stat(sourcePath)
 				if statErr == nil && os.SameFile(sourceInfo, importInfo) {
 					report.add("VERIFY_SERIES_EPISODE_HARDLINKED", "qBittorrent source and Series Library inode identity", "", true)
+					verifyJellyfinPlayback(ctx, declared, request, episodeFile.Path, deadline, report, seriesEpisodePlaybackCheck)
 					return
 				}
 			}
@@ -142,7 +143,7 @@ func verifyLegalSeries(ctx context.Context, plan Plan, declared config.MediaStac
 			report.add("VERIFY_SERIES_EPISODE_IMPORT_FAILED", "Series Library hardlink import", "Wait for Sonarr Completed Download Handling and confirm source/imported files share the selected Environment data root.", false)
 			return
 		}
-		if !waitForMoviePoll(ctx, deadline) {
+		if !waitForMediaPoll(ctx, deadline) {
 			report.add("VERIFY_SERIES_EPISODE_IMPORT_FAILED", "Series Library hardlink import", ctx.Err().Error(), false)
 			return
 		}

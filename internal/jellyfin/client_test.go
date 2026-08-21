@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-func TestReconcileMovieLibraryBootstrapsAuthenticationAndDisablesDeletion(t *testing.T) {
-	startupComplete := false
+func TestReconcileLibrariesBootstrapsAuthenticationAndDisablesDeletion(t *testing.T) {
+	startupComplete, firstUserInitialized := false, false
 	libraries := []map[string]any{{"Name": "Legacy Movies", "CollectionType": "movies", "Locations": []string{"/legacy/movies"}}}
 	policy := map[string]any{
 		"IsAdministrator":                  true,
@@ -32,8 +32,15 @@ func TestReconcileMovieLibraryBootstrapsAuthenticationAndDisablesDeletion(t *tes
 				startupComplete = true
 			}
 			writer.WriteHeader(http.StatusNoContent)
+		case "GET /Startup/User":
+			firstUserInitialized = true
+			_ = json.NewEncoder(writer).Encode(map[string]any{"Name": "jellyfin"})
 		case "POST /Startup/User":
 			writes++
+			if !firstUserInitialized {
+				http.Error(writer, "first user not initialized", http.StatusNotFound)
+				return
+			}
 			var body map[string]any
 			_ = json.NewDecoder(request.Body).Decode(&body)
 			if body["Name"] != "household" || body["Password"] != "fixture-jellyfin-password" {
@@ -59,10 +66,14 @@ func TestReconcileMovieLibraryBootstrapsAuthenticationAndDisablesDeletion(t *tes
 		case "POST /Library/VirtualFolders":
 			requireToken(t, request)
 			writes++
-			if request.URL.Query().Get("name") != "Movie Library" || request.URL.Query().Get("collectionType") != "movies" || request.URL.Query()["paths"][0] != "/data/media/movies" {
+			name := request.URL.Query().Get("name")
+			collectionType := request.URL.Query().Get("collectionType")
+			path := request.URL.Query()["paths"][0]
+			if (name != "Movie Library" || collectionType != "movies" || path != "/data/media/movies") &&
+				(name != "Series Library" || collectionType != "tvshows" || path != "/data/media/series") {
 				t.Errorf("library query = %s", request.URL.RawQuery)
 			}
-			libraries = append(libraries, map[string]any{"Name": "Movie Library", "CollectionType": "movies", "Locations": []string{"/data/media/movies"}})
+			libraries = append(libraries, map[string]any{"Name": name, "CollectionType": collectionType, "Locations": []string{path}})
 			writer.WriteHeader(http.StatusNoContent)
 		case "POST /Users/user-1/Policy":
 			requireToken(t, request)
@@ -81,8 +92,8 @@ func TestReconcileMovieLibraryBootstrapsAuthenticationAndDisablesDeletion(t *tes
 	defer server.Close()
 
 	client := New(server.URL, server.Client())
-	if err := client.ReconcileMovieLibrary(context.Background(), Credentials{Username: "household", Password: "fixture-jellyfin-password"}); err != nil {
-		t.Fatalf("reconcile Movie Library: %v", err)
+	if err := client.ReconcileLibraries(context.Background(), Credentials{Username: "household", Password: "fixture-jellyfin-password"}); err != nil {
+		t.Fatalf("reconcile Movie and Series Libraries: %v", err)
 	}
 	if policy["EnableContentDeletion"] != false {
 		t.Fatalf("content deletion = %#v, want false", policy["EnableContentDeletion"])
@@ -96,11 +107,11 @@ func TestReconcileMovieLibraryBootstrapsAuthenticationAndDisablesDeletion(t *tes
 	if otherPolicy["EnableContentDeletion"] != false {
 		t.Fatalf("other user retained destructive deletion: %#v", otherPolicy)
 	}
-	if len(libraries) != 2 || libraries[0]["Name"] != "Legacy Movies" {
-		t.Fatalf("unrelated movie library was not preserved: %#v", libraries)
+	if len(libraries) != 3 || libraries[0]["Name"] != "Legacy Movies" || libraries[1]["Name"] != "Movie Library" || libraries[2]["Name"] != "Series Library" {
+		t.Fatalf("Movie and Series Libraries were not reconciled while preserving unrelated libraries: %#v", libraries)
 	}
 	writesAfterFirstRun := writes
-	if err := client.ReconcileMovieLibrary(context.Background(), Credentials{Username: "household", Password: "fixture-jellyfin-password"}); err != nil {
+	if err := client.ReconcileLibraries(context.Background(), Credentials{Username: "household", Password: "fixture-jellyfin-password"}); err != nil {
 		t.Fatalf("repeat reconciliation: %v", err)
 	}
 	if writes != writesAfterFirstRun {
@@ -133,6 +144,42 @@ func TestMovieIsDiscoverableAndPlaybackReadyForAuthenticatedUser(t *testing.T) {
 	}
 	if !ready {
 		t.Fatal("authenticated user could not discover and directly play the imported movie")
+	}
+}
+
+func TestEpisodeIsDiscoverableAndPlaybackReadyForAuthenticatedUser(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.Method + " " + request.URL.Path {
+		case "POST /Users/AuthenticateByName":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"AccessToken": "fixture-access-token", "User": map[string]any{"Id": "user-1", "Policy": map[string]any{}}})
+		case "GET /Users/user-1/Items":
+			requireToken(t, request)
+			if request.URL.Query().Get("IncludeItemTypes") != "Episode" {
+				http.Error(writer, "expected Episode item type", http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{"Items": []any{map[string]any{
+				"Id": "episode-1", "Name": "Lucy Waits Up for Chris", "Path": "/data/media/series/The Lucy Show/Season 01/The Lucy Show - S01E01.mp4",
+			}}})
+		case "GET /Items/episode-1/PlaybackInfo":
+			requireToken(t, request)
+			_ = json.NewEncoder(writer).Encode(map[string]any{"MediaSources": []any{map[string]any{
+				"Path": "/data/media/series/The Lucy Show/Season 01/The Lucy Show - S01E01.mp4", "SupportsDirectPlay": true,
+			}}})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	ready, err := New(server.URL, server.Client()).EpisodePlaybackReady(context.Background(), Credentials{
+		Username: "household", Password: "fixture-jellyfin-password",
+	}, "/data/media/series/The Lucy Show/Season 01/The Lucy Show - S01E01.mp4")
+	if err != nil {
+		t.Fatalf("verify episode playback: %v", err)
+	}
+	if !ready {
+		t.Fatal("authenticated user could not discover and directly play the imported episode")
 	}
 }
 

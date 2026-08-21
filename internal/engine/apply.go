@@ -184,17 +184,17 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	}
 	jellyfinAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Jellyfin)
 	jellyfinClient := jellyfin.New("http://"+jellyfinAddress, &http.Client{Timeout: 10 * time.Second})
-	if err := waitForJellyfinMovieLibrary(ctx, jellyfinClient, secrets.Jellyfin, 120*time.Second); err != nil {
+	if err := waitForJellyfinLibraries(ctx, jellyfinClient, secrets.Jellyfin, 120*time.Second); err != nil {
 		return ApplyReport{}, err
 	}
 	return ApplyReport{Environment: request.plan.environment}, nil
 }
 
-func waitForJellyfinMovieLibrary(ctx context.Context, client *jellyfin.Client, credentials jellyfin.Credentials, timeout time.Duration) error {
+func waitForJellyfinLibraries(ctx context.Context, client *jellyfin.Client, credentials jellyfin.Credentials, timeout time.Duration) error {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	for {
-		err := client.ReconcileMovieLibrary(ctx, credentials)
+		err := client.ReconcileLibraries(ctx, credentials)
 		if err == nil {
 			return nil
 		}

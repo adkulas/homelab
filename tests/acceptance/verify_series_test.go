@@ -115,6 +115,33 @@ func TestPromotionVerifyAcquiresAndHardlinkImportsLegalSeriesEpisode(t *testing.
 		}
 	}))
 	defer api.Close()
+	jellyfinAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		mutex.Lock()
+		defer mutex.Unlock()
+		switch request.Method + " " + request.URL.Path {
+		case "POST /Users/AuthenticateByName":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"AccessToken": "fixture-jellyfin-token", "User": map[string]any{"Id": "jellyfin-user", "Policy": map[string]any{}}})
+		case "GET /Users/jellyfin-user/Items":
+			if request.Header.Get("X-Emby-Token") != "fixture-jellyfin-token" || request.URL.Query().Get("IncludeItemTypes") != "Episode" {
+				http.Error(writer, "unexpected Jellyfin episode discovery", http.StatusBadRequest)
+				return
+			}
+			items := []any{}
+			if imported {
+				items = append(items, map[string]any{"Id": "episode-1", "Name": "Lucy Waits Up for Chris", "Path": "/data/media/series/The Lucy Show/Season 01/The Lucy Show - S01E01.mp4"})
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{"Items": items})
+		case "GET /Items/episode-1/PlaybackInfo":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"MediaSources": []any{map[string]any{"Path": "/data/media/series/The Lucy Show/Season 01/The Lucy Show - S01E01.mp4", "SupportsDirectPlay": true}}})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer jellyfinAPI.Close()
+	jellyfinURL, err := url.Parse(jellyfinAPI.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
 	apiURL, err := url.Parse(api.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +152,12 @@ func TestPromotionVerifyAcquiresAndHardlinkImportsLegalSeriesEpisode(t *testing.
 	declared = strings.Replace(declared, "dataRoot: /srv/media/staging", "dataRoot: "+dataRoot, 1)
 	declared = strings.Replace(declared, "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "sonarr: 18989", "sonarr: "+apiURL.Port(), 1)
+	declared = strings.Replace(declared, "jellyfin: 18096", "jellyfin: "+jellyfinURL.Port(), 1)
 	writeFile(t, configPath, []byte(declared), 0o600)
+	if err := os.Mkdir(filepath.Join(temporary, "secrets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(temporary, "secrets", "staging.sops.yaml"), []byte("encrypted: true\n"), 0o600)
 	fixturePath := filepath.Join(temporary, "legal-series.yaml")
 	writeFile(t, fixturePath, []byte(`apiVersion: homelab.media-stack/legal-series/v1alpha1
 kind: LegalSeriesFixture
@@ -143,6 +175,7 @@ spec:
 	if err := os.Mkdir(binDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	writeFile(t, filepath.Join(binDirectory, "sops"), []byte("#!/bin/sh\nprintf 'nordvpn:\n  openvpn:\n    serviceUsername: fixture-user\n    servicePassword: fixture-password\nprofilarr:\n  apiKey: fixture-profilarr-api-key-32-characters\njellyfin:\n  username: household\n  password: fixture-jellyfin-password\n'\n"), 0o700)
 	writeFile(t, filepath.Join(binDirectory, "curl"), []byte("#!/bin/sh\nprintf '198.51.100.10\\n'\n"), 0o700)
 	writeFile(t, filepath.Join(binDirectory, "docker"), []byte(`#!/bin/sh
 cat >/dev/null
@@ -190,7 +223,7 @@ esac
 	for _, diagnostic := range report.Diagnostics {
 		passed[diagnostic.Code] = diagnostic.Status == "pass"
 	}
-	for _, code := range []string{"VERIFY_SERIES_EPISODE_ACQUIRED", "VERIFY_SERIES_EPISODE_HARDLINKED"} {
+	for _, code := range []string{"VERIFY_SERIES_EPISODE_ACQUIRED", "VERIFY_SERIES_EPISODE_HARDLINKED", "VERIFY_SERIES_EPISODE_PLAYBACK_READY"} {
 		if !passed[code] {
 			t.Errorf("promotion verification did not report %s: %s", code, output)
 		}

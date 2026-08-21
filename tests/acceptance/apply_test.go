@@ -308,7 +308,10 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 		case "GET /Library/VirtualFolders":
 			_ = json.NewEncoder(writer).Encode(jellyfinLibraries)
 		case "POST /Library/VirtualFolders":
-			jellyfinLibraries = append(jellyfinLibraries, map[string]any{"Name": "Movie Library", "CollectionType": "movies", "Locations": []string{"/data/media/movies"}})
+			name := request.URL.Query().Get("name")
+			collectionType := request.URL.Query().Get("collectionType")
+			path := request.URL.Query().Get("paths")
+			jellyfinLibraries = append(jellyfinLibraries, map[string]any{"Name": name, "CollectionType": collectionType, "Locations": []string{path}})
 			writer.WriteHeader(http.StatusNoContent)
 		case "POST /Users/jellyfin-user/Policy":
 			jellyfinPolicyWrites++
@@ -493,8 +496,9 @@ EOF
 	if fields := applicationsByName["Sonarr"]; fields["baseUrl"] != "http://sonarr:8989" || fields["prowlarrUrl"] != "http://prowlarr:9696" || fields["apiKey"] != "fixture-sonarr-api-key" {
 		t.Errorf("Prowlarr Sonarr application contract = %v", fields)
 	}
-	if len(jellyfinLibraries) != 1 || jellyfinLibraries[0]["Name"] != "Movie Library" {
-		t.Errorf("apply did not reconcile Jellyfin Movie Library: %v", jellyfinLibraries)
+	if len(jellyfinLibraries) != 2 || jellyfinLibraries[0]["Name"] != "Movie Library" || jellyfinLibraries[0]["CollectionType"] != "movies" ||
+		jellyfinLibraries[1]["Name"] != "Series Library" || jellyfinLibraries[1]["CollectionType"] != "tvshows" || jellyfinLibraries[1]["Locations"].([]string)[0] != "/data/media/series" {
+		t.Errorf("apply did not reconcile Jellyfin Movie and Series Libraries: %v", jellyfinLibraries)
 	}
 	if jellyfinPolicy["EnableContentDeletion"] != false || jellyfinPolicyWrites != 1 {
 		t.Errorf("apply did not disable destructive Jellyfin deletion: policy=%v writes=%d", jellyfinPolicy, jellyfinPolicyWrites)
@@ -519,7 +523,7 @@ EOF
 	if err != nil {
 		t.Fatalf("repeated media-stack apply failed: %v\n%s", err, secondOutput)
 	}
-	if len(rootFolders) != 1 || len(downloadClients) != 1 || len(seriesRootFolders) != 1 || len(seriesDownloadClients) != 1 || len(indexers) != 1 || len(applications) != 2 || len(jellyfinLibraries) != 1 || jellyfinPolicyWrites != 1 {
+	if len(rootFolders) != 1 || len(downloadClients) != 1 || len(seriesRootFolders) != 1 || len(seriesDownloadClients) != 1 || len(indexers) != 1 || len(applications) != 2 || len(jellyfinLibraries) != 2 || jellyfinPolicyWrites != 1 {
 		t.Errorf("repeated apply did not converge: movieRoots=%v movieDownloadClients=%v seriesRoots=%v seriesDownloadClients=%v indexers=%v applications=%v", rootFolders, downloadClients, seriesRootFolders, seriesDownloadClients, indexers, applications)
 	}
 
@@ -624,7 +628,7 @@ func TestApplyRedactsCredentialsFromUnhealthyGluetunFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(binDirectory, "sops"), []byte(`#!/bin/sh
-printf 'nordvpn:\n  openvpn:\n    serviceUsername: failure-service-user\n    servicePassword: failure-service-password\nprofilarr:\n  apiKey: fixture-profilarr-api-key-32-characters\n'
+printf 'nordvpn:\n  openvpn:\n    serviceUsername: failure-service-user\n    servicePassword: failure-service-password\nprofilarr:\n  apiKey: fixture-profilarr-api-key-32-characters\njellyfin:\n  username: household\n  password: fixture-jellyfin-password\n'
 `), 0o700)
 	writeFile(t, filepath.Join(binDirectory, "docker"), []byte(`#!/bin/sh
 cat >/dev/null
