@@ -84,38 +84,51 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	}
 	seriesQualityProfiles := []map[string]any{
 		{
-			"name":              "HD Bluray + WEB",
+			"name":              "WEB-1080p",
 			"upgradeAllowed":    true,
-			"cutoff":            7,
+			"cutoff":            1001,
 			"minFormatScore":    0,
 			"cutoffFormatScore": 10000,
 			"items": []any{
-				map[string]any{"quality": map[string]any{"id": 7, "name": "Bluray-1080p"}, "allowed": true},
-				map[string]any{"name": "WEB 1080p", "allowed": true, "items": []any{}},
-				map[string]any{"quality": map[string]any{"id": 6, "name": "Bluray-720p"}, "allowed": true},
+				map[string]any{
+					"id":      1001,
+					"name":    "WEB 1080p",
+					"allowed": true,
+					"items": []any{
+						map[string]any{"quality": map[string]any{"id": 3, "name": "WEBDL-1080p"}, "allowed": true},
+						map[string]any{"quality": map[string]any{"id": 15, "name": "WEBRip-1080p"}, "allowed": true},
+					},
+				},
+				map[string]any{"quality": map[string]any{"id": 7, "name": "Bluray-1080p"}, "allowed": false},
 			},
 			"formatItems": []any{
-				map[string]any{"format": 101, "score": 1800},
-				map[string]any{"format": 102, "score": 1700},
-				map[string]any{"format": 103, "score": -10000},
+				map[string]any{"format": 201, "score": 1700},
+				map[string]any{"format": 202, "score": -10000},
+				map[string]any{"format": 203, "score": -10000},
+				map[string]any{"format": 204, "score": 5},
 			},
 		},
 	}
 	seriesCustomFormats := []map[string]any{
-		{"id": 101, "name": "HD Bluray Tier 01"},
-		{"id": 102, "name": "WEB Tier 01"},
-		{"id": 103, "name": "BR-DISK"},
+		{"id": 201, "name": "WEB Tier 01"},
+		{"id": 202, "name": "BR-DISK"},
+		{"id": 203, "name": "Language: Not Original"},
+		{"id": 204, "name": "Repack/Proper"},
 	}
 	seriesQualityDefinitions := []map[string]any{
-		{"quality": map[string]any{"name": "Bluray-1080p"}, "minSize": 51, "maxSize": 2000, "preferredSize": 1999},
-		{"quality": map[string]any{"name": "WEBDL-1080p"}, "minSize": 13, "maxSize": 2000, "preferredSize": 1999},
+		{"quality": map[string]any{"name": "WEBDL-1080p"}, "minSize": 15, "maxSize": 0, "preferredSize": 995},
+		{"quality": map[string]any{"name": "WEBRip-1080p"}, "minSize": 15, "maxSize": 0, "preferredSize": 995},
 	}
 	seriesNaming := map[string]any{
-		"renameMovies":             true,
-		"standardMovieFormat":      "{Movie CleanTitle} {(Release Year)} [tmdbid-{TmdbId}] - {{Edition Tags}} {[MediaInfo 3D]}{[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}",
-		"movieFolderFormat":        "{Movie CleanTitle} ({Release Year}) [tmdbid-{TmdbId}]",
+		"renameEpisodes":           true,
+		"standardEpisodeFormat":    "{Series CleanTitleWithoutYear} {(Series Year)} - S{season:00}E{episode:00} - {Episode CleanTitle:90} {[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}",
+		"dailyEpisodeFormat":       "{Series CleanTitleWithoutYear} {(Series Year)} - {Air-Date} - {Episode CleanTitle:90} {[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}",
+		"animeEpisodeFormat":       "{Series CleanTitleWithoutYear} {(Series Year)} - S{season:00}E{episode:00} - {absolute:000} - {Episode CleanTitle:90} {[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{MediaInfo AudioLanguages}{[MediaInfo VideoDynamicRangeType]}[{Mediainfo VideoCodec }{MediaInfo VideoBitDepth}bit]{-Release Group}",
+		"seriesFolderFormat":       "{Series CleanTitleWithoutYear} {(Series Year)} [tvdbid-{TvdbId}]",
+		"seasonFolderFormat":       "Season {season:00}",
 		"replaceIllegalCharacters": false,
-		"colonReplacementFormat":   "smart",
+		"colonReplacementFormat":   4,
+		"multiEpisodeStyle":        5,
 	}
 	seriesMediaManagement := map[string]any{
 		"downloadPropersAndRepacks": "doNotPrefer",
@@ -358,6 +371,9 @@ EOF
 	if !strings.Contains(string(output), "Applied the pinned Movie Library policy through Profilarr in the staging Environment.") {
 		t.Errorf("apply output = %q, want completed Movie Library policy", output)
 	}
+	if !strings.Contains(string(output), "Applied the pinned Series Library policy through Profilarr in the staging Environment.") {
+		t.Errorf("apply output = %q, want completed Series Library policy", output)
+	}
 
 	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr"
 	if got := strings.TrimSpace(string(readFile(t, dockerLog))); got != wantDocker {
@@ -494,6 +510,7 @@ EOF
 			t.Errorf("Movie Library policy guidance = %q, want %q", policyOutput, want)
 		}
 	}
+	movieQualityProfiles = originalMovieQualityProfiles
 	seriesQualityProfiles = nil
 	seriesPolicyCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
 	seriesPolicyCommand.Dir = command.Dir
@@ -507,8 +524,8 @@ EOF
 		"http://127.0.0.1:" + apiURL.Port(),
 		"https://github.com/Dictionarry-Hub/trash-pcd",
 		"9e424382191de7d507efc9806ac3c807793d1c60",
-		"HD Bluray + WEB",
-		"Jellyfin TMDB",
+		"WEB-1080p",
+		"Jellyfin TVDB",
 		"Series quality definitions",
 		"Default",
 		"run sync",
@@ -519,9 +536,13 @@ EOF
 			t.Errorf("Series Library policy guidance = %q, want %q", seriesPolicyOutput, want)
 		}
 	}
-	movieQualityProfiles = originalMovieQualityProfiles
 	seriesQualityProfiles = originalSeriesQualityProfiles
 	profilarrInstances = profilarrInstances[:1]
+	seriesQualityProfiles = nil
+	seriesPolicyObservationsBeforeBootstrap := make(map[string]int, len(seriesPolicyObservations))
+	for observation, count := range seriesPolicyObservations {
+		seriesPolicyObservationsBeforeBootstrap[observation] = count
+	}
 	thirdCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
 	thirdCommand.Dir = command.Dir
 	thirdCommand.Env = command.Env
@@ -532,6 +553,14 @@ EOF
 	for _, want := range []string{"manual action required", "http://127.0.0.1:" + apiURL.Port(), "http://radarr:7878", "http://sonarr:8989", "rerun media-stack apply"} {
 		if !strings.Contains(string(thirdOutput), want) {
 			t.Errorf("incomplete Profilarr guidance = %q, want %q", thirdOutput, want)
+		}
+	}
+	if strings.Contains(string(thirdOutput), "Series Library policy drift") {
+		t.Errorf("apply checked Series Library policy before Profilarr bootstrap: %s", thirdOutput)
+	}
+	for observation, count := range seriesPolicyObservations {
+		if count != seriesPolicyObservationsBeforeBootstrap[observation] {
+			t.Errorf("apply observed Sonarr %s before Profilarr bootstrap", observation)
 		}
 	}
 }

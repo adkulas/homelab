@@ -5,42 +5,47 @@ source:
   revision: 9e424382191de7d507efc9806ac3c807793d1c60
   manifestVersion: 1.0.37
 profile:
-  name: HD Bluray + WEB
+  name: WEB-1080p
   upgradesAllowed: true
-  upgradeUntilQuality: Bluray-1080p
+  upgradeUntilQuality: WEB 1080p
   minimumCustomFormatScore: 0
   upgradeUntilCustomFormatScore: 10000
   allowedQualities:
-    - Bluray-1080p
     - WEB 1080p
-    - Bluray-720p
   customFormats:
-    - name: HD Bluray Tier 01
-      score: 1800
     - name: WEB Tier 01
       score: 1700
     - name: BR-DISK
       score: -10000
+    - name: "Language: Not Original"
+      score: -10000
+    - name: Repack/Proper
+      score: 5
 qualityDefinitions:
-  - quality: Bluray-1080p
-    minimum: 51
-    maximum: 2000
-    preferred: 1999
   - quality: WEBDL-1080p
-    minimum: 13
-    maximum: 2000
-    preferred: 1999
+    minimum: 15
+    maximum: 0
+    preferred: 995
+  - quality: WEBRip-1080p
+    minimum: 15
+    maximum: 0
+    preferred: 995
 naming:
-  preset: Jellyfin TMDB
-  renameMovies: true
-  standardMovieFormat: "{Movie CleanTitle} {(Release Year)} [tmdbid-{TmdbId}] - {{Edition Tags}} {[MediaInfo 3D]}{[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}"
-  movieFolderFormat: "{Movie CleanTitle} ({Release Year}) [tmdbid-{TmdbId}]"
+  preset: Jellyfin TVDB
+  renameEpisodes: true
+  standardEpisodeFormat: "{Series CleanTitleWithoutYear} {(Series Year)} - S{season:00}E{episode:00} - {Episode CleanTitle:90} {[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}"
+  dailyEpisodeFormat: "{Series CleanTitleWithoutYear} {(Series Year)} - {Air-Date} - {Episode CleanTitle:90} {[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}"
+  animeEpisodeFormat: "{Series CleanTitleWithoutYear} {(Series Year)} - S{season:00}E{episode:00} - {absolute:000} - {Episode CleanTitle:90} {[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{MediaInfo AudioLanguages}{[MediaInfo VideoDynamicRangeType]}[{Mediainfo VideoCodec }{MediaInfo VideoBitDepth}bit]{-Release Group}"
+  seriesFolderFormat: "{Series CleanTitleWithoutYear} {(Series Year)} [tvdbid-{TvdbId}]"
+  seasonFolderFormat: "Season {season:00}"
   replaceIllegalCharacters: false
-  colonReplacementFormat: smart
+  colonReplacementFormat: 4
+  multiEpisodeStyle: 5
 mediaManagement:
   preset: Default
   downloadPropersAndRepacks: doNotPrefer
   enableMediaInfo: true
 deviations:
-  - Select the Jellyfin TMDB naming preset because Jellyfin is the Media Stack playback service.
-  - Sync only the HD Bluray + WEB profile; UHD, remux-heavy, anime, and language-specific profiles are excluded from the first milestone.
+  - Select the Jellyfin TVDB naming preset because Jellyfin is the Media Stack playback service and Sonarr identifies series through TVDB.
+  - Sync only the WEB-1080p profile; Bluray, UHD, remux-heavy, anime, and language-specific profiles are excluded from the first milestone.
+  - Verify representative required, preferred, and unwanted custom-format scores while Profilarr remains the sole owner of the complete custom-format definitions.

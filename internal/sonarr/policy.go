@@ -57,11 +57,15 @@ type SeriesQualityDefinition struct {
 
 type SeriesNamingPolicy struct {
 	Preset                   string `yaml:"preset"`
-	RenameMovies             bool   `yaml:"renameMovies"`
-	StandardMovieFormat      string `yaml:"standardMovieFormat"`
-	MovieFolderFormat        string `yaml:"movieFolderFormat"`
+	RenameEpisodes           bool   `yaml:"renameEpisodes"`
+	StandardEpisodeFormat    string `yaml:"standardEpisodeFormat"`
+	DailyEpisodeFormat       string `yaml:"dailyEpisodeFormat"`
+	AnimeEpisodeFormat       string `yaml:"animeEpisodeFormat"`
+	SeriesFolderFormat       string `yaml:"seriesFolderFormat"`
+	SeasonFolderFormat       string `yaml:"seasonFolderFormat"`
 	ReplaceIllegalCharacters bool   `yaml:"replaceIllegalCharacters"`
-	ColonReplacementFormat   string `yaml:"colonReplacementFormat"`
+	ColonReplacementFormat   int    `yaml:"colonReplacementFormat"`
+	MultiEpisodeStyle        int    `yaml:"multiEpisodeStyle"`
 }
 
 type SeriesMediaManagement struct {
@@ -200,11 +204,15 @@ func (client *Client) VerifySeriesPolicy(ctx context.Context, policy SeriesPolic
 			drift = append(drift, fmt.Sprintf("quality definition %q differs", expected.Quality))
 		}
 	}
-	if naming.RenameMovies != policy.Naming.RenameMovies ||
-		naming.StandardMovieFormat != policy.Naming.StandardMovieFormat ||
-		naming.MovieFolderFormat != policy.Naming.MovieFolderFormat ||
+	if naming.RenameEpisodes != policy.Naming.RenameEpisodes ||
+		naming.StandardEpisodeFormat != policy.Naming.StandardEpisodeFormat ||
+		naming.DailyEpisodeFormat != policy.Naming.DailyEpisodeFormat ||
+		naming.AnimeEpisodeFormat != policy.Naming.AnimeEpisodeFormat ||
+		naming.SeriesFolderFormat != policy.Naming.SeriesFolderFormat ||
+		naming.SeasonFolderFormat != policy.Naming.SeasonFolderFormat ||
 		naming.ReplaceIllegalCharacters != policy.Naming.ReplaceIllegalCharacters ||
-		naming.ColonReplacementFormat != policy.Naming.ColonReplacementFormat {
+		naming.ColonReplacementFormat != policy.Naming.ColonReplacementFormat ||
+		naming.MultiEpisodeStyle != policy.Naming.MultiEpisodeStyle {
 		drift = append(drift, fmt.Sprintf("naming preset %q differs", policy.Naming.Preset))
 	}
 	if media.DownloadPropersAndRepacks != policy.MediaManagement.DownloadPropersAndRepacks ||
@@ -235,6 +243,12 @@ func allowedQualityNames(items []observedQualityProfileItem) []string {
 
 func cutoffQuality(items []observedQualityProfileItem, cutoff int) string {
 	for _, item := range items {
+		if item.ID == cutoff {
+			if item.Quality != nil {
+				return item.Quality.Name
+			}
+			return item.Name
+		}
 		if item.Quality != nil && item.Quality.ID == cutoff {
 			return item.Quality.Name
 		}
