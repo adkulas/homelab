@@ -18,7 +18,7 @@ func TestApplyRetentionKeepsDailyWeeklyMonthlySurvivors(t *testing.T) {
 		{ID: "2026-05-15", GeneratedAt: mustTime("2026-05-15T10:00:00Z")},
 	}
 
-	decision := ApplyRetention(RetentionPolicy{Daily: 1, Weekly: 1, Monthly: 1}, archives, mustTime("2026-08-20T23:59:59Z"))
+	decision := ApplyRetention(RetentionPolicy{Daily: 1, Weekly: 1, Monthly: 1}, archives)
 
 	gotKeep := archiveIDs(decision.Keep)
 	wantKeep := []string{"2026-08-19", "2026-08-20-a", "2026-08-20-b"}
@@ -39,7 +39,7 @@ func TestApplyRetentionNeverDropsProtectedArchives(t *testing.T) {
 		{ID: "expired", GeneratedAt: mustTime("2026-02-01T10:00:00Z")},
 	}
 
-	decision := ApplyRetention(RetentionPolicy{}, archives, mustTime("2026-08-20T23:59:59Z"))
+	decision := ApplyRetention(RetentionPolicy{}, archives)
 
 	gotKeep := archiveIDs(decision.Keep)
 	wantKeep := []string{"protected-new", "protected-old"}

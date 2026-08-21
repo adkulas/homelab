@@ -6,6 +6,10 @@ spec:
         runtimeUID: 1000
         runtimeGID: 1000
         lanBindAddress: 0.0.0.0
+        backupRetention:
+            daily: 7
+            weekly: 4
+            monthly: 6
     environments:
         production:
             projectName: media-production

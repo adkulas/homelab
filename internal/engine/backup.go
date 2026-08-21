@@ -86,8 +86,7 @@ func checksum(contents []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func ApplyRetention(policy RetentionPolicy, archives []BackupArchive, now time.Time) RetentionDecision {
-	_ = now
+func ApplyRetention(policy RetentionPolicy, archives []BackupArchive) RetentionDecision {
 	kept := make(map[string]BackupArchive)
 	remaining := make([]BackupArchive, 0, len(archives))
 	for _, archive := range archives {

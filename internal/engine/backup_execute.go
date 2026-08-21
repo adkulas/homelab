@@ -190,7 +190,54 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 		}
 		return BackupReport{}, err
 	}
+	retention := declared.Spec.Defaults.BackupRetention
+	if err := applyPublishedBackupRetention(environment.BackupRoot, request.plan.environment, RetentionPolicy{
+		Daily: retention.Daily, Weekly: retention.Weekly, Monthly: retention.Monthly,
+	}); err != nil {
+		return BackupReport{}, err
+	}
 	return report, nil
+}
+
+func applyPublishedBackupRetention(root, environment string, policy RetentionPolicy) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return fmt.Errorf("inventory %s Environment backups for retention: %w", environment, err)
+	}
+	archives := make([]BackupArchive, 0, len(entries))
+	paths := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".incomplete-") {
+			continue
+		}
+		directory := filepath.Join(root, entry.Name())
+		manifestPath := filepath.Join(directory, "manifest.json")
+		contents, err := os.ReadFile(manifestPath)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("read published backup manifest for retention: %w", err)
+		}
+		var manifest BackupReport
+		if err := json.Unmarshal(contents, &manifest); err != nil {
+			return fmt.Errorf("decode published backup manifest for retention: %w", err)
+		}
+		if manifest.SchemaVersion != backupSchemaVersion || !manifest.Complete || manifest.ID != entry.Name() ||
+			manifest.Environment != environment || manifest.GeneratedAt.IsZero() {
+			return fmt.Errorf("published backup %q is not a valid complete %s Environment archive", entry.Name(), environment)
+		}
+		archives = append(archives, BackupArchive{
+			ID: manifest.ID, GeneratedAt: manifest.GeneratedAt, Protected: manifest.Protected,
+		})
+		paths[manifest.ID] = directory
+	}
+	for _, archive := range ApplyRetention(policy, archives).Drop {
+		if err := os.RemoveAll(paths[archive.ID]); err != nil {
+			return fmt.Errorf("expire backup %q: %w", archive.ID, err)
+		}
+	}
+	return nil
 }
 
 func quarantinePublishedBackup(finalPath, incompletePath string) error {

@@ -10,11 +10,165 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 var backupFixtureServiceNames = []string{"gluetun", "qbittorrent", "prowlarr", "sonarr", "radarr", "profilarr", "jellyfin", "seerr"}
+
+func TestBackupAppliesConfiguredRetentionToPublishedEnvironmentArchives(t *testing.T) {
+	repository := repositoryRoot(t)
+	temporary := t.TempDir()
+	backupRoot := filepath.Join(temporary, "backups", "staging")
+	configPath := backupConfig(t, repository, temporary)
+	contents, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read Declared Configuration: %v", err)
+	}
+	contents = bytes.Replace(contents, []byte("        backupRetention:\n            daily: 7\n            weekly: 4\n            monthly: 6\n"), []byte("        backupRetention:\n            daily: 1\n            weekly: 1\n            monthly: 1\n"), 1)
+	if err := os.WriteFile(configPath, contents, 0o600); err != nil {
+		t.Fatalf("configure backup retention: %v", err)
+	}
+
+	fixtures := []struct {
+		id          string
+		generatedAt string
+		protected   bool
+	}{
+		{id: "weekly-survivor", generatedAt: "2025-03-19T12:00:00Z"},
+		{id: "monthly-survivor", generatedAt: "2025-02-15T12:00:00Z"},
+		{id: "expired", generatedAt: "2025-01-10T12:00:00Z"},
+		{id: "protected", generatedAt: "2024-01-01T12:00:00Z", protected: true},
+	}
+	for _, fixture := range fixtures {
+		writeBackupRetentionFixture(t, backupRoot, fixture.id, fixture.generatedAt, fixture.protected)
+	}
+
+	createdID := runBackupForRetention(t, temporary, configPath)
+	got := retainedBackupDirectories(t, backupRoot)
+	want := []string{createdID, "monthly-survivor", "protected", "weekly-survivor"}
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("retained backup directories = %#v, want %#v", got, want)
+	}
+}
+
+func TestBackupAppliesDefaultSevenDailyFourWeeklySixMonthlyRetention(t *testing.T) {
+	repository := repositoryRoot(t)
+	temporary := t.TempDir()
+	backupRoot := filepath.Join(temporary, "backups", "staging")
+	configPath := backupConfig(t, repository, temporary)
+	fixtures := []struct {
+		id          string
+		generatedAt string
+		protected   bool
+	}{
+		{id: "daily-1", generatedAt: "2024-03-30T12:00:00Z"},
+		{id: "daily-2", generatedAt: "2024-03-29T12:00:00Z"},
+		{id: "daily-3", generatedAt: "2024-03-28T12:00:00Z"},
+		{id: "daily-4", generatedAt: "2024-03-27T12:00:00Z"},
+		{id: "daily-5", generatedAt: "2024-03-26T12:00:00Z"},
+		{id: "daily-6", generatedAt: "2024-03-25T12:00:00Z"},
+		{id: "weekly-1", generatedAt: "2024-03-17T12:00:00Z"},
+		{id: "weekly-2", generatedAt: "2024-03-10T12:00:00Z"},
+		{id: "weekly-3", generatedAt: "2024-03-03T12:00:00Z"},
+		{id: "weekly-4", generatedAt: "2024-02-25T12:00:00Z"},
+		{id: "monthly-1", generatedAt: "2024-01-15T12:00:00Z"},
+		{id: "monthly-2", generatedAt: "2023-12-15T12:00:00Z"},
+		{id: "monthly-3", generatedAt: "2023-11-15T12:00:00Z"},
+		{id: "monthly-4", generatedAt: "2023-10-15T12:00:00Z"},
+		{id: "monthly-5", generatedAt: "2023-09-15T12:00:00Z"},
+		{id: "monthly-6", generatedAt: "2023-08-15T12:00:00Z"},
+		{id: "expired", generatedAt: "2023-07-15T12:00:00Z"},
+		{id: "protected", generatedAt: "2020-01-01T12:00:00Z", protected: true},
+	}
+	for _, fixture := range fixtures {
+		writeBackupRetentionFixture(t, backupRoot, fixture.id, fixture.generatedAt, fixture.protected)
+	}
+
+	createdID := runBackupForRetention(t, temporary, configPath)
+	got := retainedBackupDirectories(t, backupRoot)
+	want := []string{
+		createdID,
+		"daily-1", "daily-2", "daily-3", "daily-4", "daily-5", "daily-6",
+		"weekly-1", "weekly-2", "weekly-3", "weekly-4",
+		"monthly-1", "monthly-2", "monthly-3", "monthly-4", "monthly-5", "monthly-6",
+		"protected",
+	}
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("retained backup directories = %#v, want %#v", got, want)
+	}
+}
+
+func runBackupForRetention(t *testing.T, temporary, configPath string) string {
+	t.Helper()
+	fixtureRoot := filepath.Join(temporary, "volumes")
+	createBackupVolumeFixtures(t, fixtureRoot, "media-staging")
+	command := backupCommand(t, "--environment", "staging", "--config", configPath, "--output", "json")
+	command.Env = append(os.Environ(),
+		"PATH="+fakeDockerPath(t, temporary)+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"FAKE_DOCKER_FIXTURE_ROOT="+fixtureRoot,
+		"FAKE_DOCKER_LOG="+filepath.Join(temporary, "docker.log"),
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("media-stack backup failed: %v\n%s", err, output)
+	}
+	var report struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(output, &report); err != nil {
+		t.Fatalf("decode backup report: %v\n%s", err, output)
+	}
+	return report.ID
+}
+
+func retainedBackupDirectories(t *testing.T, backupRoot string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(backupRoot)
+	if err != nil {
+		t.Fatalf("read retained backups: %v", err)
+	}
+	var retained []string
+	for _, entry := range entries {
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".incomplete-") {
+			retained = append(retained, entry.Name())
+		}
+	}
+	sort.Strings(retained)
+	return retained
+}
+
+func writeBackupRetentionFixture(t *testing.T, backupRoot, id, generatedAt string, protected bool) {
+	t.Helper()
+	if _, err := time.Parse(time.RFC3339, generatedAt); err != nil {
+		t.Fatalf("invalid fixture time %q: %v", generatedAt, err)
+	}
+	directory := filepath.Join(backupRoot, id)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatalf("create backup retention fixture: %v", err)
+	}
+	manifest := map[string]any{
+		"schemaVersion": "homelab.media-stack/backup/v1alpha1",
+		"id":            id,
+		"environment":   "staging",
+		"generatedAt":   generatedAt,
+		"protected":     protected,
+		"complete":      true,
+		"services":      []any{},
+	}
+	contents, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("encode backup retention fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "manifest.json"), append(contents, byte(10)), 0o600); err != nil {
+		t.Fatalf("write backup retention fixture: %v", err)
+	}
+}
 
 func TestBackupPublishesVerifiedArchivesForEveryMutableServiceVolume(t *testing.T) {
 	repository := repositoryRoot(t)
