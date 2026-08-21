@@ -448,6 +448,7 @@ from silently becoming ineffective configuration.
 | `spec.defaults.timezone` | `init`, `plan` | Validated as an IANA timezone; rendered as `TZ` for every service. |
 | `spec.defaults.runtimeUID` / `runtimeGID` | `init`, `plan` | Own newly created data directories; render as `PUID`/`PGID` for LinuxServer-style services and Compose `user` for Jellyfin and Seerr. |
 | `spec.defaults.lanBindAddress` | `plan` | Host address used for every published web port. `0.0.0.0` listens on all host interfaces. |
+| `spec.defaults.backupRetention.daily` / `weekly` / `monthly` | `backup` | Counts of unprotected archives retained in distinct UTC day, ISO-week, and UTC-month buckets. The checked-in policy is 7/4/6; counts must be non-negative and at least one tier must retain an archive. |
 | `spec.environments.<name>.projectName` | `plan`, `apply` | Compose project name; scopes networks, runtime secret paths, and config volumes independently for Production and Staging. |
 | `spec.environments.<name>.dataRoot` | `init`, `plan` | Absolute host root provisioned by `init`; mounted as the selected Environment `/data` seam. The other Environment root is never rendered. |
 | `spec.environments.<name>.backupRoot` | `backup` | Absolute host namespace for the Environment's application-state archives. Production and Staging roots must be non-overlapping and neither may overlap either Environment's `dataRoot`; `backup` creates the selected root privately and atomically publishes verified backup directories beneath it. |
@@ -613,9 +614,12 @@ The command writes `<backupRoot>/<backup-id>/manifest.json` and one tar archive 
 version digests, immutable service images, Docker volume and mount identities, archive paths, sizes, SHA-256 checksums, and
 the consistency method. A failed run remains under `.incomplete-<backup-id>` without a manifest and cannot be restored.
 
-The initial retention policy keeps 7 daily, 4 weekly, and 6 monthly archives. Protected and Promotion-referenced backups are
-never expired by retention. Production and Staging backups use separate namespaces; the backup root should preferably live
-on another disk or NAS.
+After publishing and verifying a backup, the command applies the configured retention policy to the selected Environment
+published archives. The checked-in policy keeps the newest archive in each of 7 UTC daily buckets, followed by 4 complete
+ISO-week buckets older than the daily window, followed by 6 complete UTC-month buckets older than the weekly window.
+Protected backups are never expired by retention. Production and Staging backups use separate namespaces; the backup root
+should preferably live on another disk or NAS. `--now` fixes the backup and retention clock for deterministic verification;
+omit it during ordinary operation.
 
 Ordinary restore only accepts a backup from the same environment. A Restore Drill is the one Production-to-Staging
 exception: it preserves Staging identity, rotates external credentials, starts with acquisition disabled, and gates
@@ -631,7 +635,7 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
 | `media-stack apply --environment production|staging [--config path]` | Available through Jellyfin Movie and Series Library reconciliation | Uses the selected Environment's OpenVPN, Profilarr, and Jellyfin credentials without printing them; starts and reconciles qBittorrent, Radarr, Sonarr, Prowlarr, and Profilarr; then starts Jellyfin, bootstraps or authenticates its administrator, creates both libraries, and disables destructive deletion. An incomplete Profilarr connection still prints the exact UI checklist and exits `1`. |
-| `media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--output human|json]` | Available | Stops only running services with mutable named volumes, archives each volume through a read-only Docker mount, resumes those services, independently verifies every checksum, then atomically publishes the selected Environment's manifest last. Use `--protect` for an archive that retention must preserve. |
+| `media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--now RFC3339] [--output human|json]` | Available | Stops only running services with mutable named volumes, archives each volume through a read-only Docker mount, resumes those services, independently verifies every checksum, atomically publishes the selected Environment manifest last, then expires unprotected archives according to `backupRetention`. Use `--protect` for an archive that retention must preserve and `--now` only to fix the clock for deterministic verification. |
 | `media-stack restore` | Planned | Will preview and safely restore compatible Environment state. It is not accepted by the current binary. |
 | `media-stack verify --environment staging --suite full [--config path] [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, and recovery. Use it after `apply` in Staging; it is deliberately rejected for Production. |
 | `media-stack verify --environment staging --suite promotion --legal-fixture path [--config path] [--output human|json]` | Available through Movie Library playback proof | Runs the full VPN proof, registers the fixture movie in Radarr, grabs the exact Internet Archive release into qBittorrent, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported path, and requires direct-play readiness. Use only in a disposable Staging Environment. Verification Artifact behavior remains planned. |

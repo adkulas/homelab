@@ -25,10 +25,17 @@ type MediaStackSpec struct {
 }
 
 type Defaults struct {
-	Timezone       string `yaml:"timezone"`
-	RuntimeUID     int    `yaml:"runtimeUID"`
-	RuntimeGID     int    `yaml:"runtimeGID"`
-	LANBindAddress string `yaml:"lanBindAddress"`
+	Timezone        string          `yaml:"timezone"`
+	RuntimeUID      int             `yaml:"runtimeUID"`
+	RuntimeGID      int             `yaml:"runtimeGID"`
+	LANBindAddress  string          `yaml:"lanBindAddress"`
+	BackupRetention BackupRetention `yaml:"backupRetention"`
+}
+
+type BackupRetention struct {
+	Daily   int `yaml:"daily"`
+	Weekly  int `yaml:"weekly"`
+	Monthly int `yaml:"monthly"`
 }
 
 // HardwareTranscodingPreference controls whether an Environment detects a hardware overlay.
@@ -166,6 +173,13 @@ func (declared MediaStack) validateEnvironment(name string, allowMissingHardware
 func (declared MediaStack) ValidateBackupEnvironment(name string) error {
 	if err := declared.ValidateEnvironment(name); err != nil {
 		return err
+	}
+	retention := declared.Spec.Defaults.BackupRetention
+	if retention.Daily < 0 || retention.Weekly < 0 || retention.Monthly < 0 {
+		return fmt.Errorf("backup retention counts must not be negative")
+	}
+	if retention.Daily+retention.Weekly+retention.Monthly == 0 {
+		return fmt.Errorf("backup retention must keep at least one daily, weekly, or monthly archive")
 	}
 	production := declared.Spec.Environments["production"]
 	staging := declared.Spec.Environments["staging"]
