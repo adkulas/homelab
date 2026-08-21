@@ -181,21 +181,7 @@ func validateInitAnswers(answers initAnswers, requireSecrets bool) error {
 }
 
 func encryptSecrets(ctx context.Context, destination string, answers initAnswers) error {
-	var document struct {
-		NordVPN struct {
-			OpenVPN struct {
-				ServiceUsername string `yaml:"serviceUsername"`
-				ServicePassword string `yaml:"servicePassword"`
-			} `yaml:"openvpn"`
-		} `yaml:"nordvpn"`
-		Profilarr struct {
-			APIKey string `yaml:"apiKey"`
-		} `yaml:"profilarr"`
-		Jellyfin struct {
-			Username string `yaml:"username"`
-			Password string `yaml:"password"`
-		} `yaml:"jellyfin"`
-	}
+	var document environmentSecretDocument
 	document.NordVPN.OpenVPN.ServiceUsername = answers.ServiceUsername
 	document.NordVPN.OpenVPN.ServicePassword = answers.ServicePassword
 	document.Profilarr.APIKey = answers.ProfilarrAPIKey

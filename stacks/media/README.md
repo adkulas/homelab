@@ -229,10 +229,10 @@ item, searches the linked Internet Archive source, and grabs only the exact decl
 `movies` or `series` qBittorrent torrent to complete and for the Arr application to expose the imported file, then compares
 the source and library filesystem identities beneath the selected Environment `dataRoot`. The `VERIFY_MOVIE_*` and
 `VERIFY_SERIES_EPISODE_*` diagnostics pass only when each requested path succeeds and both paths resolve to the same inode.
-The checked-in fixtures allow up to 45 minutes for download and import. Run Promotion verification only in a disposable
+For a movie fixture, Promotion then authenticates to Jellyfin, waits for the exact imported path to appear, and requires direct-play readiness through playback information; `VERIFY_MOVIE_PLAYBACK_READY` records success. The checked-in fixtures allow up to 45 minutes for download, import, and playback discovery. Run Promotion verification only in a disposable
 Staging Environment; it adds the fixture items and retains their qBittorrent sources for seeding.
 
-The smoke and Restore Drill suites, playback verification, and content-addressed Verification Artifacts remain planned.
+The smoke and Restore Drill suites, Series Library playback verification, and content-addressed Verification Artifacts remain planned.
 
 ### 6. Create Production and promote the proven change (planned)
 

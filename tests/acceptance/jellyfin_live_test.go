@@ -68,30 +68,34 @@ func TestDisposableJellyfinServesImportedMovieReadOnly(t *testing.T) {
 	client := jellyfin.New(address, &http.Client{Timeout: 10 * time.Second})
 	credentials := jellyfin.Credentials{Username: "household", Password: "fixture-jellyfin-password"}
 	deadline := time.Now().Add(2 * time.Minute)
-	for {
-		err = client.ReconcileMovieLibrary(context.Background(), credentials)
-		if err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("reconcile disposable Jellyfin: %v", err)
-		}
-		time.Sleep(time.Second)
+	pollJellyfin(t, deadline, "reconcile disposable Jellyfin", func() (bool, error) {
+		return true, client.ReconcileMovieLibrary(context.Background(), credentials)
+	})
+	pollJellyfin(t, deadline, "discover the legal movie with direct-play readiness", func() (bool, error) {
+		return client.MoviePlaybackReady(context.Background(), credentials, "/data/media/movies/legal-fixture.mp4")
+	})
+	deletionDisabled, err := client.DestructiveDeletionDisabled(context.Background(), credentials)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for {
-		ready, playbackErr := client.MoviePlaybackReady(context.Background(), credentials, "/data/media/movies/legal-fixture.mp4")
-		if playbackErr != nil {
-			t.Fatal(playbackErr)
-		}
-		if ready {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("disposable Jellyfin did not discover the legal movie with direct-play readiness")
-		}
-		time.Sleep(time.Second)
+	if !deletionDisabled {
+		t.Fatal("disposable Jellyfin retained destructive deletion permission")
 	}
 	if output, err := exec.Command("docker", "exec", containerName, "sh", "-c", "touch /data/media/write-must-fail").CombinedOutput(); err == nil {
 		t.Fatalf("Jellyfin wrote through its read-only Movie and Series Libraries mount: %s", output)
+	}
+}
+
+func pollJellyfin(t *testing.T, deadline time.Time, behavior string, observe func() (bool, error)) {
+	t.Helper()
+	for {
+		complete, err := observe()
+		if err == nil && complete {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("disposable Jellyfin did not %s: %v", behavior, err)
+		}
+		time.Sleep(time.Second)
 	}
 }

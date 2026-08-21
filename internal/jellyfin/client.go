@@ -31,6 +31,11 @@ type authentication struct {
 	} `json:"User"`
 }
 
+type user struct {
+	ID     string         `json:"Id"`
+	Policy map[string]any `json:"Policy"`
+}
+
 func New(baseURL string, httpClient *http.Client) *Client {
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: httpClient}
 }
@@ -75,10 +80,10 @@ func (client *Client) ReconcileMovieLibrary(ctx context.Context, credentials Cre
 	}
 	found := false
 	for _, library := range libraries {
-		if library.CollectionType != "movies" && library.Name != "Movie Library" {
+		if library.Name != "Movie Library" {
 			continue
 		}
-		if library.Name != "Movie Library" || len(library.Locations) != 1 || library.Locations[0] != movieLibraryPath {
+		if library.CollectionType != "movies" || len(library.Locations) != 1 || library.Locations[0] != movieLibraryPath {
 			return fmt.Errorf("Jellyfin Movie Library must use only %s", movieLibraryPath)
 		}
 		found = true
@@ -89,16 +94,52 @@ func (client *Client) ReconcileMovieLibrary(ctx context.Context, credentials Cre
 			return fmt.Errorf("create Jellyfin Movie Library: %w", err)
 		}
 	}
-	deletionEnabled, _ := auth.User.Policy["EnableContentDeletion"].(bool)
-	folderDeletion, _ := auth.User.Policy["EnableContentDeletionFromFolders"].([]any)
-	if deletionEnabled || len(folderDeletion) != 0 {
-		auth.User.Policy["EnableContentDeletion"] = false
-		auth.User.Policy["EnableContentDeletionFromFolders"] = []any{}
-		if err := client.doJSON(ctx, http.MethodPost, "/Users/"+url.PathEscape(auth.User.ID)+"/Policy", auth.User.Policy, auth.AccessToken, nil); err != nil {
-			return fmt.Errorf("disable destructive Jellyfin deletion: %w", err)
+	users, err := client.users(ctx, auth.AccessToken)
+	if err != nil {
+		return err
+	}
+	for _, currentUser := range users {
+		if deletionDisabled(currentUser.Policy) {
+			continue
+		}
+		currentUser.Policy["EnableContentDeletion"] = false
+		currentUser.Policy["EnableContentDeletionFromFolders"] = []any{}
+		if err := client.doJSON(ctx, http.MethodPost, "/Users/"+url.PathEscape(currentUser.ID)+"/Policy", currentUser.Policy, auth.AccessToken, nil); err != nil {
+			return fmt.Errorf("disable destructive Jellyfin deletion for user %s: %w", currentUser.ID, err)
 		}
 	}
 	return nil
+}
+
+func (client *Client) DestructiveDeletionDisabled(ctx context.Context, credentials Credentials) (bool, error) {
+	auth, err := client.authenticate(ctx, credentials)
+	if err != nil {
+		return false, err
+	}
+	users, err := client.users(ctx, auth.AccessToken)
+	if err != nil {
+		return false, err
+	}
+	for _, currentUser := range users {
+		if !deletionDisabled(currentUser.Policy) {
+			return false, nil
+		}
+	}
+	return len(users) != 0, nil
+}
+
+func (client *Client) users(ctx context.Context, token string) ([]user, error) {
+	var users []user
+	if err := client.doJSON(ctx, http.MethodGet, "/Users", nil, token, &users); err != nil {
+		return nil, fmt.Errorf("observe Jellyfin user policies: %w", err)
+	}
+	return users, nil
+}
+
+func deletionDisabled(policy map[string]any) bool {
+	deletionEnabled, _ := policy["EnableContentDeletion"].(bool)
+	folders, _ := policy["EnableContentDeletionFromFolders"].([]any)
+	return !deletionEnabled && len(folders) == 0
 }
 
 func (client *Client) MoviePlaybackReady(ctx context.Context, credentials Credentials, moviePath string) (bool, error) {

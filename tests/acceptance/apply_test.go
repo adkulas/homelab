@@ -303,6 +303,8 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 			_ = json.NewEncoder(writer).Encode(map[string]any{"StartupWizardCompleted": true})
 		case "POST /Users/AuthenticateByName":
 			_ = json.NewEncoder(writer).Encode(map[string]any{"AccessToken": "fixture-jellyfin-token", "User": map[string]any{"Id": "jellyfin-user", "Policy": jellyfinPolicy}})
+		case "GET /Users":
+			_ = json.NewEncoder(writer).Encode([]any{map[string]any{"Id": "jellyfin-user", "Policy": jellyfinPolicy}})
 		case "GET /Library/VirtualFolders":
 			_ = json.NewEncoder(writer).Encode(jellyfinLibraries)
 		case "POST /Library/VirtualFolders":

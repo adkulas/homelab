@@ -457,21 +457,7 @@ func decryptEnvironmentSecrets(ctx context.Context, path string) (environmentSec
 	if err != nil {
 		return environmentSecrets{}, fmt.Errorf("decrypt selected Environment secrets: %w", err)
 	}
-	var document struct {
-		NordVPN struct {
-			OpenVPN struct {
-				ServiceUsername string `yaml:"serviceUsername"`
-				ServicePassword string `yaml:"servicePassword"`
-			} `yaml:"openvpn"`
-		} `yaml:"nordvpn"`
-		Profilarr struct {
-			APIKey string `yaml:"apiKey"`
-		} `yaml:"profilarr"`
-		Jellyfin struct {
-			Username string `yaml:"username"`
-			Password string `yaml:"password"`
-		} `yaml:"jellyfin"`
-	}
+	var document environmentSecretDocument
 	decoder := yaml.NewDecoder(bytes.NewReader(plain))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&document); err != nil {

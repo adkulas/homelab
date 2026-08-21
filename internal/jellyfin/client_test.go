@@ -10,12 +10,16 @@ import (
 
 func TestReconcileMovieLibraryBootstrapsAuthenticationAndDisablesDeletion(t *testing.T) {
 	startupComplete := false
-	libraries := []map[string]any{}
+	libraries := []map[string]any{{"Name": "Legacy Movies", "CollectionType": "movies", "Locations": []string{"/legacy/movies"}}}
 	policy := map[string]any{
 		"IsAdministrator":                  true,
 		"EnableMediaPlayback":              true,
 		"EnableContentDeletion":            true,
 		"EnableContentDeletionFromFolders": []any{"old-library"},
+	}
+	otherPolicy := map[string]any{
+		"IsAdministrator": false, "EnableMediaPlayback": true,
+		"EnableContentDeletion": true, "EnableContentDeletionFromFolders": []any{"legacy-library"},
 	}
 	writes := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -46,6 +50,9 @@ func TestReconcileMovieLibraryBootstrapsAuthenticationAndDisablesDeletion(t *tes
 				"AccessToken": "fixture-access-token",
 				"User":        map[string]any{"Id": "user-1", "Policy": policy},
 			})
+		case "GET /Users":
+			requireToken(t, request)
+			_ = json.NewEncoder(writer).Encode([]any{map[string]any{"Id": "user-1", "Policy": policy}, map[string]any{"Id": "user-2", "Policy": otherPolicy}})
 		case "GET /Library/VirtualFolders":
 			requireToken(t, request)
 			_ = json.NewEncoder(writer).Encode(libraries)
@@ -61,6 +68,11 @@ func TestReconcileMovieLibraryBootstrapsAuthenticationAndDisablesDeletion(t *tes
 			requireToken(t, request)
 			writes++
 			_ = json.NewDecoder(request.Body).Decode(&policy)
+			writer.WriteHeader(http.StatusNoContent)
+		case "POST /Users/user-2/Policy":
+			requireToken(t, request)
+			writes++
+			_ = json.NewDecoder(request.Body).Decode(&otherPolicy)
 			writer.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(writer, request)
@@ -81,6 +93,12 @@ func TestReconcileMovieLibraryBootstrapsAuthenticationAndDisablesDeletion(t *tes
 	if policy["IsAdministrator"] != true || policy["EnableMediaPlayback"] != true {
 		t.Fatalf("unrelated user policy was not preserved: %#v", policy)
 	}
+	if otherPolicy["EnableContentDeletion"] != false {
+		t.Fatalf("other user retained destructive deletion: %#v", otherPolicy)
+	}
+	if len(libraries) != 2 || libraries[0]["Name"] != "Legacy Movies" {
+		t.Fatalf("unrelated movie library was not preserved: %#v", libraries)
+	}
 	writesAfterFirstRun := writes
 	if err := client.ReconcileMovieLibrary(context.Background(), Credentials{Username: "household", Password: "fixture-jellyfin-password"}); err != nil {
 		t.Fatalf("repeat reconciliation: %v", err)
@@ -95,6 +113,8 @@ func TestMovieIsDiscoverableAndPlaybackReadyForAuthenticatedUser(t *testing.T) {
 		switch request.Method + " " + request.URL.Path {
 		case "POST /Users/AuthenticateByName":
 			_ = json.NewEncoder(writer).Encode(map[string]any{"AccessToken": "fixture-access-token", "User": map[string]any{"Id": "user-1", "Policy": map[string]any{}}})
+		case "GET /Users":
+			_ = json.NewEncoder(writer).Encode([]any{map[string]any{"Id": "user-1", "Policy": map[string]any{"EnableContentDeletion": false, "EnableContentDeletionFromFolders": []any{}}}})
 		case "GET /Users/user-1/Items":
 			requireToken(t, request)
 			_ = json.NewEncoder(writer).Encode(map[string]any{"Items": []any{map[string]any{"Id": "movie-1", "Name": "Legal Movie", "Path": "/data/media/movies/legal/movie.mp4"}}})
