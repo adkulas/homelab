@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/adkulas/homelab/internal/config"
+	"github.com/adkulas/homelab/internal/jellyfin"
 	"github.com/adkulas/homelab/internal/prowlarr"
 	"github.com/adkulas/homelab/internal/qbittorrent"
 	"github.com/adkulas/homelab/internal/radarr"
@@ -35,6 +36,7 @@ type ApplyReport struct {
 type environmentSecrets struct {
 	OpenVPN      openVPNCredentials
 	ProfilarrKey string
+	Jellyfin     jellyfin.Credentials
 }
 
 func NewApplyRequest(workingDirectory, environment, configPath string) (ApplyRequest, error) {
@@ -177,7 +179,33 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 			err,
 		)
 	}
+	if output, err := runDockerCompose(ctx, plan, "up", "-d", "jellyfin"); err != nil {
+		return ApplyReport{}, fmt.Errorf("start Jellyfin: %w: %s", err, redactCredentials(output, credentials))
+	}
+	jellyfinAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Jellyfin)
+	jellyfinClient := jellyfin.New("http://"+jellyfinAddress, &http.Client{Timeout: 10 * time.Second})
+	if err := waitForJellyfinMovieLibrary(ctx, jellyfinClient, secrets.Jellyfin, 120*time.Second); err != nil {
+		return ApplyReport{}, err
+	}
 	return ApplyReport{Environment: request.plan.environment}, nil
+}
+
+func waitForJellyfinMovieLibrary(ctx context.Context, client *jellyfin.Client, credentials jellyfin.Credentials, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		err := client.ReconcileMovieLibrary(ctx, credentials)
+		if err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("Jellyfin API did not become ready within %s: %w", timeout, err)
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 func verifyProfilarrBootstrap(ctx context.Context, baseURL, apiKey string) error {
@@ -439,6 +467,10 @@ func decryptEnvironmentSecrets(ctx context.Context, path string) (environmentSec
 		Profilarr struct {
 			APIKey string `yaml:"apiKey"`
 		} `yaml:"profilarr"`
+		Jellyfin struct {
+			Username string `yaml:"username"`
+			Password string `yaml:"password"`
+		} `yaml:"jellyfin"`
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(plain))
 	decoder.KnownFields(true)
@@ -455,7 +487,10 @@ func decryptEnvironmentSecrets(ctx context.Context, path string) (environmentSec
 	if len(document.Profilarr.APIKey) < 32 {
 		return environmentSecrets{}, fmt.Errorf("selected Environment secrets require profilarr.apiKey with at least 32 characters")
 	}
-	return environmentSecrets{OpenVPN: credentials, ProfilarrKey: document.Profilarr.APIKey}, nil
+	if document.Jellyfin.Username == "" || document.Jellyfin.Password == "" {
+		return environmentSecrets{}, fmt.Errorf("selected Environment secrets require jellyfin.username and jellyfin.password")
+	}
+	return environmentSecrets{OpenVPN: credentials, ProfilarrKey: document.Profilarr.APIKey, Jellyfin: jellyfin.Credentials{Username: document.Jellyfin.Username, Password: document.Jellyfin.Password}}, nil
 }
 
 func materializeRuntimeSecrets(directory string, secrets environmentSecrets) error {

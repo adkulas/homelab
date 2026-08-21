@@ -294,6 +294,33 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 		}
 	}))
 	defer api.Close()
+	jellyfinLibraries := []map[string]any{}
+	jellyfinPolicy := map[string]any{"IsAdministrator": true, "EnableMediaPlayback": true, "EnableContentDeletion": true, "EnableContentDeletionFromFolders": []any{"old-library"}}
+	jellyfinPolicyWrites := 0
+	jellyfinAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.Method + " " + request.URL.Path {
+		case "GET /System/Info/Public":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"StartupWizardCompleted": true})
+		case "POST /Users/AuthenticateByName":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"AccessToken": "fixture-jellyfin-token", "User": map[string]any{"Id": "jellyfin-user", "Policy": jellyfinPolicy}})
+		case "GET /Library/VirtualFolders":
+			_ = json.NewEncoder(writer).Encode(jellyfinLibraries)
+		case "POST /Library/VirtualFolders":
+			jellyfinLibraries = append(jellyfinLibraries, map[string]any{"Name": "Movie Library", "CollectionType": "movies", "Locations": []string{"/data/media/movies"}})
+			writer.WriteHeader(http.StatusNoContent)
+		case "POST /Users/jellyfin-user/Policy":
+			jellyfinPolicyWrites++
+			_ = json.NewDecoder(request.Body).Decode(&jellyfinPolicy)
+			writer.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer jellyfinAPI.Close()
+	jellyfinURL, err := url.Parse(jellyfinAPI.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
 	apiURL, err := url.Parse(api.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -302,6 +329,7 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	declared = strings.Replace(declared, "radarr: 17878", "radarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "prowlarr: 19696", "prowlarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "profilarr: 16868", "profilarr: "+apiURL.Port(), 1)
+	declared = strings.Replace(declared, "jellyfin: 18096", "jellyfin: "+jellyfinURL.Port(), 1)
 	sonarrURL, err := url.Parse(sonarrAPI.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -325,6 +353,9 @@ nordvpn:
     servicePassword: apply-service-password
 profilarr:
   apiKey: fixture-profilarr-api-key-32-characters
+jellyfin:
+  username: household
+  password: fixture-jellyfin-password
 EOF
 `), 0o700)
 	dockerLog := filepath.Join(temporary, "docker-arguments")
@@ -344,6 +375,7 @@ EOF
 	  "compose -f - up -d prowlarr") exit 0 ;;
 	  "compose -f - exec -T prowlarr cat /config/config.xml") printf '<Config><ApiKey>fixture-prowlarr-api-key</ApiKey></Config>\n'; exit 0 ;;
 	  "compose -f - up -d profilarr") exit 0 ;;
+	  "compose -f - up -d jellyfin") exit 0 ;;
 	  "compose -f - ps --format json gluetun")
 	    count=0
 	    [ -f "$APPLY_HEALTH_COUNT" ] && count=$(cat "$APPLY_HEALTH_COUNT")
@@ -375,12 +407,12 @@ EOF
 		t.Errorf("apply output = %q, want completed Series Library policy", output)
 	}
 
-	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr"
+	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr\ncompose -f - up -d jellyfin"
 	if got := strings.TrimSpace(string(readFile(t, dockerLog))); got != wantDocker {
 		t.Errorf("Docker invocation = %q", got)
 	}
 	rendered := string(readFile(t, composeCapture))
-	for _, secret := range []string{"apply-service-user", "apply-service-password", "fixture-profilarr-api-key-32-characters"} {
+	for _, secret := range []string{"apply-service-user", "apply-service-password", "fixture-profilarr-api-key-32-characters", "fixture-jellyfin-password"} {
 		if strings.Contains(rendered, secret) || strings.Contains(string(output), secret) {
 			t.Errorf("apply exposed secret %q\noutput: %s\nCompose: %s", secret, output, rendered)
 		}
@@ -459,6 +491,12 @@ EOF
 	if fields := applicationsByName["Sonarr"]; fields["baseUrl"] != "http://sonarr:8989" || fields["prowlarrUrl"] != "http://prowlarr:9696" || fields["apiKey"] != "fixture-sonarr-api-key" {
 		t.Errorf("Prowlarr Sonarr application contract = %v", fields)
 	}
+	if len(jellyfinLibraries) != 1 || jellyfinLibraries[0]["Name"] != "Movie Library" {
+		t.Errorf("apply did not reconcile Jellyfin Movie Library: %v", jellyfinLibraries)
+	}
+	if jellyfinPolicy["EnableContentDeletion"] != false || jellyfinPolicyWrites != 1 {
+		t.Errorf("apply did not disable destructive Jellyfin deletion: policy=%v writes=%d", jellyfinPolicy, jellyfinPolicyWrites)
+	}
 	if profilarrObservations != 2 {
 		t.Errorf("apply observed Profilarr connections %d times, want startup retry plus successful verification", profilarrObservations)
 	}
@@ -479,7 +517,7 @@ EOF
 	if err != nil {
 		t.Fatalf("repeated media-stack apply failed: %v\n%s", err, secondOutput)
 	}
-	if len(rootFolders) != 1 || len(downloadClients) != 1 || len(seriesRootFolders) != 1 || len(seriesDownloadClients) != 1 || len(indexers) != 1 || len(applications) != 2 {
+	if len(rootFolders) != 1 || len(downloadClients) != 1 || len(seriesRootFolders) != 1 || len(seriesDownloadClients) != 1 || len(indexers) != 1 || len(applications) != 2 || len(jellyfinLibraries) != 1 || jellyfinPolicyWrites != 1 {
 		t.Errorf("repeated apply did not converge: movieRoots=%v movieDownloadClients=%v seriesRoots=%v seriesDownloadClients=%v indexers=%v applications=%v", rootFolders, downloadClients, seriesRootFolders, seriesDownloadClients, indexers, applications)
 	}
 

@@ -37,6 +37,8 @@ type initAnswers struct {
 	ServiceUsername         string `yaml:"serviceUsername"`
 	ServicePassword         string `yaml:"servicePassword"`
 	ProfilarrAPIKey         string `yaml:"profilarrAPIKey"`
+	JellyfinUsername        string `yaml:"jellyfinUsername"`
+	JellyfinPassword        string `yaml:"jellyfinPassword"`
 }
 
 func NewInitRequest(workingDirectory, environment, configPath, answersPath string) (InitRequest, error) {
@@ -162,8 +164,8 @@ func validateInitAnswers(answers initAnswers, requireSecrets bool) error {
 	if _, err := time.LoadLocation(answers.Timezone); err != nil {
 		return fmt.Errorf("timezone %q is not a valid IANA timezone: %w", answers.Timezone, err)
 	}
-	if requireSecrets && (answers.AgeRecipient == "" || answers.ServiceUsername == "" || answers.ServicePassword == "" || len(answers.ProfilarrAPIKey) < 32) {
-		return fmt.Errorf("ageRecipient, serviceUsername, servicePassword, and a profilarrAPIKey of at least 32 characters are required")
+	if requireSecrets && (answers.AgeRecipient == "" || answers.ServiceUsername == "" || answers.ServicePassword == "" || len(answers.ProfilarrAPIKey) < 32 || answers.JellyfinUsername == "" || answers.JellyfinPassword == "") {
+		return fmt.Errorf("ageRecipient, serviceUsername, servicePassword, a profilarrAPIKey of at least 32 characters, jellyfinUsername, and jellyfinPassword are required")
 	}
 	if answers.ServerCategory != "" && answers.ServerCategory != "P2P" {
 		return fmt.Errorf("serverCategory must be empty or P2P")
@@ -189,10 +191,16 @@ func encryptSecrets(ctx context.Context, destination string, answers initAnswers
 		Profilarr struct {
 			APIKey string `yaml:"apiKey"`
 		} `yaml:"profilarr"`
+		Jellyfin struct {
+			Username string `yaml:"username"`
+			Password string `yaml:"password"`
+		} `yaml:"jellyfin"`
 	}
 	document.NordVPN.OpenVPN.ServiceUsername = answers.ServiceUsername
 	document.NordVPN.OpenVPN.ServicePassword = answers.ServicePassword
 	document.Profilarr.APIKey = answers.ProfilarrAPIKey
+	document.Jellyfin.Username = answers.JellyfinUsername
+	document.Jellyfin.Password = answers.JellyfinPassword
 	plain, err := yaml.Marshal(document)
 	if err != nil {
 		return fmt.Errorf("encode environment secrets: %w", err)
