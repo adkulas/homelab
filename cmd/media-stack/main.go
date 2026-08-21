@@ -265,6 +265,7 @@ func runApply(ctx context.Context, arguments []string) error {
 	}
 	fmt.Fprintf(os.Stdout, "Applied the pinned Movie Library policy through Profilarr in the %s Environment.\n", report.Environment)
 	fmt.Fprintf(os.Stdout, "Applied the pinned Series Library policy through Profilarr in the %s Environment.\n", report.Environment)
+	fmt.Fprintf(os.Stdout, "Reconciled authenticated Jellyfin Movie Library playback with destructive deletion disabled in the %s Environment.\n", report.Environment)
 	return nil
 }
 

@@ -100,6 +100,7 @@ func NewInteractiveInitRequest(workingDirectory, environment, configPath string,
 		fmt.Fprintln(output, "Use the username and password from the Nord Account manual-setup area.")
 		fmt.Fprintln(output, "These are service credentials, not your Nord account email/password.")
 		fmt.Fprintln(output, "Choose a unique 32-character-or-longer Profilarr API key for this Environment; the CLI stores it only in the SOPS document and uses it to verify the guided connections.")
+		fmt.Fprintln(output, "Choose distinct Jellyfin administrator credentials for this Environment; they are used for supported API reconciliation and authenticated playback verification.")
 		answers.AgeRecipient, err = promptRequired(reader, output, "Age recipient for this environment: ")
 		if err != nil {
 			return InitRequest{}, err
@@ -113,6 +114,14 @@ func NewInteractiveInitRequest(workingDirectory, environment, configPath string,
 			return InitRequest{}, err
 		}
 		answers.ProfilarrAPIKey, err = promptRequired(reader, output, "Profilarr API key (at least 32 characters): ")
+		if err != nil {
+			return InitRequest{}, err
+		}
+		answers.JellyfinUsername, err = promptRequired(reader, output, "Jellyfin administrator username: ")
+		if err != nil {
+			return InitRequest{}, err
+		}
+		answers.JellyfinPassword, err = promptRequired(reader, output, "Jellyfin administrator password: ")
 		if err != nil {
 			return InitRequest{}, err
 		}

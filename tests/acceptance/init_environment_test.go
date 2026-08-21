@@ -47,7 +47,9 @@ func completeAnswers(uid, gid, country, protocol, username, password string) []b
 		"ageRecipient: age1example\n" +
 		"serviceUsername: " + username + "\n" +
 		"servicePassword: " + password + "\n" +
-		"profilarrAPIKey: fixture-profilarr-api-key-32-characters\n")
+		"profilarrAPIKey: fixture-profilarr-api-key-32-characters\n" +
+		"jellyfinUsername: household\n" +
+		"jellyfinPassword: fixture-jellyfin-password\n")
 }
 
 func runNonInteractiveInit(t *testing.T, binDirectory, configPath, environment, answersPath string) {

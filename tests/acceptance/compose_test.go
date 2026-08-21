@@ -331,6 +331,11 @@ func TestPlanRendersCoexistingEnvironmentResources(t *testing.T) {
 					problems = append(problems, fmt.Sprintf("%s mounts = %#v, missing %#v", serviceName, project.Services[serviceName].Volumes, mount))
 				}
 			}
+			for _, mount := range project.Services["jellyfin"].Volumes {
+				if strings.HasPrefix(mount.Target, "/data/torrents") {
+					problems = append(problems, fmt.Sprintf("Jellyfin unexpectedly receives torrent mount %#v", mount))
+				}
+			}
 			for _, secretName := range []string{"openvpn_user", "openvpn_password"} {
 				secret, exists := project.Secrets[secretName]
 				if !exists || !strings.HasSuffix(secret.File, expected.secretDirectory+secretName) {

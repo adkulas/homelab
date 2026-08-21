@@ -113,6 +113,27 @@ func TestPromotionVerifyAcquiresAndHardlinkImportsLegalMovie(t *testing.T) {
 		}
 	}))
 	defer api.Close()
+	jellyfinAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.Method + " " + request.URL.Path {
+		case "POST /Users/AuthenticateByName":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"AccessToken": "fixture-jellyfin-token", "User": map[string]any{"Id": "jellyfin-user", "Policy": map[string]any{}}})
+		case "GET /Users/jellyfin-user/Items":
+			items := []any{}
+			if imported {
+				items = append(items, map[string]any{"Id": "movie-1", "Name": "Night of the Living Dead", "Path": "/data/media/movies/Night of the Living Dead (1968)/Night of the Living Dead (1968).mp4"})
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{"Items": items})
+		case "GET /Items/movie-1/PlaybackInfo":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"MediaSources": []any{map[string]any{"Path": "/data/media/movies/Night of the Living Dead (1968)/Night of the Living Dead (1968).mp4", "SupportsDirectPlay": true}}})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer jellyfinAPI.Close()
+	jellyfinURL, err := url.Parse(jellyfinAPI.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
 	apiURL, err := url.Parse(api.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +144,12 @@ func TestPromotionVerifyAcquiresAndHardlinkImportsLegalMovie(t *testing.T) {
 	declared = strings.Replace(declared, "dataRoot: /srv/media/staging", "dataRoot: "+dataRoot, 1)
 	declared = strings.Replace(declared, "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "radarr: 17878", "radarr: "+apiURL.Port(), 1)
+	declared = strings.Replace(declared, "jellyfin: 18096", "jellyfin: "+jellyfinURL.Port(), 1)
 	writeFile(t, configPath, []byte(declared), 0o600)
+	if err := os.Mkdir(filepath.Join(temporary, "secrets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(temporary, "secrets", "staging.sops.yaml"), []byte("encrypted: true\n"), 0o600)
 	fixturePath := filepath.Join(temporary, "legal-movie.yaml")
 	writeFile(t, fixturePath, []byte(`apiVersion: homelab.media-stack/legal-movie/v1alpha1
 kind: LegalMovieFixture
@@ -139,6 +165,7 @@ spec:
 	if err := os.Mkdir(binDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	writeFile(t, filepath.Join(binDirectory, "sops"), []byte("#!/bin/sh\nprintf 'nordvpn:\n  openvpn:\n    serviceUsername: fixture-user\n    servicePassword: fixture-password\nprofilarr:\n  apiKey: fixture-profilarr-api-key-32-characters\njellyfin:\n  username: household\n  password: fixture-jellyfin-password\n'\n"), 0o700)
 	writeFile(t, filepath.Join(binDirectory, "curl"), []byte("#!/bin/sh\nprintf '198.51.100.10\\n'\n"), 0o700)
 	writeFile(t, filepath.Join(binDirectory, "docker"), []byte(`#!/bin/sh
 cat >/dev/null
@@ -186,7 +213,7 @@ esac
 	for _, diagnostic := range report.Diagnostics {
 		passed[diagnostic.Code] = diagnostic.Status == "pass"
 	}
-	for _, code := range []string{"VERIFY_MOVIE_ACQUIRED", "VERIFY_MOVIE_HARDLINKED"} {
+	for _, code := range []string{"VERIFY_MOVIE_ACQUIRED", "VERIFY_MOVIE_HARDLINKED", "VERIFY_MOVIE_PLAYBACK_READY"} {
 		if !passed[code] {
 			t.Errorf("promotion verification did not report %s: %s", code, output)
 		}

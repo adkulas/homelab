@@ -51,6 +51,10 @@ func TestInitSendsOnlyOpenVPNServiceCredentialsToSOPS(t *testing.T) {
 		"profilarr": map[string]any{
 			"apiKey": "fixture-profilarr-api-key-32-characters",
 		},
+		"jellyfin": map[string]any{
+			"username": "household",
+			"password": "fixture-jellyfin-password",
+		},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("plaintext supplied to SOPS = %#v, want %#v", got, want)

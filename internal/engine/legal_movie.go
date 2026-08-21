@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/adkulas/homelab/internal/config"
+	"github.com/adkulas/homelab/internal/jellyfin"
 	"github.com/adkulas/homelab/internal/qbittorrent"
 	"github.com/adkulas/homelab/internal/radarr"
 	"gopkg.in/yaml.v3"
@@ -135,6 +136,7 @@ func verifyLegalMovie(ctx context.Context, plan Plan, declared config.MediaStack
 				sourceInfo, statErr := os.Stat(sourcePath)
 				if statErr == nil && os.SameFile(sourceInfo, importInfo) {
 					report.add("VERIFY_MOVIE_HARDLINKED", "qBittorrent source and Movie Library inode identity", "", true)
+					verifyJellyfinMoviePlayback(ctx, declared, request, movieFile.Path, deadline, report)
 					return
 				}
 			}
@@ -145,6 +147,40 @@ func verifyLegalMovie(ctx context.Context, plan Plan, declared config.MediaStack
 		}
 		if !waitForMoviePoll(ctx, deadline) {
 			report.add("VERIFY_MOVIE_IMPORT_FAILED", "Movie Library hardlink import", ctx.Err().Error(), false)
+			return
+		}
+	}
+}
+
+func verifyJellyfinMoviePlayback(ctx context.Context, declared config.MediaStack, request VerifyRequest, moviePath string, deadline time.Time, report *VerifyReport) {
+	environment := declared.Spec.Environments[request.plan.environment]
+	secretsPath := environment.SecretsFile
+	if !filepath.IsAbs(secretsPath) {
+		secretsPath = filepath.Join(filepath.Dir(request.plan.configPath), secretsPath)
+	}
+	secrets, err := decryptEnvironmentSecrets(ctx, secretsPath)
+	if err != nil {
+		report.add("VERIFY_MOVIE_AUTH_FAILED", "authenticated Jellyfin Movie Library access", err.Error(), false)
+		return
+	}
+	address := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Jellyfin)
+	client := jellyfin.New("http://"+address, &http.Client{Timeout: 10 * time.Second})
+	for {
+		ready, observeErr := client.MoviePlaybackReady(ctx, secrets.Jellyfin, moviePath)
+		if observeErr != nil {
+			report.add("VERIFY_MOVIE_PLAYBACK_FAILED", "authenticated Jellyfin movie playback", observeErr.Error(), false)
+			return
+		}
+		if ready {
+			report.add("VERIFY_MOVIE_PLAYBACK_READY", "authenticated Jellyfin Movie Library discovery and direct playback", "", true)
+			return
+		}
+		if time.Now().After(deadline) {
+			report.add("VERIFY_MOVIE_PLAYBACK_FAILED", "authenticated Jellyfin movie playback", "Wait for Jellyfin to scan the Movie Library and confirm direct playback is available, then retry.", false)
+			return
+		}
+		if !waitForMoviePoll(ctx, deadline) {
+			report.add("VERIFY_MOVIE_PLAYBACK_FAILED", "authenticated Jellyfin movie playback", ctx.Err().Error(), false)
 			return
 		}
 	}
