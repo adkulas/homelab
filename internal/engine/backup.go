@@ -7,26 +7,23 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/adkulas/homelab/internal/config"
 )
 
 const backupSchemaVersion = "homelab.media-stack/backup/v1alpha1"
 
 type BackupRequest struct {
-	plan    PlanRequest
-	label   string
-	protect bool
+	plan        PlanRequest
+	label       string
+	protect     bool
+	generatedAt time.Time
 }
 
 type BackupArchive struct {
 	ID          string
 	GeneratedAt time.Time
 	Protected   bool
-}
-
-type RetentionPolicy struct {
-	Daily   int
-	Weekly  int
-	Monthly int
 }
 
 type RetentionDecision struct {
@@ -69,12 +66,12 @@ type BackupService struct {
 	SizeBytes         int64                   `json:"sizeBytes"`
 }
 
-func NewBackupRequest(workingDirectory, environment, configPath, label string, protect bool) (BackupRequest, error) {
+func NewBackupRequest(workingDirectory, environment, configPath, label string, protect bool, generatedAt time.Time) (BackupRequest, error) {
 	plan, err := NewPlanRequest(workingDirectory, environment, configPath)
 	if err != nil {
 		return BackupRequest{}, err
 	}
-	return BackupRequest{plan: plan, label: label, protect: protect}, nil
+	return BackupRequest{plan: plan, label: label, protect: protect, generatedAt: generatedAt}, nil
 }
 
 func (engine localEngine) Backup(ctx context.Context, request BackupRequest) (BackupReport, error) {
@@ -86,22 +83,26 @@ func checksum(contents []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func ApplyRetention(policy RetentionPolicy, archives []BackupArchive) RetentionDecision {
+func ApplyRetention(policy config.BackupRetention, archives []BackupArchive, now time.Time) RetentionDecision {
+	now = now.UTC()
 	kept := make(map[string]BackupArchive)
-	remaining := make([]BackupArchive, 0, len(archives))
 	for _, archive := range archives {
-		if archive.Protected {
+		if archive.Protected || archive.GeneratedAt.After(now) {
 			kept[archive.ID] = archive
-			continue
 		}
-		remaining = append(remaining, archive)
 	}
 
-	selectNewest := func(candidates []BackupArchive, limit int, bucket func(time.Time) string) ([]BackupArchive, []BackupArchive) {
-		if limit <= 0 || len(candidates) == 0 {
-			return nil, candidates
+	selectNewest := func(start, end time.Time, limit int, bucket func(time.Time) string) {
+		if limit <= 0 {
+			return
 		}
-		ordered := append([]BackupArchive(nil), candidates...)
+		var ordered []BackupArchive
+		for _, archive := range archives {
+			if archive.Protected || archive.GeneratedAt.Before(start) || !archive.GeneratedAt.Before(end) {
+				continue
+			}
+			ordered = append(ordered, archive)
+		}
 		sort.Slice(ordered, func(i, j int) bool {
 			if ordered[i].GeneratedAt.Equal(ordered[j].GeneratedAt) {
 				return ordered[i].ID > ordered[j].ID
@@ -109,48 +110,38 @@ func ApplyRetention(policy RetentionPolicy, archives []BackupArchive) RetentionD
 			return ordered[i].GeneratedAt.After(ordered[j].GeneratedAt)
 		})
 		seen := make(map[string]bool)
-		selected := make([]BackupArchive, 0, limit)
 		for _, archive := range ordered {
 			key := bucket(archive.GeneratedAt)
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
-			selected = append(selected, archive)
-			if len(selected) == limit {
+			kept[archive.ID] = archive
+			if len(seen) == limit {
 				break
 			}
 		}
-		selectedIDs := make(map[string]struct{}, len(selected))
-		for _, archive := range selected {
-			selectedIDs[archive.ID] = struct{}{}
-			kept[archive.ID] = archive
-		}
-		var next []BackupArchive
-		for _, archive := range candidates {
-			if _, ok := selectedIDs[archive.ID]; ok {
-				continue
-			}
-			next = append(next, archive)
-		}
-		return selected, next
 	}
 
-	remaining = func(input []BackupArchive) []BackupArchive {
-		_, output := selectNewest(input, policy.Daily, func(t time.Time) string { return t.UTC().Format("2006-01-02") })
-		return output
-	}(remaining)
-	remaining = func(input []BackupArchive) []BackupArchive {
-		_, output := selectNewest(input, policy.Weekly, func(t time.Time) string {
-			year, week := t.UTC().ISOWeek()
-			return fmt.Sprintf("%04d-%02d", year, week)
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	dailyStart := now
+	if policy.Daily > 0 {
+		dailyStart = dayStart.AddDate(0, 0, 1-policy.Daily)
+		selectNewest(dailyStart, now.Add(time.Nanosecond), policy.Daily, func(value time.Time) string {
+			return value.UTC().Format("2006-01-02")
 		})
-		return output
-	}(remaining)
-	remaining = func(input []BackupArchive) []BackupArchive {
-		_, output := selectNewest(input, policy.Monthly, func(t time.Time) string { return t.UTC().Format("2006-01") })
-		return output
-	}(remaining)
+	}
+	weeklyEnd := startOfISOWeek(dailyStart)
+	weeklyStart := weeklyEnd.AddDate(0, 0, -7*policy.Weekly)
+	selectNewest(weeklyStart, weeklyEnd, policy.Weekly, func(value time.Time) string {
+		year, week := value.UTC().ISOWeek()
+		return fmt.Sprintf("%04d-%02d", year, week)
+	})
+	monthlyEnd := time.Date(weeklyStart.Year(), weeklyStart.Month(), 1, 0, 0, 0, 0, time.UTC)
+	monthlyStart := monthlyEnd.AddDate(0, -policy.Monthly, 0)
+	selectNewest(monthlyStart, monthlyEnd, policy.Monthly, func(value time.Time) string {
+		return value.UTC().Format("2006-01")
+	})
 
 	var decision RetentionDecision
 	for _, archive := range archives {
@@ -161,4 +152,11 @@ func ApplyRetention(policy RetentionPolicy, archives []BackupArchive) RetentionD
 		decision.Drop = append(decision.Drop, archive)
 	}
 	return decision
+}
+
+func startOfISOWeek(value time.Time) time.Time {
+	value = value.UTC()
+	dayStart := time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC)
+	offset := (int(dayStart.Weekday()) + 6) % 7
+	return dayStart.AddDate(0, 0, -offset)
 }

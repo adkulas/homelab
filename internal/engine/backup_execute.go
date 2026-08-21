@@ -70,7 +70,10 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 		return BackupReport{}, err
 	}
 
-	generatedAt := time.Now().UTC()
+	generatedAt := request.generatedAt.UTC()
+	if generatedAt.IsZero() {
+		generatedAt = time.Now().UTC()
+	}
 	id, err := backupID(generatedAt)
 	if err != nil {
 		return BackupReport{}, err
@@ -190,16 +193,13 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 		}
 		return BackupReport{}, err
 	}
-	retention := declared.Spec.Defaults.BackupRetention
-	if err := applyPublishedBackupRetention(environment.BackupRoot, request.plan.environment, RetentionPolicy{
-		Daily: retention.Daily, Weekly: retention.Weekly, Monthly: retention.Monthly,
-	}); err != nil {
+	if err := applyPublishedBackupRetention(environment.BackupRoot, request.plan.environment, declared.Spec.Defaults.BackupRetention, generatedAt); err != nil {
 		return BackupReport{}, err
 	}
 	return report, nil
 }
 
-func applyPublishedBackupRetention(root, environment string, policy RetentionPolicy) error {
+func applyPublishedBackupRetention(root, environment string, policy config.BackupRetention, now time.Time) error {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return fmt.Errorf("inventory %s Environment backups for retention: %w", environment, err)
@@ -232,7 +232,7 @@ func applyPublishedBackupRetention(root, environment string, policy RetentionPol
 		})
 		paths[manifest.ID] = directory
 	}
-	for _, archive := range ApplyRetention(policy, archives).Drop {
+	for _, archive := range ApplyRetention(policy, archives, now).Drop {
 		if err := os.RemoveAll(paths[archive.ID]); err != nil {
 			return fmt.Errorf("expire backup %q: %w", archive.ID, err)
 		}

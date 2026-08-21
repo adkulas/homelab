@@ -38,9 +38,12 @@ func TestBackupAppliesConfiguredRetentionToPublishedEnvironmentArchives(t *testi
 		generatedAt string
 		protected   bool
 	}{
-		{id: "weekly-survivor", generatedAt: "2025-03-19T12:00:00Z"},
-		{id: "monthly-survivor", generatedAt: "2025-02-15T12:00:00Z"},
-		{id: "expired", generatedAt: "2025-01-10T12:00:00Z"},
+		{id: "daily-expired-same-bucket", generatedAt: "2026-08-21T08:00:00Z"},
+		{id: "weekly-survivor", generatedAt: "2026-08-16T12:00:00Z"},
+		{id: "weekly-expired-same-bucket", generatedAt: "2026-08-15T12:00:00Z"},
+		{id: "monthly-survivor", generatedAt: "2026-07-15T12:00:00Z"},
+		{id: "monthly-expired-same-bucket", generatedAt: "2026-07-01T12:00:00Z"},
+		{id: "expired", generatedAt: "2026-06-30T12:00:00Z"},
 		{id: "protected", generatedAt: "2024-01-01T12:00:00Z", protected: true},
 	}
 	for _, fixture := range fixtures {
@@ -66,23 +69,23 @@ func TestBackupAppliesDefaultSevenDailyFourWeeklySixMonthlyRetention(t *testing.
 		generatedAt string
 		protected   bool
 	}{
-		{id: "daily-1", generatedAt: "2024-03-30T12:00:00Z"},
-		{id: "daily-2", generatedAt: "2024-03-29T12:00:00Z"},
-		{id: "daily-3", generatedAt: "2024-03-28T12:00:00Z"},
-		{id: "daily-4", generatedAt: "2024-03-27T12:00:00Z"},
-		{id: "daily-5", generatedAt: "2024-03-26T12:00:00Z"},
-		{id: "daily-6", generatedAt: "2024-03-25T12:00:00Z"},
-		{id: "weekly-1", generatedAt: "2024-03-17T12:00:00Z"},
-		{id: "weekly-2", generatedAt: "2024-03-10T12:00:00Z"},
-		{id: "weekly-3", generatedAt: "2024-03-03T12:00:00Z"},
-		{id: "weekly-4", generatedAt: "2024-02-25T12:00:00Z"},
-		{id: "monthly-1", generatedAt: "2024-01-15T12:00:00Z"},
-		{id: "monthly-2", generatedAt: "2023-12-15T12:00:00Z"},
-		{id: "monthly-3", generatedAt: "2023-11-15T12:00:00Z"},
-		{id: "monthly-4", generatedAt: "2023-10-15T12:00:00Z"},
-		{id: "monthly-5", generatedAt: "2023-09-15T12:00:00Z"},
-		{id: "monthly-6", generatedAt: "2023-08-15T12:00:00Z"},
-		{id: "expired", generatedAt: "2023-07-15T12:00:00Z"},
+		{id: "daily-1", generatedAt: "2026-08-20T12:00:00Z"},
+		{id: "daily-2", generatedAt: "2026-08-19T12:00:00Z"},
+		{id: "daily-3", generatedAt: "2026-08-18T12:00:00Z"},
+		{id: "daily-4", generatedAt: "2026-08-17T12:00:00Z"},
+		{id: "daily-5", generatedAt: "2026-08-16T12:00:00Z"},
+		{id: "daily-6", generatedAt: "2026-08-15T12:00:00Z"},
+		{id: "weekly-1", generatedAt: "2026-08-09T12:00:00Z"},
+		{id: "weekly-2", generatedAt: "2026-08-02T12:00:00Z"},
+		{id: "weekly-3", generatedAt: "2026-07-26T12:00:00Z"},
+		{id: "weekly-4", generatedAt: "2026-07-19T12:00:00Z"},
+		{id: "monthly-1", generatedAt: "2026-06-15T12:00:00Z"},
+		{id: "monthly-2", generatedAt: "2026-05-15T12:00:00Z"},
+		{id: "monthly-3", generatedAt: "2026-04-15T12:00:00Z"},
+		{id: "monthly-4", generatedAt: "2026-03-15T12:00:00Z"},
+		{id: "monthly-5", generatedAt: "2026-02-15T12:00:00Z"},
+		{id: "monthly-6", generatedAt: "2026-01-15T12:00:00Z"},
+		{id: "expired", generatedAt: "2025-12-15T12:00:00Z"},
 		{id: "protected", generatedAt: "2020-01-01T12:00:00Z", protected: true},
 	}
 	for _, fixture := range fixtures {
@@ -108,7 +111,7 @@ func runBackupForRetention(t *testing.T, temporary, configPath string) string {
 	t.Helper()
 	fixtureRoot := filepath.Join(temporary, "volumes")
 	createBackupVolumeFixtures(t, fixtureRoot, "media-staging")
-	command := backupCommand(t, "--environment", "staging", "--config", configPath, "--output", "json")
+	command := backupCommand(t, "--environment", "staging", "--config", configPath, "--output", "json", "--now", "2026-08-21T12:00:00Z")
 	command.Env = append(os.Environ(),
 		"PATH="+fakeDockerPath(t, temporary)+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"FAKE_DOCKER_FIXTURE_ROOT="+fixtureRoot,

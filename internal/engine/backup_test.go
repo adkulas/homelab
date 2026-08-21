@@ -5,6 +5,8 @@ import (
 	"sort"
 	"testing"
 	"time"
+
+	"github.com/adkulas/homelab/internal/config"
 )
 
 func TestApplyRetentionKeepsDailyWeeklyMonthlySurvivors(t *testing.T) {
@@ -18,15 +20,15 @@ func TestApplyRetentionKeepsDailyWeeklyMonthlySurvivors(t *testing.T) {
 		{ID: "2026-05-15", GeneratedAt: mustTime("2026-05-15T10:00:00Z")},
 	}
 
-	decision := ApplyRetention(RetentionPolicy{Daily: 1, Weekly: 1, Monthly: 1}, archives)
+	decision := ApplyRetention(config.BackupRetention{Daily: 1, Weekly: 1, Monthly: 1}, archives, mustTime("2026-08-20T23:59:59Z"))
 
 	gotKeep := archiveIDs(decision.Keep)
-	wantKeep := []string{"2026-08-19", "2026-08-20-a", "2026-08-20-b"}
+	wantKeep := []string{"2026-07-31", "2026-08-13", "2026-08-20-b"}
 	if !reflect.DeepEqual(gotKeep, wantKeep) {
 		t.Fatalf("kept archives = %#v, want %#v", gotKeep, wantKeep)
 	}
 	gotDrop := archiveIDs(decision.Drop)
-	wantDrop := []string{"2026-05-15", "2026-06-30", "2026-07-31", "2026-08-13"}
+	wantDrop := []string{"2026-05-15", "2026-06-30", "2026-08-19", "2026-08-20-a"}
 	if !reflect.DeepEqual(gotDrop, wantDrop) {
 		t.Fatalf("dropped archives = %#v, want %#v", gotDrop, wantDrop)
 	}
@@ -39,7 +41,7 @@ func TestApplyRetentionNeverDropsProtectedArchives(t *testing.T) {
 		{ID: "expired", GeneratedAt: mustTime("2026-02-01T10:00:00Z")},
 	}
 
-	decision := ApplyRetention(RetentionPolicy{}, archives)
+	decision := ApplyRetention(config.BackupRetention{}, archives, mustTime("2026-08-20T23:59:59Z"))
 
 	gotKeep := archiveIDs(decision.Keep)
 	wantKeep := []string{"protected-new", "protected-old"}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/adkulas/homelab/internal/engine"
 	"github.com/adkulas/homelab/internal/storageprobe"
@@ -19,7 +20,7 @@ const usage = `usage:
   media-stack plan --environment production|staging [--config path]
   media-stack apply --environment production|staging [--config path]
   media-stack promote --environment production [--config path] --verification path --backup path [--output human|json]
-  media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--output human|json]
+  media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--now RFC3339] [--output human|json]
   media-stack restore --environment production|staging --backup path [--config path] [--confirm] [--as-restore-drill] [--credentials path] [--output human|json]
   media-stack verify --environment production|staging [--config path] --suite full|promotion [--legal-fixture path] [--legal-series-fixture path] [--output human|json]
   media-stack test [--run pattern]`
@@ -148,6 +149,7 @@ func runBackup(ctx context.Context, arguments []string) error {
 	configPath := flags.String("config", "", "Declared Configuration path")
 	label := flags.String("label", "", "optional backup label")
 	protect := flags.Bool("protect", false, "protect backup from retention")
+	nowValue := flags.String("now", "", "backup and retention time in RFC3339")
 	output := flags.String("output", "human", "human or json")
 	if err := flags.Parse(arguments); err != nil {
 		return err
@@ -158,11 +160,19 @@ func runBackup(ctx context.Context, arguments []string) error {
 	if *output != "human" && *output != "json" {
 		return fmt.Errorf("output must be human or json")
 	}
+	var now time.Time
+	if *nowValue != "" {
+		parsedNow, parseErr := time.Parse(time.RFC3339, *nowValue)
+		if parseErr != nil {
+			return fmt.Errorf("now must be RFC3339: %w", parseErr)
+		}
+		now = parsedNow
+	}
 	workingDirectory, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("locate working directory: %w", err)
 	}
-	request, err := engine.NewBackupRequest(workingDirectory, *environmentName, *configPath, *label, *protect)
+	request, err := engine.NewBackupRequest(workingDirectory, *environmentName, *configPath, *label, *protect, now)
 	if err != nil {
 		return err
 	}
