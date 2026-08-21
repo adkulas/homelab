@@ -325,7 +325,6 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	seerrInitialized := false
 	seerrLocalPassword := ""
 	seerrMain := map[string]any{"localLogin": false, "mediaServerLogin": false, "newPlexLogin": false, "defaultPermissions": float64(0), "mediaServerType": float64(4)}
-	seerrJellyfin := map[string]any{"ip": "jellyfin", "port": float64(8096), "externalHostname": "", "jellyfinForgotPasswordUrl": ""}
 	seerrWrites := 0
 	seerrAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.Method + " " + request.URL.Path {
@@ -350,16 +349,12 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 			_ = json.NewEncoder(writer).Encode(map[string]any{"id": 1, "email": "household", "permissions": 2})
 		case "GET /api/v1/settings/main":
 			_ = json.NewEncoder(writer).Encode(seerrMain)
+		case "GET /api/v1/auth/me":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"id": 1, "email": "household", "permissions": 2})
 		case "POST /api/v1/settings/main":
 			seerrWrites++
 			_ = json.NewDecoder(request.Body).Decode(&seerrMain)
 			_ = json.NewEncoder(writer).Encode(seerrMain)
-		case "GET /api/v1/settings/jellyfin":
-			_ = json.NewEncoder(writer).Encode(seerrJellyfin)
-		case "POST /api/v1/settings/jellyfin":
-			seerrWrites++
-			_ = json.NewDecoder(request.Body).Decode(&seerrJellyfin)
-			_ = json.NewEncoder(writer).Encode(seerrJellyfin)
 		case "POST /api/v1/user/1/settings/password":
 			seerrWrites++
 			var body map[string]string

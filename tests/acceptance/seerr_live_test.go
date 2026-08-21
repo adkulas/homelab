@@ -90,7 +90,7 @@ func TestDisposableSeerrAuthenticatesHouseholdAndEmergencyLocalUsers(t *testing.
 	}
 	seerrAdministrator := seerr.Credentials{Username: administrator.Username, Password: administrator.Password}
 	pollService(t, deadline, "reconcile disposable Seerr authentication", func() error {
-		return seerrClient.ReconcileAuthentication(context.Background(), seerrAdministrator, jellyfinAddress)
+		return seerrClient.ReconcileAuthentication(context.Background(), seerrAdministrator)
 	})
 	if err := seerrClient.VerifyJellyfinAuthentication(context.Background(), household); err != nil {
 		t.Fatal(err)

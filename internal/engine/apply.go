@@ -197,19 +197,18 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 		return ApplyReport{}, err
 	}
 	seerrCredentials := seerr.Credentials{Username: secrets.Jellyfin.Username, Password: secrets.Jellyfin.Password}
-	jellyfinLANURL := "http://" + jellyfinAddress
-	if err := waitForSeerrAuthentication(ctx, seerrClient, seerrCredentials, jellyfinLANURL, 120*time.Second); err != nil {
+	if err := waitForSeerrAuthentication(ctx, seerrClient, seerrCredentials, 120*time.Second); err != nil {
 		return ApplyReport{}, err
 	}
 	return ApplyReport{Environment: request.plan.environment}, nil
 }
 
-func waitForSeerrAuthentication(ctx context.Context, client *seerr.Client, credentials seerr.Credentials, jellyfinLANURL string, timeout time.Duration) error {
+func waitForSeerrAuthentication(ctx context.Context, client *seerr.Client, credentials seerr.Credentials, timeout time.Duration) error {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	var lastErr error
 	for {
-		if err := client.ReconcileAuthentication(ctx, credentials, jellyfinLANURL); err == nil {
+		if err := client.ReconcileAuthentication(ctx, credentials); err == nil {
 			return nil
 		} else {
 			lastErr = err

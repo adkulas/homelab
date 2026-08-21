@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -13,7 +14,6 @@ func TestReconcileAuthenticationKeepsJellyfinAndEmergencyLocalSignInAvailable(t 
 	jellyfinConfigured := false
 	localPassword := ""
 	main := mainSettings{LocalLogin: false, MediaServerLogin: false, NewJellyfinLogin: false, DefaultPermissions: 0}
-	jellyfin := jellyfinSettings{IP: "jellyfin", Port: 8096}
 	writes := 0
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -45,6 +45,8 @@ func TestReconcileAuthenticationKeepsJellyfinAndEmergencyLocalSignInAvailable(t 
 			}
 			http.SetCookie(writer, &http.Cookie{Name: "connect.sid", Value: "owner-session", Path: "/"})
 			_ = json.NewEncoder(writer).Encode(map[string]any{"id": 1, "email": "household", "permissions": 2})
+		case "GET /api/v1/auth/me":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"id": 1, "email": "household", "permissions": administratorPermission})
 		case "GET /api/v1/settings/main":
 			requireOwnerSession(t, request)
 			_ = json.NewEncoder(writer).Encode(main)
@@ -53,14 +55,6 @@ func TestReconcileAuthenticationKeepsJellyfinAndEmergencyLocalSignInAvailable(t 
 			writes++
 			_ = json.NewDecoder(request.Body).Decode(&main)
 			_ = json.NewEncoder(writer).Encode(main)
-		case "GET /api/v1/settings/jellyfin":
-			requireOwnerSession(t, request)
-			_ = json.NewEncoder(writer).Encode(jellyfin)
-		case "POST /api/v1/settings/jellyfin":
-			requireOwnerSession(t, request)
-			writes++
-			_ = json.NewDecoder(request.Body).Decode(&jellyfin)
-			_ = json.NewEncoder(writer).Encode(jellyfin)
 		case "POST /api/v1/user/1/settings/password":
 			requireOwnerSession(t, request)
 			writes++
@@ -84,21 +78,18 @@ func TestReconcileAuthenticationKeepsJellyfinAndEmergencyLocalSignInAvailable(t 
 		t.Fatal(err)
 	}
 	credentials := Credentials{Username: "household", Password: "fixture-jellyfin-password"}
-	if err := client.ReconcileAuthentication(context.Background(), credentials, "http://192.0.2.10:18096"); err != nil {
+	if err := client.ReconcileAuthentication(context.Background(), credentials); err != nil {
 		t.Fatalf("reconcile Seerr authentication: %v", err)
 	}
 	if !initialized || !main.LocalLogin || !main.MediaServerLogin || !main.NewJellyfinLogin || main.DefaultPermissions != requestPermission {
 		t.Fatalf("Seerr main settings = %#v, initialized=%t", main, initialized)
-	}
-	if jellyfin.ExternalHostname != "http://192.0.2.10:18096" || jellyfin.ForgotPasswordURL != "http://192.0.2.10:18096/web/index.html#!/forgotpassword.html" {
-		t.Fatalf("Seerr Jellyfin settings = %#v", jellyfin)
 	}
 	if localPassword != credentials.Password {
 		t.Fatal("emergency local administrator password was not reconciled")
 	}
 
 	writesAfterFirstRun := writes
-	if err := client.ReconcileAuthentication(context.Background(), credentials, "http://192.0.2.10:18096"); err != nil {
+	if err := client.ReconcileAuthentication(context.Background(), credentials); err != nil {
 		t.Fatalf("repeat reconciliation: %v", err)
 	}
 	if writes != writesAfterFirstRun {
@@ -106,6 +97,39 @@ func TestReconcileAuthenticationKeepsJellyfinAndEmergencyLocalSignInAvailable(t 
 	}
 }
 
+func TestVerifyLocalAdministratorRejectsRequestOnlyUser(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.Method + " " + request.URL.Path {
+		case "POST /api/v1/auth/local":
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"id":          7,
+				"email":       "household",
+				"permissions": requestPermission,
+			})
+		case "GET /api/v1/auth/me":
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"id":          7,
+				"email":       "household",
+				"permissions": requestPermission,
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = client.VerifyLocalAdministrator(context.Background(), Credentials{
+		Username: "household",
+		Password: "fixture-jellyfin-password",
+	})
+	if err == nil || !strings.Contains(err.Error(), "lacks administrator permission") {
+		t.Fatalf("VerifyLocalAdministrator error = %v, want missing administrator permission", err)
+	}
+}
 func requireOwnerSession(t *testing.T, request *http.Request) {
 	t.Helper()
 	cookie, err := request.Cookie("connect.sid")

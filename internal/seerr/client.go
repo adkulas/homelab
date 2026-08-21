@@ -11,7 +11,10 @@ import (
 	"strings"
 )
 
-const requestPermission = 32
+const (
+	administratorPermission = 2
+	requestPermission       = 32
+)
 
 type Credentials struct {
 	Username string
@@ -36,15 +39,6 @@ type mainSettings struct {
 	DefaultPermissions int  `json:"defaultPermissions"`
 }
 
-type jellyfinSettings struct {
-	IP                string `json:"ip"`
-	Port              int    `json:"port"`
-	UseSSL            bool   `json:"useSsl"`
-	URLBase           string `json:"urlBase"`
-	ExternalHostname  string `json:"externalHostname"`
-	ForgotPasswordURL string `json:"jellyfinForgotPasswordUrl"`
-}
-
 func New(baseURL string, httpClient *http.Client) (*Client, error) {
 	if httpClient == nil {
 		httpClient = &http.Client{}
@@ -59,12 +53,9 @@ func New(baseURL string, httpClient *http.Client) (*Client, error) {
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: httpClient}, nil
 }
 
-func (client *Client) ReconcileAuthentication(ctx context.Context, credentials Credentials, jellyfinExternalURL string) error {
+func (client *Client) ReconcileAuthentication(ctx context.Context, credentials Credentials) error {
 	if credentials.Username == "" || credentials.Password == "" {
 		return fmt.Errorf("Seerr authentication requires Jellyfin administrator credentials")
-	}
-	if jellyfinExternalURL == "" {
-		return fmt.Errorf("Seerr authentication requires the Jellyfin LAN URL")
 	}
 	var public struct {
 		Initialized     bool `json:"initialized"`
@@ -92,20 +83,7 @@ func (client *Client) ReconcileAuthentication(ctx context.Context, credentials C
 		}
 	}
 
-	var jellyfin jellyfinSettings
-	if err := client.doJSON(ctx, http.MethodGet, "/api/v1/settings/jellyfin", nil, &jellyfin); err != nil {
-		return fmt.Errorf("observe Seerr Jellyfin connection: %w", err)
-	}
-	forgotPasswordURL := strings.TrimRight(jellyfinExternalURL, "/") + "/web/index.html#!/forgotpassword.html"
-	if jellyfin.ExternalHostname != jellyfinExternalURL || jellyfin.ForgotPasswordURL != forgotPasswordURL {
-		jellyfin.ExternalHostname = jellyfinExternalURL
-		jellyfin.ForgotPasswordURL = forgotPasswordURL
-		if err := client.doJSON(ctx, http.MethodPost, "/api/v1/settings/jellyfin", jellyfin, nil); err != nil {
-			return fmt.Errorf("reconcile Seerr Jellyfin connection: %w", err)
-		}
-	}
-
-	if _, err := client.authenticateLocal(ctx, credentials); err != nil {
+	if err := client.VerifyLocalAdministrator(ctx, credentials); err != nil {
 		owner, err = client.authenticateJellyfin(ctx, credentials, false)
 		if err != nil {
 			return err
@@ -115,8 +93,8 @@ func (client *Client) ReconcileAuthentication(ctx context.Context, credentials C
 		if err := client.doJSON(ctx, http.MethodPost, path, password, nil); err != nil {
 			return fmt.Errorf("establish Seerr emergency local administrator: %w", err)
 		}
-		if _, err := client.authenticateLocal(ctx, credentials); err != nil {
-			return fmt.Errorf("verify Seerr emergency local administrator: %w", err)
+		if err := client.VerifyLocalAdministrator(ctx, credentials); err != nil {
+			return err
 		}
 	}
 	if !public.Initialized {
@@ -135,8 +113,19 @@ func (client *Client) VerifyJellyfinAuthentication(ctx context.Context, credenti
 }
 
 func (client *Client) VerifyLocalAdministrator(ctx context.Context, credentials Credentials) error {
-	if _, err := client.authenticateLocal(ctx, credentials); err != nil {
+	localSession, err := client.authenticateLocal(ctx, credentials)
+	if err != nil {
 		return fmt.Errorf("verify Seerr emergency local administrator: %w", err)
+	}
+	var current user
+	if err := client.doJSON(ctx, http.MethodGet, "/api/v1/auth/me", nil, &current); err != nil {
+		return fmt.Errorf("verify Seerr emergency local administrator permission: %w", err)
+	}
+	if current.ID != localSession.ID {
+		return fmt.Errorf("verify Seerr emergency local administrator: session user changed from %d to %d", localSession.ID, current.ID)
+	}
+	if current.Permissions&administratorPermission == 0 {
+		return fmt.Errorf("verify Seerr emergency local administrator: user %d lacks administrator permission", current.ID)
 	}
 	return nil
 }
