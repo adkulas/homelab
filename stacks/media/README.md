@@ -14,7 +14,8 @@ independent Production and Staging Environments so changes can be proven before 
 > Desktop WSL2 compatibility is verified independently and does not block Ubuntu work. Sections below label planned behavior explicitly.
 > The authoritative target design is in the
 > [implementation plan](../../docs/plans/media-stack.md) and
-> [CLI contract](../../docs/plans/media-stack-cli.md).
+> [CLI contract](../../docs/plans/media-stack-cli.md). A read-only `media-stack config describe` command implementing the
+> [Service Configuration Contract](../../docs/plans/service-configuration-contract.md) is planned but not yet available.
 
 ## What the stack provides
 
@@ -30,6 +31,25 @@ independent Production and Staging Environments so changes can be proven before 
 
 Every web interface is intended for the trusted LAN and requires authentication. Nothing is intentionally exposed to the
 public internet.
+
+## Discovering service configuration (planned)
+
+The current CLI does not enumerate which settings it controls for each service. Until the planned discovery command exists,
+the checked-in YAML, policy fixtures, and this runbook must be read together; this is a known interface gap.
+
+The planned interface is:
+
+```bash
+media-stack config describe
+media-stack config describe --service sonarr
+media-stack config describe --service sonarr --output json
+```
+
+It will cover Gluetun, qBittorrent, Prowlarr, Sonarr, Radarr, Profilarr, Jellyfin, and Seerr. Each setting will be identified
+as declared, secret, derived, fixed by Stack Policy, externally synchronized, or unmanaged. In particular, Sonarr file
+naming will be shown as an Externally Synchronized Policy owned by the pinned Profilarr policy: it is recorded in
+`fixtures/profilarr-series-policy.yaml` and verified by `apply`, but it is not currently configurable through
+`media-stack.yaml`.
 
 ## Quick start
 

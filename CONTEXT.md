@@ -29,6 +29,24 @@ _Avoid_: Test stack, dev stack
 The settings intentionally controlled by this repository and restored to their declared values during reconciliation.
 _Avoid_: Managed settings, desired state
 
+**Service Configuration Contract**:
+The complete operator-visible inventory of how the Media Stack controls, sources, synchronizes, or deliberately leaves
+unmanaged each service setting within its scope.
+_Avoid_: Settings catalog, configuration schema
+
+**Stack Policy**:
+A service setting intentionally fixed by the Media Stack with no operator override in Declared Configuration.
+_Avoid_: Hard-coded setting, default
+
+**Externally Synchronized Policy**:
+A service setting applied by a named external policy owner and verified, but not directly reconciled, by the Media Stack.
+_Avoid_: Declared Configuration, manual setting
+
+**Unmanaged Configuration**:
+An upstream service setting outside the Service Configuration Contract that the Media Stack does not promise to observe,
+apply, or repair.
+_Avoid_: User setting, ignored setting
+
 **Promotion**:
 The deliberate application to the Production Environment of an exact change already verified in the Staging Environment.
 _Avoid_: Deploy, release

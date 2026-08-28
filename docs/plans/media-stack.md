@@ -4,7 +4,9 @@
 
 Build a portable, idempotently configured home Media Stack for movies and episodic television. It must run on Ubuntu or on
 Windows through Docker Desktop with WSL 2, follow TRaSH-derived media-management guidance, and support isolated Production and
-Staging Environments.
+Staging Environments. Every required service must publish a complete operator-facing
+[Service Configuration Contract](service-configuration-contract.md) that distinguishes operator choices from secrets,
+derived configuration, Stack Policy, Externally Synchronized Policy, and Unmanaged Configuration.
 
 Implementation does not begin as part of this plan.
 

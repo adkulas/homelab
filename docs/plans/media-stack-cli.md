@@ -20,6 +20,16 @@ media-stack verify
 media-stack destroy
 ```
 
+Add one read-only discovery interface without requiring an Environment:
+
+```text
+media-stack config describe [--service <name>] [--output human|json]
+```
+
+It publishes the complete [Service Configuration Contract](service-configuration-contract.md) for every required service,
+including which settings are declared, secret, derived, fixed by Stack Policy, externally synchronized, or unmanaged. It
+describes the versioned interface and never resolves values or observes live services.
+
 Promotion, pruning, and Restore Drills are guarded modes rather than additional top-level commands:
 
 - Promotion is a Production `plan` and `apply` constrained by an exact Staging Verification Artifact.
@@ -93,6 +103,23 @@ Diagnostics have a stable code, severity, environment, subject, explanation, rem
 Detailed classification belongs in structured output, not an ever-growing set of exit codes.
 
 ## Command behavior
+
+### `config describe`
+
+```text
+media-stack config describe
+media-stack config describe --service sonarr
+media-stack config describe --service sonarr --output json
+```
+
+`config describe` is the authoritative discovery surface for the
+[Service Configuration Contract](service-configuration-contract.md). Without a filter it describes Gluetun, qBittorrent,
+Prowlarr, Sonarr, Radarr, Profilarr, Jellyfin, and Seerr. Filtered output is self-contained and explains how every in-scope
+setting is controlled and how an operator may change it. The command is deterministic, needs no Environment, performs no
+Docker or application calls, never decrypts secrets, and emits no resolved values.
+
+Sonarr and Radarr naming policy is reported as externally synchronized through Profilarr, not as operator-editable Declared
+Configuration. Upstream settings absent from a service's contract are explicitly Unmanaged Configuration.
 
 ### `init`
 
@@ -245,6 +272,11 @@ By default it removes only containers and networks. Volumes require `--volumes`,
 It never deletes media, torrent payloads, backups, secrets, or Declared Configuration. There is no `--purge-data`.
 
 ## Declared Configuration
+
+Declared Configuration is one control class within the broader
+[Service Configuration Contract](service-configuration-contract.md). A checked-in expected value is not necessarily an
+operator choice: derived values, Stack Policy, and Externally Synchronized Policy must be identified separately by
+`media-stack config describe`.
 
 Use three documents with distinct lifecycles:
 
