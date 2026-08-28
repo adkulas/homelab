@@ -126,11 +126,14 @@ id -g
 From the repository root, initialize Staging:
 
 ```bash
-go build -o bin/media-stack ./cmd/media-stack
+CGO_ENABLED=0 go build -o bin/media-stack ./cmd/media-stack
 ./bin/media-stack init --environment staging
 ```
 
-That local build path is the simplest way to start a fresh implementation from the current repository state.
+That local build path is the simplest way to start a fresh implementation from the current repository state. The
+`CGO_ENABLED=0` setting produces a statically linked executable because `doctor` bind-mounts the CLI into the pinned
+application images for its disposable storage probes; a binary linked against the host's C library may not execute inside
+those containers.
 
 If you prefer the pinned release launcher, `setup.sh` downloads the pinned `media-stack` Linux binary for amd64 or arm64, verifies its SHA-256 checksum, caches it, and runs `media-stack init`. `init` currently prompts for the runtime UID/GID, timezone, NordVPN country, optional P2P category,
 OpenVPN UDP or TCP, Gluetun catalogue interval, hardware transcoding preference, age recipient, and NordVPN service credentials. Non-interactive automation can
