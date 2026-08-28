@@ -40,6 +40,8 @@ type initAnswers struct {
 	ProfilarrAPIKey         string                               `yaml:"profilarrAPIKey"`
 	JellyfinUsername        string                               `yaml:"jellyfinUsername"`
 	JellyfinPassword        string                               `yaml:"jellyfinPassword"`
+	QBittorrentUsername     string                               `yaml:"qbittorrentUsername"`
+	QBittorrentPassword     string                               `yaml:"qbittorrentPassword"`
 }
 
 func NewInitRequest(workingDirectory, environment, configPath, answersPath string) (InitRequest, error) {
@@ -85,6 +87,9 @@ func (localEngine) Init(ctx context.Context, request InitRequest) (InitReport, e
 	secretExists := false
 	if _, err := os.Stat(secretsPath); err == nil {
 		secretExists = true
+		if _, err := decryptEnvironmentSecrets(ctx, secretsPath); err != nil {
+			return InitReport{}, err
+		}
 		if configurationAlreadyComplete {
 			if err := provisionDataLayout(environment.DataRoot, declared.Spec.Defaults.RuntimeUID, declared.Spec.Defaults.RuntimeGID); err != nil {
 				return InitReport{}, err
@@ -170,8 +175,8 @@ func validateInitAnswers(answers initAnswers, requireSecrets bool) error {
 	if _, err := time.LoadLocation(answers.Timezone); err != nil {
 		return fmt.Errorf("timezone %q is not a valid IANA timezone: %w", answers.Timezone, err)
 	}
-	if requireSecrets && (answers.AgeRecipient == "" || answers.ServiceUsername == "" || answers.ServicePassword == "" || len(answers.ProfilarrAPIKey) < 32 || answers.JellyfinUsername == "" || answers.JellyfinPassword == "") {
-		return fmt.Errorf("ageRecipient, serviceUsername, servicePassword, a profilarrAPIKey of at least 32 characters, jellyfinUsername, and jellyfinPassword are required")
+	if requireSecrets && (answers.AgeRecipient == "" || answers.ServiceUsername == "" || answers.ServicePassword == "" || len(answers.ProfilarrAPIKey) < 32 || answers.JellyfinUsername == "" || answers.JellyfinPassword == "" || answers.QBittorrentUsername == "" || answers.QBittorrentPassword == "") {
+		return fmt.Errorf("ageRecipient, serviceUsername, servicePassword, a profilarrAPIKey of at least 32 characters, jellyfinUsername, jellyfinPassword, qbittorrentUsername, and qbittorrentPassword are required")
 	}
 	if answers.ServerCategory != "" && answers.ServerCategory != "P2P" {
 		return fmt.Errorf("serverCategory must be empty or P2P")
@@ -196,6 +201,8 @@ func encryptSecrets(ctx context.Context, destination string, answers initAnswers
 	document.Profilarr.APIKey = answers.ProfilarrAPIKey
 	document.Jellyfin.Username = answers.JellyfinUsername
 	document.Jellyfin.Password = answers.JellyfinPassword
+	document.QBittorrent.Username = answers.QBittorrentUsername
+	document.QBittorrent.Password = answers.QBittorrentPassword
 	plain, err := yaml.Marshal(document)
 	if err != nil {
 		return fmt.Errorf("encode environment secrets: %w", err)

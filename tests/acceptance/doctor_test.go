@@ -22,7 +22,11 @@ func TestDoctorProbesTheApplicationStorageMountsAsTheDeclaredRuntimeIdentity(t *
 	)
 	output, err := command.Output()
 	if err != nil {
-		t.Fatalf("doctor rejected capable storage: %v\n%s", err, output)
+		stderr := []byte(nil)
+		if exitError, ok := err.(*exec.ExitError); ok {
+			stderr = exitError.Stderr
+		}
+		t.Fatalf("doctor rejected capable storage: %v\nstdout: %s\nstderr: %s", err, output, stderr)
 	}
 
 	var report struct {
@@ -311,6 +315,8 @@ func doctorFixture(t *testing.T) (string, string) {
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
 	configuration := readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml"))
+	configuration = []byte(strings.Replace(string(configuration), "runtimeUID: 1000", "runtimeUID: "+strconv.Itoa(os.Getuid()), 1))
+	configuration = []byte(strings.Replace(string(configuration), "runtimeGID: 1000", "runtimeGID: "+strconv.Itoa(os.Getgid()), 1))
 	if !strings.Contains(string(configuration), "\n  acquisition:") && !strings.Contains(string(configuration), "\n    acquisition:") {
 		configuration = append(configuration, []byte(`  acquisition:
     vpn:
@@ -335,6 +341,39 @@ func doctorFixture(t *testing.T) (string, string) {
 	docker := `#!/bin/sh
 [ -n "$DOCTOR_DOCKER_LOG" ] && printf '%s\n' "$*" >> "$DOCTOR_DOCKER_LOG"
 case "$*" in
+	*"run --detach"*)
+		previous= name= port=
+		for argument in "$@"; do
+			[ "$previous" = --name ] && name=$argument
+			if [ "$previous" = -p ]; then mapping=${argument#127.0.0.1:}; port=${mapping%%:*}; fi
+			previous=$argument
+		done
+		(
+		python3 - "$port" <<'PY'
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.send_response(204)
+        self.end_headers()
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"v5.1.2")
+    def log_message(self, format, *args):
+        pass
+HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
+PY
+		) >/dev/null 2>&1 &
+		printf '%s' "$!" > "/tmp/media-stack-doctor-fixture-$name.pid"
+		printf 'fixture-container-id\n'
+		exit 0 ;;
+	"rm --force "*)
+		name=${*##* }
+		pidfile="/tmp/media-stack-doctor-fixture-$name.pid"
+		[ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null
+		rm -f "$pidfile"
+		exit 0 ;;
 	*"__storage-probe"*)
 		if [ "$DOCTOR_STORAGE_FAILURE" = incomplete ]; then
 			printf '%s\n' '{"checks":[]}'

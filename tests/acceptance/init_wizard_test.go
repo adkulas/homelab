@@ -52,8 +52,10 @@ func TestInitWizardExplainsAndCollectsSupportedOpenVPNChoices(t *testing.T) {
 		"service-user",     // Nord manual-setup username
 		"service-password", // Nord manual-setup password
 		"fixture-profilarr-api-key-32-characters", // Profilarr API key
-		"household",                 // Jellyfin administrator username
-		"fixture-jellyfin-password", // Jellyfin administrator password
+		"household",                    // Jellyfin administrator username
+		"fixture-jellyfin-password",    // Jellyfin administrator password
+		"household",                    // qBittorrent Web UI username
+		"fixture-qbittorrent-password", // qBittorrent Web UI password
 	}, "\n") + "\n")
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -69,6 +71,8 @@ func TestInitWizardExplainsAndCollectsSupportedOpenVPNChoices(t *testing.T) {
 		"Profilarr API key",
 		"Jellyfin administrator username",
 		"Jellyfin administrator password",
+		"qBittorrent Web UI username",
+		"qBittorrent Web UI password",
 		"OpenVPN protocol (udp or tcp) [udp]",
 		"Hardware transcoding (auto or disabled) [auto]",
 	} {
@@ -79,7 +83,7 @@ func TestInitWizardExplainsAndCollectsSupportedOpenVPNChoices(t *testing.T) {
 	if strings.Contains(strings.ToLower(humanOutput), "wireguard") {
 		t.Errorf("first-milestone wizard offered WireGuard:\n%s", humanOutput)
 	}
-	for _, secret := range []string{"service-user", "service-password", "fixture-jellyfin-password"} {
+	for _, secret := range []string{"service-user", "service-password", "fixture-jellyfin-password", "fixture-qbittorrent-password"} {
 		if strings.Contains(humanOutput, secret) {
 			t.Errorf("wizard output exposed secret %q:\n%s", secret, humanOutput)
 		}

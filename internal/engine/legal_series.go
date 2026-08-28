@@ -62,13 +62,13 @@ func verifyLegalSeries(ctx context.Context, plan Plan, declared config.MediaStac
 		return
 	}
 	environment := declared.Spec.Environments[request.plan.environment]
-	password, err := waitForTemporaryQBittorrentPassword(ctx, plan, 120*time.Second)
+	secrets, err := decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment)
 	if err != nil {
 		report.add("VERIFY_SERIES_EPISODE_ACQUISITION_FAILED", "legal series episode acquisition", err.Error(), false)
 		return
 	}
 	qbClient := qbittorrent.New("http://"+environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.QBittorrent), &http.Client{Timeout: 10 * time.Second})
-	if err := qbClient.Login(ctx, "admin", password); err != nil {
+	if err := qbClient.Login(ctx, secrets.QBittorrent.Username, secrets.QBittorrent.Password); err != nil {
 		report.add("VERIFY_SERIES_EPISODE_ACQUISITION_FAILED", "legal series episode acquisition", err.Error(), false)
 		return
 	}

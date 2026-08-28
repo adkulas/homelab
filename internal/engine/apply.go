@@ -38,6 +38,7 @@ type environmentSecrets struct {
 	OpenVPN      openVPNCredentials
 	ProfilarrKey string
 	Jellyfin     jellyfin.Credentials
+	QBittorrent  qbittorrent.Credentials
 }
 
 func NewApplyRequest(workingDirectory, environment, configPath string) (ApplyRequest, error) {
@@ -72,11 +73,7 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 		return ApplyReport{}, err
 	}
 	environment := declared.Spec.Environments[request.plan.environment]
-	secretPath := environment.SecretsFile
-	if !filepath.IsAbs(secretPath) {
-		secretPath = filepath.Join(filepath.Dir(request.plan.configPath), secretPath)
-	}
-	secrets, err := decryptEnvironmentSecrets(ctx, secretPath)
+	secrets, err := decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment)
 	if err != nil {
 		return ApplyReport{}, err
 	}
@@ -94,14 +91,17 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if output, err := runDockerCompose(ctx, plan, "up", "-d", "qbittorrent"); err != nil {
 		return ApplyReport{}, fmt.Errorf("start qBittorrent after healthy Gluetun: %w: %s", err, redactCredentials(output, credentials))
 	}
-	password, err := waitForTemporaryQBittorrentPassword(ctx, plan, 120*time.Second)
+	qbittorrentStart, err := qbittorrentContainerStart(ctx, plan)
 	if err != nil {
 		return ApplyReport{}, err
 	}
 	address := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.QBittorrent)
 	client := qbittorrent.New("http://"+address, &http.Client{Timeout: 10 * time.Second})
-	if err := client.Login(ctx, "admin", password); err != nil {
-		return ApplyReport{}, err
+	qbittorrentConfiguration := qbittorrent.DeclaredConfiguration{Credentials: secrets.QBittorrent, Port: environment.Ports.QBittorrent}
+	if err := client.Bootstrap(ctx, secrets.QBittorrent, func(ctx context.Context) (string, bool, error) {
+		return currentTemporaryQBittorrentPassword(ctx, plan, qbittorrentStart)
+	}, 120*time.Second, 2*time.Second); err != nil {
+		return ApplyReport{}, fmt.Errorf("establish declared qBittorrent authentication: %w", err)
 	}
 	if _, err := client.ReconcileAcquisitionPolicy(ctx); err != nil {
 		return ApplyReport{}, fmt.Errorf("reconcile qBittorrent acquisition policy: %w", err)
@@ -118,7 +118,7 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if err := waitForRadarrReady(ctx, radarrClient, 120*time.Second); err != nil {
 		return ApplyReport{}, err
 	}
-	if _, err := radarrClient.ReconcileMovieLibrary(ctx, password); err != nil {
+	if _, err := radarrClient.ReconcileMovieLibrary(ctx, qbittorrentConfiguration); err != nil {
 		return ApplyReport{}, fmt.Errorf("reconcile Radarr Movie Library: %w", err)
 	}
 	if output, err := runDockerCompose(ctx, plan, "up", "-d", "sonarr"); err != nil {
@@ -133,7 +133,7 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if err := waitForSonarrReady(ctx, sonarrClient, 120*time.Second); err != nil {
 		return ApplyReport{}, err
 	}
-	if _, err := sonarrClient.ReconcileSeriesLibrary(ctx, password); err != nil {
+	if _, err := sonarrClient.ReconcileSeriesLibrary(ctx, qbittorrentConfiguration); err != nil {
 		return ApplyReport{}, fmt.Errorf("reconcile Sonarr Series Library: %w", err)
 	}
 	if output, err := runDockerCompose(ctx, plan, "up", "-d", "prowlarr"); err != nil {
@@ -398,7 +398,7 @@ func waitForRadarrReady(ctx context.Context, client radarrReadiness, timeout tim
 	}
 }
 
-var temporaryPasswordPattern = regexp.MustCompile(`temporary password is provided for this session:\s*(\S+)`)
+var temporaryPasswordPattern = regexp.MustCompile(`(?i)temporary password[^\r\n:]*session:\s*(?:\x1b\[[0-9;]*m\s*)*([^\s\x1b]+)`)
 
 func temporaryQBittorrentPassword(logs []byte) (string, error) {
 	matches := temporaryPasswordPattern.FindAllSubmatch(logs, -1)
@@ -406,6 +406,41 @@ func temporaryQBittorrentPassword(logs []byte) (string, error) {
 		return "", fmt.Errorf("qBittorrent did not report its temporary Web UI password; restore the CLI-owned bootstrap state or provide a supported credential contract")
 	}
 	return string(matches[len(matches)-1][1]), nil
+}
+
+func currentTemporaryQBittorrentPassword(ctx context.Context, plan Plan, startedAt time.Time) (string, bool, error) {
+	logs, err := runDockerCompose(ctx, plan, "logs", "--no-color", "--since", startedAt.Format(time.RFC3339Nano), "qbittorrent")
+	if err != nil {
+		return "", false, fmt.Errorf("read current-start qBittorrent bootstrap credentials: %w", err)
+	}
+	password, err := temporaryQBittorrentPassword(logs)
+	if err != nil {
+		if strings.Contains(strings.ToLower(string(logs)), "password was not set") {
+			return "", false, qbittorrent.ErrCurrentStartCredentialMissing
+		}
+		return "", false, nil
+	}
+	return password, true, nil
+}
+
+func qbittorrentContainerStart(ctx context.Context, plan Plan) (time.Time, error) {
+	containerID, err := runDockerCompose(ctx, plan, "ps", "-q", "qbittorrent")
+	if err != nil {
+		return time.Time{}, fmt.Errorf("resolve current qBittorrent container identity: %w", err)
+	}
+	if len(bytes.TrimSpace(containerID)) == 0 {
+		return time.Time{}, fmt.Errorf("resolve current qBittorrent container identity: Compose returned no container ID")
+	}
+	command := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{.State.StartedAt}}", string(bytes.TrimSpace(containerID)))
+	output, err := command.Output()
+	if err != nil {
+		return time.Time{}, fmt.Errorf("inspect current qBittorrent container start: %w", err)
+	}
+	startedAt, err := time.Parse(time.RFC3339Nano, string(bytes.TrimSpace(output)))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("decode current qBittorrent container start: %w", err)
+	}
+	return startedAt, nil
 }
 
 func waitForTemporaryQBittorrentPassword(ctx context.Context, plan Plan, timeout time.Duration) (string, error) {
@@ -508,7 +543,18 @@ func decryptEnvironmentSecrets(ctx context.Context, path string) (environmentSec
 	if document.Jellyfin.Username == "" || document.Jellyfin.Password == "" {
 		return environmentSecrets{}, fmt.Errorf("selected Environment secrets require jellyfin.username and jellyfin.password")
 	}
-	return environmentSecrets{OpenVPN: credentials, ProfilarrKey: document.Profilarr.APIKey, Jellyfin: jellyfin.Credentials{Username: document.Jellyfin.Username, Password: document.Jellyfin.Password}}, nil
+	if document.QBittorrent.Username == "" || document.QBittorrent.Password == "" {
+		return environmentSecrets{}, fmt.Errorf("selected Environment secrets require qbittorrent.username and qbittorrent.password; run media-stack init with the new keys to migrate this SOPS document without overwriting existing values")
+	}
+	return environmentSecrets{OpenVPN: credentials, ProfilarrKey: document.Profilarr.APIKey, Jellyfin: jellyfin.Credentials{Username: document.Jellyfin.Username, Password: document.Jellyfin.Password}, QBittorrent: qbittorrent.Credentials{Username: document.QBittorrent.Username, Password: document.QBittorrent.Password}}, nil
+}
+
+func decryptSelectedEnvironmentSecrets(ctx context.Context, configPath string, environment config.Environment) (environmentSecrets, error) {
+	secretPath := environment.SecretsFile
+	if !filepath.IsAbs(secretPath) {
+		secretPath = filepath.Join(filepath.Dir(configPath), secretPath)
+	}
+	return decryptEnvironmentSecrets(ctx, secretPath)
 }
 
 func materializeRuntimeSecrets(directory string, secrets environmentSecrets) error {

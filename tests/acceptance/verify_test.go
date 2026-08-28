@@ -21,6 +21,7 @@ func TestVerifyProvesVPNEgressFailClosedAndRecovery(t *testing.T) {
 	dockerLog := filepath.Join(temporary, "docker.log")
 	probeCount := filepath.Join(temporary, "probe-count")
 	writeFile(t, filepath.Join(binDirectory, "curl"), []byte("#!/bin/sh\nprintf '198.51.100.10\\n'\n"), 0o700)
+	writeFile(t, filepath.Join(binDirectory, "sops"), []byte("#!/bin/sh\nprintf 'nordvpn:\n  openvpn:\n    serviceUsername: fixture-user\n    servicePassword: fixture-password\nprofilarr:\n  apiKey: fixture-profilarr-api-key-32-characters\njellyfin:\n  username: household\n  password: fixture-jellyfin-password\nqbittorrent:\n  username: household\n  password: fixture-qbittorrent-password\n'\n"), 0o700)
 	writeFile(t, filepath.Join(binDirectory, "docker"), []byte(`#!/bin/sh
 printf '%s\n' "$*" >> "$VERIFY_DOCKER_LOG"
 cat >/dev/null
@@ -39,6 +40,7 @@ case "$*" in
   "compose -f - stop gluetun") exit 0 ;;
   "compose -f - start gluetun") exit 0 ;;
   "compose -f - up -d --force-recreate qbittorrent") exit 0 ;;
+  "run --rm --no-healthcheck -i --network media-staging_application --entrypoint /bin/sh "*) exit 0 ;;
   *) exit 99 ;;
 esac
 `), 0o700)
@@ -81,6 +83,7 @@ esac
 		"VERIFY_VPN_EGRESS",
 		"VERIFY_FAIL_CLOSED",
 		"VERIFY_TUNNEL_RECOVERED",
+		"VERIFY_QBITTORRENT_AUTH_PERSISTED",
 	} {
 		if !passed[code] {
 			t.Errorf("verify did not report passing %s: %s", code, output)
@@ -98,6 +101,7 @@ esac
 		"ps --format json gluetun",
 		"up -d --force-recreate qbittorrent",
 		"exec -T qbittorrent curl",
+		"run --rm --no-healthcheck -i --network media-staging_application",
 	}
 	position := 0
 	for _, fragment := range wantOrder {

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+
+	"github.com/adkulas/homelab/internal/qbittorrent"
 )
 
 const seriesLibraryRoot = "/data/media/series"
@@ -62,7 +64,7 @@ func (client *Client) Ready(ctx context.Context) error {
 	return nil
 }
 
-func (client *Client) ReconcileSeriesLibrary(ctx context.Context, qbittorrentPassword string) (bool, error) {
+func (client *Client) ReconcileSeriesLibrary(ctx context.Context, qbittorrentConfiguration qbittorrent.DeclaredConfiguration) (bool, error) {
 	var roots []rootFolder
 	if err := client.getJSON(ctx, "/api/v3/rootfolder", &roots); err != nil {
 		return false, err
@@ -83,7 +85,7 @@ func (client *Client) ReconcileSeriesLibrary(ctx context.Context, qbittorrentPas
 	if err := client.getJSON(ctx, "/api/v3/downloadclient", &observed); err != nil {
 		return false, err
 	}
-	desired := declaredDownloadClient(qbittorrentPassword)
+	desired := declaredDownloadClient(qbittorrentConfiguration)
 	for _, current := range observed {
 		if current.Implementation == desired.Implementation && downloadClientMatches(current, desired) {
 			return changed, nil
@@ -95,16 +97,16 @@ func (client *Client) ReconcileSeriesLibrary(ctx context.Context, qbittorrentPas
 	return true, nil
 }
 
-func declaredDownloadClient(password string) downloadClient {
+func declaredDownloadClient(configuration qbittorrent.DeclaredConfiguration) downloadClient {
 	return downloadClient{
 		Enable: true, Protocol: "torrent", Priority: 1,
 		RemoveCompletedDownloads: true, RemoveFailedDownloads: true,
 		Name: "qBittorrent", ImplementationName: "qBittorrent",
 		Implementation: "QBittorrent", ConfigContract: "QBittorrentSettings", Tags: []int{},
 		Fields: []field{
-			{Name: "host", Value: "qbittorrent"}, {Name: "port", Value: 8080},
+			{Name: "host", Value: "qbittorrent"}, {Name: "port", Value: configuration.Port},
 			{Name: "useSsl", Value: false}, {Name: "urlBase", Value: ""},
-			{Name: "username", Value: "admin"}, {Name: "password", Value: password},
+			{Name: "username", Value: configuration.Credentials.Username}, {Name: "password", Value: configuration.Credentials.Password},
 			{Name: "tvCategory", Value: "series"}, {Name: "tvImportedCategory", Value: ""},
 			{Name: "recentTvPriority", Value: 0}, {Name: "olderTvPriority", Value: 0},
 			{Name: "initialState", Value: 0}, {Name: "sequentialOrder", Value: false},

@@ -165,7 +165,7 @@ spec:
 	if err := os.Mkdir(binDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(binDirectory, "sops"), []byte("#!/bin/sh\nprintf 'nordvpn:\n  openvpn:\n    serviceUsername: fixture-user\n    servicePassword: fixture-password\nprofilarr:\n  apiKey: fixture-profilarr-api-key-32-characters\njellyfin:\n  username: household\n  password: fixture-jellyfin-password\n'\n"), 0o700)
+	writeFile(t, filepath.Join(binDirectory, "sops"), []byte("#!/bin/sh\nprintf 'nordvpn:\n  openvpn:\n    serviceUsername: fixture-user\n    servicePassword: fixture-password\nprofilarr:\n  apiKey: fixture-profilarr-api-key-32-characters\njellyfin:\n  username: household\n  password: fixture-jellyfin-password\nqbittorrent:\n  username: household\n  password: fixture-qbittorrent-password\n'\n"), 0o700)
 	writeFile(t, filepath.Join(binDirectory, "curl"), []byte("#!/bin/sh\nprintf '198.51.100.10\\n'\n"), 0o700)
 	writeFile(t, filepath.Join(binDirectory, "docker"), []byte(`#!/bin/sh
 cat >/dev/null
@@ -182,6 +182,7 @@ case "$*" in
   "compose -f - stop gluetun") exit 0 ;;
   "compose -f - start gluetun") exit 0 ;;
   "compose -f - up -d --force-recreate qbittorrent") exit 0 ;;
+  "run --rm --no-healthcheck -i --network media-staging_application --entrypoint /bin/sh "*) exit 0 ;;
   "compose -f - logs --no-color qbittorrent") printf 'A temporary password is provided for this session: fixture-temporary-password\n'; exit 0 ;;
   "compose -f - exec -T radarr cat /config/config.xml") printf '<Config><ApiKey>fixture-radarr-api-key</ApiKey></Config>\n'; exit 0 ;;
   *) exit 99 ;;

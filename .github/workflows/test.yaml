@@ -1,0 +1,32 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - name: Validate rendered Compose
+        run: |
+          set -o pipefail
+          go run ./cmd/media-stack plan --environment staging | docker compose -f - config --quiet
+      - run: go test ./...
+
+  pinned-qbittorrent-contract:
+    runs-on: ubuntu-latest
+    env:
+      MEDIA_STACK_LIVE_QBITTORRENT: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./internal/engine -run TestPinnedQBittorrentBootstrapRestartAndPeerContract -count=1 -v

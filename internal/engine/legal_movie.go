@@ -61,14 +61,14 @@ func verifyLegalMovie(ctx context.Context, plan Plan, declared config.MediaStack
 		return
 	}
 	environment := declared.Spec.Environments[request.plan.environment]
-	password, err := waitForTemporaryQBittorrentPassword(ctx, plan, 120*time.Second)
+	secrets, err := decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment)
 	if err != nil {
 		report.add("VERIFY_MOVIE_ACQUISITION_FAILED", "legal movie acquisition", err.Error(), false)
 		return
 	}
 	qbAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.QBittorrent)
 	qbClient := qbittorrent.New("http://"+qbAddress, &http.Client{Timeout: 10 * time.Second})
-	if err := qbClient.Login(ctx, "admin", password); err != nil {
+	if err := qbClient.Login(ctx, secrets.QBittorrent.Username, secrets.QBittorrent.Password); err != nil {
 		report.add("VERIFY_MOVIE_ACQUISITION_FAILED", "legal movie acquisition", err.Error(), false)
 		return
 	}

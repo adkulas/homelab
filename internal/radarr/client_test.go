@@ -8,6 +8,8 @@ import (
 	"os"
 	"reflect"
 	"testing"
+
+	"github.com/adkulas/homelab/internal/qbittorrent"
 )
 
 func TestReconcileMovieLibraryConvergesContractFixtures(t *testing.T) {
@@ -46,7 +48,8 @@ func TestReconcileMovieLibraryConvergesContractFixtures(t *testing.T) {
 	if err := client.Ready(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := client.ReconcileMovieLibrary(context.Background(), "fixture-qb-password")
+	configuration := qbittorrent.DeclaredConfiguration{Credentials: qbittorrent.Credentials{Username: "household", Password: "fixture-qb-password"}, Port: 18080}
+	changed, err := client.ReconcileMovieLibrary(context.Background(), configuration)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +61,7 @@ func TestReconcileMovieLibraryConvergesContractFixtures(t *testing.T) {
 	}
 
 	mutations = nil
-	changed, err = client.ReconcileMovieLibrary(context.Background(), "fixture-qb-password")
+	changed, err = client.ReconcileMovieLibrary(context.Background(), configuration)
 	if err != nil {
 		t.Fatal(err)
 	}

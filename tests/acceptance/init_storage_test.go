@@ -21,7 +21,7 @@ func TestInitProvisionsOnlyTheSelectedEnvironmentDataLayout(t *testing.T) {
 	if err := os.Mkdir(binDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(binDirectory, "sops"), []byte("#!/bin/sh\ncat >/dev/null\nprintf 'encrypted: ENC[ciphertext]\\n'\n"), 0o700)
+	writeFile(t, filepath.Join(binDirectory, "sops"), []byte("#!/bin/sh\nif [ \"$1\" = decrypt ]; then printf 'nordvpn:\\n  openvpn:\\n    serviceUsername: staging-user\\n    servicePassword: staging-password\\nprofilarr:\\n  apiKey: fixture-profilarr-api-key-32-characters\\njellyfin:\\n  username: household\\n  password: fixture-jellyfin-password\\nqbittorrent:\\n  username: household\\n  password: fixture-qbittorrent-password\\n'; else cat >/dev/null; printf 'encrypted: ENC[ciphertext]\\n'; fi\n"), 0o700)
 	answersPath := filepath.Join(temporary, "answers.yaml")
 	writeFile(t, answersPath, completeAnswers(
 		strconv.Itoa(os.Getuid()),
@@ -75,7 +75,7 @@ func TestInitDoesNotChangeExistingDataOwnershipOrPermissions(t *testing.T) {
 	if err := os.Mkdir(binDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(binDirectory, "sops"), []byte("#!/bin/sh\ncat >/dev/null\nprintf 'encrypted: ENC[ciphertext]\\n'\n"), 0o700)
+	writeFile(t, filepath.Join(binDirectory, "sops"), []byte("#!/bin/sh\nif [ \"$1\" = decrypt ]; then printf 'nordvpn:\\n  openvpn:\\n    serviceUsername: staging-user\\n    servicePassword: staging-password\\nprofilarr:\\n  apiKey: fixture-profilarr-api-key-32-characters\\njellyfin:\\n  username: household\\n  password: fixture-jellyfin-password\\nqbittorrent:\\n  username: household\\n  password: fixture-qbittorrent-password\\n'; else cat >/dev/null; printf 'encrypted: ENC[ciphertext]\\n'; fi\n"), 0o700)
 	answersPath := filepath.Join(temporary, "answers.yaml")
 	writeFile(t, answersPath, completeAnswers(
 		strconv.Itoa(os.Getuid()),

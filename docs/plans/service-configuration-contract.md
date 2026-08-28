@@ -75,7 +75,7 @@ reconcilers and add any setting they read, write, or verify that is missing here
 | Service | Required subjects |
 | --- | --- |
 | Gluetun | image, VPN provider and protocol, OpenVPN transport, server filters, catalogue interval, service credentials, TUN and capability contract, firewall inputs, network aliases, and qBittorrent port publication |
-| qBittorrent | image, LAN port, runtime identity, mounts, VPN-shared networking, authentication bootstrap, save path, Automatic Torrent Management, movie and series categories, seeding limits, and unmanaged preferences |
+| qBittorrent | image, canonical Environment port, runtime identity, mounts, VPN-shared networking, current-start temporary bootstrap, stable SOPS-backed Web UI credentials, protected API verification, restart and peer authentication, save path, Automatic Torrent Management, movie and series categories, seeding limits, and unmanaged preferences |
 | Prowlarr | image, LAN port, runtime identity, approved Public Torrent Sources, source details, Radarr and Sonarr links, synchronization mode, internal URLs, API keys, and unmanaged indexers/applications |
 | Sonarr | image, LAN port, runtime identity, Series Library root, qBittorrent client and category, internal URLs and credentials, quality profile, quality definitions, custom-format scores, naming formats, media management, and unmanaged settings |
 | Radarr | image, LAN port, runtime identity, Movie Library root, qBittorrent client and category, internal URLs and credentials, quality profile, quality definitions, custom-format scores, naming formats, media management, and unmanaged settings |

@@ -16,7 +16,7 @@ func TestDetectedHardwareTranscodingOverlayIsComposeValid(t *testing.T) {
 	}
 	rendered, err := topology.Render(
 		config.Defaults{Timezone: "America/Toronto", RuntimeUID: 1000, RuntimeGID: 1000},
-		config.Environment{ProjectName: "media-staging", DataRoot: "/srv/media/staging"},
+		config.Environment{ProjectName: "media-staging", DataRoot: "/srv/media/staging", Ports: config.Ports{QBittorrent: 18080, Prowlarr: 19696, Sonarr: 18989, Radarr: 17878, Profilarr: 16868, Jellyfin: 18096, Seerr: 15055}},
 		config.VPN{},
 		versions.Images,
 		"/run/media-stack/media-staging",
