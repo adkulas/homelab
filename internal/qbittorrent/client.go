@@ -3,12 +3,30 @@ package qbittorrent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 )
+
+var ErrAuthenticationRejected = errors.New("qBittorrent rejected Web UI credentials")
+
+var (
+	ErrUnsupportedLoginResponse = errors.New("qBittorrent returned an unsupported login response")
+	ErrProtectedObservation     = errors.New("qBittorrent protected API observation failed")
+)
+
+type Credentials struct {
+	Username string
+	Password string
+}
+
+type DeclaredConfiguration struct {
+	Credentials Credentials
+	Port        int
+}
 
 const (
 	defaultSavePath  = "/data/torrents"
@@ -61,15 +79,59 @@ func (client *Client) Login(ctx context.Context, username, password string) erro
 	}
 	defer response.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-	if response.StatusCode != http.StatusOK || strings.TrimSpace(string(body)) != "Ok." {
-		return fmt.Errorf("authenticate to qBittorrent API: HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
-	}
 	cookies := response.Cookies()
+	if len(cookies) > 0 {
+		client.cookie = cookies[0]
+	}
+	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("%w: HTTP %d", ErrAuthenticationRejected, response.StatusCode)
+	}
+	if response.StatusCode == http.StatusNoContent {
+		if err := client.ObserveProtectedAPI(ctx); err != nil {
+			return fmt.Errorf("%w: %v", ErrProtectedObservation, err)
+		}
+		return nil
+	}
+	if response.StatusCode != http.StatusOK || strings.TrimSpace(string(body)) != "Ok." {
+		return fmt.Errorf("%w: HTTP %d: %s", ErrUnsupportedLoginResponse, response.StatusCode, strings.TrimSpace(string(body)))
+	}
 	if len(cookies) == 0 {
-		return fmt.Errorf("authenticate to qBittorrent API: response did not set a session cookie")
+		return fmt.Errorf("%w: legacy response did not set a session cookie", ErrUnsupportedLoginResponse)
 	}
 	client.cookie = cookies[0]
 	return nil
+}
+
+func (client *Client) ObserveProtectedAPI(ctx context.Context) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, client.baseURL+"/api/v2/app/version", nil)
+	if err != nil {
+		return err
+	}
+	client.authorize(request)
+	request.Header.Set("Referer", client.baseURL)
+	response, err := client.http.Do(request)
+	if err != nil {
+		return fmt.Errorf("observe protected qBittorrent API: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("observe protected qBittorrent API: HTTP %d", response.StatusCode)
+	}
+	return nil
+}
+
+func (client *Client) ReconcileWebUICredentials(ctx context.Context, credentials Credentials) error {
+	if credentials.Username == "" || credentials.Password == "" {
+		return fmt.Errorf("qBittorrent Web UI username and password are required")
+	}
+	encoded, err := json.Marshal(map[string]string{
+		"web_ui_username": credentials.Username,
+		"web_ui_password": credentials.Password,
+	})
+	if err != nil {
+		return err
+	}
+	return client.postForm(ctx, "/api/v2/app/setPreferences", url.Values{"json": {string(encoded)}})
 }
 
 func (client *Client) ReconcileAcquisitionPolicy(ctx context.Context) (bool, error) {
@@ -123,6 +185,7 @@ func (client *Client) getJSON(ctx context.Context, endpoint string, target any) 
 		return err
 	}
 	client.authorize(request)
+	request.Header.Set("Referer", client.baseURL)
 	response, err := client.http.Do(request)
 	if err != nil {
 		return fmt.Errorf("observe qBittorrent API %s: %w", endpoint, err)
@@ -145,6 +208,7 @@ func (client *Client) postForm(ctx context.Context, endpoint string, values url.
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	client.authorize(request)
+	request.Header.Set("Referer", client.baseURL)
 	response, err := client.http.Do(request)
 	if err != nil {
 		return fmt.Errorf("reconcile qBittorrent API %s: %w", endpoint, err)

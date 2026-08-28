@@ -183,7 +183,7 @@ secret, `/dev/net/tun`, `NET_ADMIN`, and whether the pinned Gluetun catalogue ac
 prove that a detected node is usable; invalid devices or container access fail with a remedy. A disabled preference is reported as an explicit skip. Doctor also runs disposable probes from the pinned qBittorrent, Radarr, and Sonarr images as the declared runtime UID/GID, using their
 actual `/data/torrents` or `/data` bind-mount shapes. Those probes verify write permission, same-device layout, hardlink
 creation and inode identity, atomic rename, filesystem events, and cleanup. Human output explains each result; JSON provides
-stable diagnostic records and remedies for automation. Each disposable Docker probe has a two-minute deadline and disables
+stable diagnostic records and remedies for automation. The `PREFLIGHT_QBITTORRENT_BOOTSTRAP_UNSUPPORTED` probe additionally launches the exact pinned qBittorrent digest with a fresh config and canonical port, uses the production bootstrap component to install generated credentials, restarts it, and proves authenticated access from a disposable application-network peer. Generated credentials are redacted and resources are cleaned up. Each disposable Docker probe has a two-minute deadline and disables
 the pinned image's service health check so a quick preflight command cannot be retained by Docker Desktop after it exits. It
 does not start the stack.
 
@@ -223,23 +223,21 @@ After `doctor` passes, start Staging qBittorrent behind Gluetun:
 media-stack apply --environment staging
 ```
 
-The currently available `apply` phase decrypts the selected Environment's NordVPN OpenVPN service credentials, Profilarr API key, and Jellyfin administrator credentials. Only the OpenVPN values and Profilarr key are materialized as runtime files; Jellyfin credentials remain in memory. It atomically materializes them as `0600` files beneath the operator's `0700`
+The currently available `apply` phase decrypts the selected Environment's NordVPN OpenVPN service credentials, Profilarr API key, Jellyfin administrator credentials, and stable qBittorrent Web UI credentials. Only the OpenVPN values and Profilarr key are materialized as runtime files; Jellyfin and qBittorrent credentials remain in memory. It atomically materializes them as `0600` files beneath the operator's `0700`
 `$XDG_RUNTIME_DIR/media-stack/<projectName>/` directory, streams the value-free Compose model to Docker, starts
 Gluetun, and waits up to two minutes for its built-in health check. Only after Gluetun is healthy does `apply` start
 qBittorrent, which shares Gluetun's network namespace. It then reconciles qBittorrent through its Web API: the default
 save path is `/data/torrents`; Automatic Torrent Management relocates downloads when their torrent, save path, or category
 changes; the exact `movies` and `series` categories use relative `movies` and `series` save paths; and global seeding stops
 at ratio 1.0 or seven days, whichever is reached first. Repeating `apply` observes those values and makes no API writes when
-they already match the Declared Configuration. During the CLI-owned bootstrap phase, `apply` reads the pinned LinuxServer
-image's latest temporary admin password from container logs, exchanges it for an in-memory Web API session, and never writes
-the password to command output or repository files. No remote path mappings are created. A transient unhealthy state is polled so Gluetun can try
+they already match the Declared Configuration. On a fresh config volume, a bounded bootstrap state machine considers only the temporary administrator password emitted after the current container start, waits through transient connection resets, accepts the pinned image's `204 No Content` login only after a protected API observation, installs the selected Environment's declared username and password, reauthenticates with them, and proves protected access. On an existing config volume it tries the declared credential first and never uses historical log credentials as recovery. Neither temporary nor declared credentials are written to command output, Compose, process arguments, or repository plaintext. No remote path mappings are created. A transient unhealthy state is polled so Gluetun can try
 another catalogue endpoint; a persistent failure exits `1`. The runtime files remain while the service is running so Docker
 can remount them after a container restart. After qBittorrent converges, `apply` starts Radarr, reads its generated API key
 from that Environment's `/config/config.xml` into memory, and waits for the supported Radarr v3 API. It reconciles
-`/data/media/movies` as the Movie Library root and a qBittorrent download client at `qbittorrent:8080` with the `movies`
+`/data/media/movies` as the Movie Library root and a qBittorrent download client at `qbittorrent:<Environment qBittorrent port>` with the `movies`
 category. It then starts Sonarr, reads its generated API key from the selected Environment's `/config/config.xml`, and waits
 for its supported v3 API. It reconciles `/data/media/series` as the Series Library root and a qBittorrent download client at
-`qbittorrent:8080` with the `series` category. qBittorrent and both Arr applications see the same `/data` paths, so no remote
+`qbittorrent:<Environment qBittorrent port>` with the `series` category. Both Arr clients use the same stable declared qBittorrent credential, so container recreation does not rotate their authentication. qBittorrent and both Arr applications see the same `/data` paths, so no remote
 path mapping is created. Repeated reconciliation makes no API writes once these values match. It then starts API-ready
 Prowlarr and reconciles the checked-in `internetarchive`
 Public Torrent Source plus full-sync Radarr and Sonarr application links. Prowlarr reaches Radarr at `http://radarr:7878`
@@ -249,9 +247,8 @@ in the CLI's approved semantic catalog, requires no credentials, and supports le
 `apply` observes all three Prowlarr resources through `/api/v1` and makes no writes when they already match. Rerunning `apply` safely replaces the
 runtime VPN files and converges Gluetun, qBittorrent, Radarr, Sonarr, and Prowlarr.
 Gluetun alone
-publishes the selected Environment's qBittorrent Web UI port, and its firewall admits only the narrow input port `8080`
-needed for that UI. Its `qbittorrent` application-network alias preserves the internal
-`http://qbittorrent:8080` endpoint without granting qBittorrent an independent route. Later tickets extend `apply` to the
+publishes the selected Environment's qBittorrent Web UI port to that same container port, and its firewall admits only that narrow port. qBittorrent receives the same value as `WEBUI_PORT`. Its `qbittorrent` application-network alias preserves the internal
+`http://qbittorrent:<Environment qBittorrent port>` endpoint without granting qBittorrent an independent route. Later tickets extend `apply` to the
 other services and application reconciliation.
 
 ### 5. Verify Staging VPN behavior and a legal movie import
@@ -341,10 +338,10 @@ network namespace and Gluetun's firewall is qBittorrent's only egress path.
 ```mermaid
 flowchart TB
     subgraph Project[Environment Compose project]
-        Apps[Radarr / Sonarr] -->|http://qbittorrent:8080| Alias[qbittorrent network alias]
+        Apps[Radarr / Sonarr] -->|Environment qBittorrent port| Alias[qbittorrent network alias]
 
         subgraph Namespace[Gluetun network namespace]
-            Alias --> QB[qBittorrent :8080]
+            Alias --> QB[qBittorrent Web UI]
             QB --> Firewall[Gluetun firewall]
             Firewall --> Tunnel[OpenVPN tunnel]
         end
@@ -356,13 +353,13 @@ flowchart TB
 ```
 
 Gluetun, not qBittorrent, publishes the qBittorrent Web UI port. Gluetun also carries the `qbittorrent` alias on the
-application network, preserving the stable internal address `http://qbittorrent:8080` for Radarr and Sonarr without giving
+application network, preserving `http://qbittorrent:<Environment qBittorrent port>` for Radarr and Sonarr without giving
 qBittorrent another route. The deployed design prohibits host networking, privileged mode, `FIREWALL=off`, and broad LAN
 firewall exceptions as kill-switch workarounds.
 
 `media-stack verify --environment staging --suite full [--config path] [--output human|json]` compares the public IP
 seen from qBittorrent's shared namespace with a host-side observation, interrupts the tunnel, proves a fresh egress attempt
-fails instead of using the host route, then restores Gluetun and verifies tunneled egress returns.
+fails instead of using the host route, then restores Gluetun, verifies tunneled egress returns, and proves the declared qBittorrent credential still authenticates from a disposable peer on the Environment application network.
 `--suite promotion` runs that proof first, then drives each supplied `--legal-fixture <path>` and
 `--legal-series-fixture <path>` release through its Arr application and qBittorrent and requires source/imported inode
 equality. At least one fixture is required. Both suites reject Production because they are disruptive.
@@ -432,7 +429,7 @@ rerunning similar commands in Production.
 | Service | Responsibility | Default example ports¹ |
 | --- | --- | ---: |
 | Gluetun | NordVPN tunnel, firewall, and qBittorrent network namespace | — |
-| qBittorrent | Categorized movie and series acquisition | 8080 / 18080 |
+| qBittorrent | Categorized movie and series acquisition | Environment-canonical: Production 8080, Staging 18080 |
 | Prowlarr | Approved Public Torrent Sources and Arr application links | 9696 / 19696 |
 | Radarr | Movie Library management | 7878 / 17878 |
 | Sonarr | Series Library management | 8989 / 18989 |
@@ -475,9 +472,9 @@ from silently becoming ineffective configuration.
 | `spec.environments.<name>.projectName` | `plan`, `apply` | Compose project name; scopes networks, runtime secret paths, and config volumes independently for Production and Staging. |
 | `spec.environments.<name>.dataRoot` | `init`, `plan` | Absolute host root provisioned by `init`; mounted as the selected Environment `/data` seam. The other Environment root is never rendered. |
 | `spec.environments.<name>.backupRoot` | `backup` | Absolute host namespace for the Environment's application-state archives. Production and Staging roots must be non-overlapping and neither may overlap either Environment's `dataRoot`; `backup` creates the selected root privately and atomically publishes verified backup directories beneath it. |
-| `spec.environments.<name>.secretsFile` | `init`, `doctor`, `apply`, Promotion verification | Environment-specific SOPS document written by `init`; `doctor` proves it can be decrypted, `apply` uses its OpenVPN, Profilarr, and Jellyfin credentials while materializing only runtime values required by containers, and Promotion verification authenticates to Jellyfin. `plan` never decrypts it. |
+| `spec.environments.<name>.secretsFile` | `init`, `doctor`, `apply`, Promotion verification | Environment-specific SOPS document written by `init`; it contains isolated qBittorrent `username`/`password` keys alongside OpenVPN, Profilarr, and Jellyfin credentials. `apply` keeps qBittorrent credentials in memory, persists them through the supported API, and supplies them to both Arr clients. Existing documents missing either key fail with a migration remedy; `init` never silently overwrites them. `plan` never decrypts it. |
 | `spec.environments.<name>.hardwareTranscoding` | `init`, `doctor`, `plan` | Must be `auto` or `disabled`. `auto` detects and validates `/dev/dri/renderD128`; supported hosts add the Jellyfin device and numeric render group, while missing hardware keeps the portable topology. `disabled` always keeps the portable topology. |
-| `spec.environments.<name>.ports.qbittorrent` | `plan` | Host port published on Gluetun for the qBittorrent Web UI target `8080`; qBittorrent has no direct published port. |
+| `spec.environments.<name>.ports.qbittorrent` | `plan`, `apply` | Canonical qBittorrent port used by `WEBUI_PORT`, Gluetun host/target publication and firewall admission, CLI/browser access, the application-network alias endpoint, and both Arr download clients. qBittorrent has no direct published port. |
 | `spec.environments.<name>.ports.prowlarr` | `plan` | Host port for Prowlarr target `9696`. |
 | `spec.environments.<name>.ports.sonarr` | `plan` | Host port for Sonarr target `8989`. |
 | `spec.environments.<name>.ports.radarr` | `plan` | Host port for Radarr target `7878`. |
@@ -680,10 +677,10 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
 | `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
-| `media-stack apply --environment production|staging [--config path]` | Available through Seerr household authentication | Uses the selected Environment's OpenVPN, Profilarr, and Jellyfin credentials without printing them; reconciles qBittorrent, Radarr, Sonarr, Prowlarr, Profilarr, and Jellyfin, then starts Seerr, enables new Jellyfin users with request-only default permission, and preserves the Jellyfin administrator as an emergency local Seerr administrator. An incomplete Profilarr connection still prints the exact UI checklist and exits `1`. |
+| `media-stack apply --environment production|staging [--config path]` | Available through Seerr household authentication | Uses the selected Environment's OpenVPN, Profilarr, Jellyfin, and stable qBittorrent credentials without printing them; reconciles qBittorrent, Radarr, Sonarr, Prowlarr, Profilarr, and Jellyfin, then starts Seerr, enables new Jellyfin users with request-only default permission, and preserves the Jellyfin administrator as an emergency local Seerr administrator. An incomplete Profilarr connection still prints the exact UI checklist and exits `1`. |
 | `media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--now RFC3339] [--output human|json]` | Available | Stops only running services with mutable named volumes, archives each volume through a read-only Docker mount, resumes those services, independently verifies every checksum, atomically publishes the selected Environment manifest last, then expires unprotected archives according to `backupRetention`. Use `--protect` for an archive that retention must preserve and `--now` only to fix the clock for deterministic verification. |
 | `media-stack restore --environment production|staging --backup manifest.json [--config path] [--confirm] [--output human|json]` | Available for matching Environments | Validates complete compatible application-state coverage and checksums and persists the exact preview. Rerun unchanged with `--confirm` to create a protected safety backup, stage and verify temporary volumes, transactionally replace mutable state, restart through Compose dependency handling, and record an operation journal; failures roll back before services restart. Restore Drill execution remains planned. |
-| `media-stack verify --environment staging --suite full [--config path] [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, and recovery. Use it after `apply` in Staging; it is deliberately rejected for Production. |
+| `media-stack verify --environment staging --suite full [--config path] [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, recovery, and stable declared authentication from an application-network peer after qBittorrent recreation. Use it after `apply` in Staging; it is deliberately rejected for Production. |
 | `media-stack verify --environment staging --suite promotion --legal-fixture path [--config path] [--output human|json]` | Available through Movie Library playback proof | Runs the full VPN proof, registers the fixture movie in Radarr, grabs the exact Internet Archive release into qBittorrent, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported path, and requires direct-play readiness. Use only in a disposable Staging Environment. Verification Artifact behavior remains planned. |
 | `media-stack verify --environment staging --suite promotion --legal-series-fixture path [--config path] [--output human|json]` | Available through Series Library playback proof | Runs the full VPN proof, registers the fixture series and episode in Sonarr, grabs the exact Internet Archive release into qBittorrent, waits for Sonarr import, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported episode, and requires direct-play readiness. Supply both legal fixture flags to prove both libraries in one run. Use only in a disposable Staging Environment. |
 | `media-stack destroy` | Planned | Will remove only selected-Environment runtime resources behind explicit safety guards. It is not accepted by the current binary. |

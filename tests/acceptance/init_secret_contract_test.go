@@ -55,6 +55,10 @@ func TestInitSendsOnlyOpenVPNServiceCredentialsToSOPS(t *testing.T) {
 			"username": "household",
 			"password": "fixture-jellyfin-password",
 		},
+		"qbittorrent": map[string]any{
+			"username": "household",
+			"password": "fixture-qbittorrent-password",
+		},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("plaintext supplied to SOPS = %#v, want %#v", got, want)

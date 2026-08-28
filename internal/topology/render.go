@@ -133,7 +133,11 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 		}
 		var ports []string
 		if definition.port != nil {
-			ports = []string{fmt.Sprintf("%s:%d:%d", defaults.LANBindAddress, definition.port(environment.Ports), definition.targetPort)}
+			targetPort := definition.targetPort
+			if definition.name == "gluetun" {
+				targetPort = environment.Ports.QBittorrent
+			}
+			ports = []string{fmt.Sprintf("%s:%d:%d", defaults.LANBindAddress, definition.port(environment.Ports), targetPort)}
 		}
 		var secrets []string
 		var envFiles []composeEnvFile
@@ -153,7 +157,7 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 			}
 			serviceEnvironment["UPDATER_PERIOD"] = vpn.CatalogueUpdateInterval
 			serviceEnvironment["FIREWALL"] = "on"
-			serviceEnvironment["FIREWALL_INPUT_PORTS"] = "8080"
+			serviceEnvironment["FIREWALL_INPUT_PORTS"] = strconv.Itoa(environment.Ports.QBittorrent)
 			serviceEnvironment["VPN_PORT_FORWARDING"] = "off"
 			serviceEnvironment["OPENVPN_USER_SECRETFILE"] = "/run/secrets/openvpn_user"
 			serviceEnvironment["OPENVPN_PASSWORD_SECRETFILE"] = "/run/secrets/openvpn_password"
@@ -163,6 +167,7 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 			networks["application"] = composeServiceNetwork{Aliases: []string{"qbittorrent"}}
 		}
 		if definition.name == "qbittorrent" {
+			serviceEnvironment["WEBUI_PORT"] = strconv.Itoa(environment.Ports.QBittorrent)
 			networkMode = "service:gluetun"
 			networks = nil
 			dependsOn = map[string]composeDependency{"gluetun": {Condition: "service_healthy"}}

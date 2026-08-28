@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/adkulas/homelab/internal/config"
+	"github.com/adkulas/homelab/internal/qbittorrent"
 )
 
 const doctorSchemaVersion = "homelab.media-stack/doctor/v1alpha1"
@@ -81,7 +84,8 @@ func (localEngine) Doctor(ctx context.Context, request DoctorRequest) (DoctorRep
 			Environment: request.environment, Subject: subject, Explanation: explanation, Remedy: remedy, Retryable: !passed})
 	}
 	add("PREFLIGHT_PLATFORM_UNSUPPORTED", "supported Ubuntu or WSL2 host", "Run inside Ubuntu or a WSL2 distribution integrated with Docker Desktop.", supportedPlatform())
-	add("DEPENDENCY_DOCKER_UNAVAILABLE", "Docker Engine", "Install Docker Engine or enable Docker Desktop WSL integration.", runQuiet(ctx, "docker", "version"))
+	dockerAvailable := runQuiet(ctx, "docker", "version")
+	add("DEPENDENCY_DOCKER_UNAVAILABLE", "Docker Engine", "Install Docker Engine or enable Docker Desktop WSL integration.", dockerAvailable)
 	add("DEPENDENCY_COMPOSE_UNAVAILABLE", "Docker Compose", "Install or enable the Docker Compose v2 plugin.", runQuiet(ctx, "docker", "compose", "version"))
 	add("DEPENDENCY_SOPS_UNAVAILABLE", "SOPS", "Install SOPS and ensure it is on PATH.", runQuiet(ctx, "sops", "--version"))
 	add("DEPENDENCY_AGE_UNAVAILABLE", "age", "Install age and ensure it is on PATH.", runQuiet(ctx, "age", "--version"))
@@ -100,6 +104,35 @@ func (localEngine) Doctor(ctx context.Context, request DoctorRequest) (DoctorRep
 	filterArguments = append(filterArguments, image, "format-servers", "-nordvpn")
 	validFilter := vpn.Provider == "nordvpn" && vpn.Protocol == "openvpn" && (vpn.OpenVPNProtocol == "udp" || vpn.OpenVPNProtocol == "tcp") && len(vpn.Server.Countries) > 0
 	add("PREFLIGHT_VPN_FILTER_UNSUPPORTED", "declared NordVPN OpenVPN server filters", "Choose protocol, country, and category values supported by the pinned Gluetun catalogue.", validFilter && runDockerProbeNonEmpty(ctx, filterArguments...))
+	qbittorrentErr := fmt.Errorf("Docker Engine is unavailable")
+	if dockerAvailable {
+		qbittorrentErr = doctorQBittorrentBootstrap(ctx, versions.Images["qbittorrent"], declared.Spec.Defaults.RuntimeUID, declared.Spec.Defaults.RuntimeGID)
+	}
+	qbittorrentDiagnostic := Diagnostic{
+		Code: "PREFLIGHT_QBITTORRENT_BOOTSTRAP_UNSUPPORTED", Status: "pass", Severity: "info", Environment: request.environment,
+		Subject:     "pinned qBittorrent bootstrap, declared authentication, restart, and application-network peer contract",
+		Explanation: "pinned qBittorrent authentication contract is supported",
+		Remedy:      "Inspect the pinned image bootstrap logs and API contract; correct the canonical Web UI port or select a proven immutable image digest.",
+	}
+	if qbittorrentErr != nil {
+		switch {
+		case errors.Is(qbittorrentErr, qbittorrent.ErrReadinessTimeout):
+			qbittorrentDiagnostic.Code = "PREFLIGHT_QBITTORRENT_API_READINESS_TIMEOUT"
+		case errors.Is(qbittorrentErr, qbittorrent.ErrCurrentStartCredentialMissing):
+			qbittorrentDiagnostic.Code = "PREFLIGHT_QBITTORRENT_BOOTSTRAP_CREDENTIAL_MISSING"
+		case errors.Is(qbittorrentErr, qbittorrent.ErrAuthenticationRejected), errors.Is(qbittorrentErr, qbittorrent.ErrCredentialDrift), errors.Is(qbittorrentErr, qbittorrent.ErrBootstrapCredentialRejected):
+			qbittorrentDiagnostic.Code = "PREFLIGHT_QBITTORRENT_AUTH_REJECTED"
+		case errors.Is(qbittorrentErr, qbittorrent.ErrProtectedObservation):
+			qbittorrentDiagnostic.Code = "PREFLIGHT_QBITTORRENT_PROTECTED_API_FAILED"
+		case errors.Is(qbittorrentErr, qbittorrent.ErrUnsupportedLoginResponse):
+			qbittorrentDiagnostic.Code = "PREFLIGHT_QBITTORRENT_LOGIN_UNSUPPORTED"
+		}
+		qbittorrentDiagnostic.Status = "fail"
+		qbittorrentDiagnostic.Severity = "error"
+		qbittorrentDiagnostic.Explanation = "pinned qBittorrent authentication contract is unsupported: " + qbittorrentErr.Error()
+		qbittorrentDiagnostic.Retryable = true
+	}
+	report.Diagnostics = append(report.Diagnostics, qbittorrentDiagnostic)
 	report.Diagnostics = append(report.Diagnostics, storageDiagnostics(ctx, request.environment, environment.DataRoot,
 		declared.Spec.Defaults.RuntimeUID, declared.Spec.Defaults.RuntimeGID, versions.Images)...)
 	return report, nil

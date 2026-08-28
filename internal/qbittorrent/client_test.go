@@ -10,8 +10,93 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
+
+func TestLoginAcceptsPinnedNoContentContractOnlyAfterProtectedObservation(t *testing.T) {
+	protectedCalls := 0
+	handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v2/auth/login":
+			writer.WriteHeader(http.StatusNoContent)
+		case "/api/v2/app/version":
+			protectedCalls++
+			_, _ = writer.Write([]byte("v5.1.2"))
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	client := New("http://qbittorrent:18080", &http.Client{Transport: handlerTransport{handler: handler}})
+	if err := client.Login(context.Background(), "household", "declared-password"); err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+	if protectedCalls != 1 {
+		t.Fatalf("protected observations = %d, want 1", protectedCalls)
+	}
+}
+
+func TestLoginRetainsPinnedNoContentCookieForProtectedObservation(t *testing.T) {
+	handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v2/auth/login":
+			http.SetCookie(writer, &http.Cookie{Name: "SID", Value: "pinned-session", Path: "/"})
+			writer.WriteHeader(http.StatusNoContent)
+		case "/api/v2/app/version":
+			cookie, err := request.Cookie("SID")
+			if err != nil || cookie.Value != "pinned-session" {
+				http.Error(writer, "Forbidden", http.StatusForbidden)
+				return
+			}
+			_, _ = writer.Write([]byte("v5.2.3"))
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	client := New("http://qbittorrent:18080", &http.Client{Transport: handlerTransport{handler: handler}})
+	if err := client.Login(context.Background(), "household", "declared-password"); err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+}
+
+func TestLoginRejectsNoContentWhenProtectedObservationFails(t *testing.T) {
+	handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v2/auth/login" {
+			writer.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.Error(writer, "Forbidden", http.StatusForbidden)
+	})
+	client := New("http://qbittorrent:18080", &http.Client{Transport: handlerTransport{handler: handler}})
+	err := client.Login(context.Background(), "household", "declared-password")
+	if err == nil || !strings.Contains(err.Error(), "protected API observation") {
+		t.Fatalf("Login() error = %v, want protected observation failure", err)
+	}
+}
+
+func TestReconcileWebUICredentialsUsesSupportedPreferencesAPI(t *testing.T) {
+	const password = "declared-password-must-not-leak"
+	var update url.Values
+	handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v2/app/setPreferences" {
+			http.NotFound(writer, request)
+			return
+		}
+		body, _ := io.ReadAll(request.Body)
+		update, _ = url.ParseQuery(string(body))
+	})
+	client := New("http://qbittorrent:18080", &http.Client{Transport: handlerTransport{handler: handler}})
+	if err := client.ReconcileWebUICredentials(context.Background(), Credentials{Username: "household", Password: password}); err != nil {
+		t.Fatalf("ReconcileWebUICredentials() error = %v", err)
+	}
+	var preferences map[string]string
+	if err := json.Unmarshal([]byte(update.Get("json")), &preferences); err != nil {
+		t.Fatal(err)
+	}
+	if preferences["web_ui_username"] != "household" || preferences["web_ui_password"] != password {
+		t.Fatalf("credential preferences = %#v", preferences)
+	}
+}
 
 func TestReconcileAcquisitionPolicyConvergesContractFixture(t *testing.T) {
 	preferences := readFixture(t, "preferences.json")

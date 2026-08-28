@@ -378,8 +378,9 @@ Deliberately derive instead of configure:
 - qBittorrent categories and Automatic Torrent Management;
 - required storage capabilities;
 - environment-scoped network and volume names, with no fixed `container_name` values;
-- Gluetun's `qbittorrent` network alias and qBittorrent Web UI publication, with peer services using
-  `http://qbittorrent:8080` and no independent qBittorrent network attachment;
+- Gluetun's `qbittorrent` network alias and qBittorrent Web UI publication, with every listener, firewall, publication,
+  CLI, browser, and peer-service consumer using the selected Environment's canonical qBittorrent port and no independent
+  qBittorrent network attachment;
 - Arr root folders and internal service URLs such as `http://prowlarr:9696`, `http://radarr:7878`, and
   `http://sonarr:8989`;
 - runtime identity settings for storage-owning application images, using supported `PUID`/`PGID` variables or Compose `user`
@@ -421,13 +422,14 @@ nordvpn:
   openvpn:
     serviceUsername: <secret>
     servicePassword: <secret>
-bootstrap:
-  jellyfinAdminPassword: <secret>
-  seerrEmergencyAdminPassword: <secret>
-prowlarr:
-  sources:
-    approved-source:
-      credentials: <secret>
+profilarr:
+  apiKey: <secret>
+jellyfin:
+  username: <secret>
+  password: <secret>
+qbittorrent:
+  username: <secret>
+  password: <secret>
 ```
 
 Generated API keys remain mutable application state covered by backups unless a documented supported interface permits stable

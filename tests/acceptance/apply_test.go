@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -134,6 +135,7 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 		"downloadPropersAndRepacks": "doNotPrefer",
 		"enableMediaInfo":           true,
 	}
+	qbittorrentCredentialsInstalled := false
 	sonarrAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("X-Api-Key") != "fixture-sonarr-api-key" {
 			http.Error(writer, "Unauthorized", http.StatusUnauthorized)
@@ -262,6 +264,10 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 		if request.URL.Path == "/api/v2/auth/login" {
 			body, _ := io.ReadAll(request.Body)
 			values, _ := url.ParseQuery(string(body))
+			if qbittorrentCredentialsInstalled && values.Get("username") == "household" && values.Get("password") == "fixture-qbittorrent-password" {
+				writer.WriteHeader(http.StatusNoContent)
+				return
+			}
 			if values.Get("username") != "admin" || values.Get("password") != "fixture-temporary-password" {
 				http.Error(writer, "Fails.", http.StatusForbidden)
 				return
@@ -271,17 +277,26 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 			return
 		}
 		cookie, err := request.Cookie("SID")
-		if err != nil || cookie.Value != "acceptance-session" {
+		if !qbittorrentCredentialsInstalled && (err != nil || cookie.Value != "acceptance-session") {
 			http.Error(writer, "Forbidden", http.StatusForbidden)
 			return
 		}
 		switch request.URL.Path {
+		case "/api/v2/app/version":
+			_, _ = writer.Write([]byte("v5.1.2"))
 		case "/api/v2/app/preferences":
 			_ = json.NewEncoder(writer).Encode(preferences)
 		case "/api/v2/app/setPreferences":
 			body, _ := io.ReadAll(request.Body)
 			values, _ := url.ParseQuery(string(body))
-			_ = json.Unmarshal([]byte(values.Get("json")), &preferences)
+			var update map[string]any
+			_ = json.Unmarshal([]byte(values.Get("json")), &update)
+			if update["web_ui_username"] == "household" && update["web_ui_password"] == "fixture-qbittorrent-password" {
+				qbittorrentCredentialsInstalled = true
+			}
+			for key, value := range update {
+				preferences[key] = value
+			}
 		case "/api/v2/torrents/categories":
 			_ = json.NewEncoder(writer).Encode(categories)
 		case "/api/v2/torrents/createCategory":
@@ -414,6 +429,9 @@ profilarr:
 jellyfin:
   username: household
   password: fixture-jellyfin-password
+qbittorrent:
+  username: household
+  password: fixture-qbittorrent-password
 EOF
 `), 0o700)
 	dockerLog := filepath.Join(temporary, "docker-arguments")
@@ -425,7 +443,10 @@ EOF
 	case "$*" in
 	  "compose -f - up -d gluetun") exit 0 ;;
 	  "compose -f - up -d qbittorrent") exit 0 ;;
-	  "compose -f - logs --no-color qbittorrent") printf 'A temporary password is provided for this session: fixture-temporary-password\n'; exit 0 ;;
+	  "compose -f - ps -q qbittorrent") printf 'fixture-qbittorrent-id\n'; exit 0 ;;
+	  "inspect --format {{.State.StartedAt}} fixture-qbittorrent-id") printf '2026-08-28T12:34:56.123456789Z\n'; exit 0 ;;
+	  "compose -f - logs --no-color --since 2026-08-28T12:34:56.123456789Z qbittorrent") printf 'A temporary password is provided for this session: fixture-temporary-password\n'; exit 0 ;;
+	  "compose -f - logs --no-color qbittorrent") printf 'A temporary password is provided for this session: stale-historical-password\n'; exit 0 ;;
 	  "compose -f - up -d radarr") exit 0 ;;
 	  "compose -f - exec -T radarr cat /config/config.xml") printf '<Config><ApiKey>fixture-radarr-api-key</ApiKey></Config>\n'; exit 0 ;;
 	  "compose -f - up -d sonarr") exit 0 ;;
@@ -466,12 +487,13 @@ EOF
 		t.Errorf("apply output = %q, want completed Series Library policy", output)
 	}
 
-	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - logs --no-color qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr\ncompose -f - up -d jellyfin\ncompose -f - up -d seerr"
-	if got := strings.TrimSpace(string(readFile(t, dockerLog))); got != wantDocker {
+	dockerLines := strings.Split(strings.TrimSpace(string(readFile(t, dockerLog))), "\n")
+	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - ps -q qbittorrent\ninspect --format {{.State.StartedAt}} fixture-qbittorrent-id\ncompose -f - logs --no-color --since 2026-08-28T12:34:56.123456789Z qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr\ncompose -f - up -d jellyfin\ncompose -f - up -d seerr"
+	if got := strings.Join(dockerLines, "\n"); got != wantDocker {
 		t.Errorf("Docker invocation = %q", got)
 	}
 	rendered := string(readFile(t, composeCapture))
-	for _, secret := range []string{"apply-service-user", "apply-service-password", "fixture-profilarr-api-key-32-characters", "fixture-jellyfin-password"} {
+	for _, secret := range []string{"apply-service-user", "apply-service-password", "fixture-profilarr-api-key-32-characters", "fixture-jellyfin-password", "fixture-qbittorrent-password"} {
 		if strings.Contains(rendered, secret) || strings.Contains(string(output), secret) {
 			t.Errorf("apply exposed secret %q\noutput: %s\nCompose: %s", secret, output, rendered)
 		}
@@ -512,7 +534,8 @@ EOF
 		field := item.(map[string]any)
 		fields[field["name"].(string)] = field["value"]
 	}
-	if fields["host"] != "qbittorrent" || fields["port"] != float64(8080) || fields["movieCategory"] != "movies" {
+	qbittorrentPort, _ := strconv.Atoi(apiURL.Port())
+	if fields["host"] != "qbittorrent" || fields["port"] != float64(qbittorrentPort) || fields["username"] != "household" || fields["password"] != "fixture-qbittorrent-password" || fields["movieCategory"] != "movies" {
 		t.Errorf("Radarr qBittorrent contract = %v", fields)
 	}
 	if len(seriesRootFolders) != 1 || seriesRootFolders[0]["path"] != "/data/media/series" {
@@ -526,7 +549,7 @@ EOF
 		field := item.(map[string]any)
 		seriesFields[field["name"].(string)] = field["value"]
 	}
-	if seriesFields["host"] != "qbittorrent" || seriesFields["port"] != float64(8080) || seriesFields["tvCategory"] != "series" {
+	if seriesFields["host"] != "qbittorrent" || seriesFields["port"] != float64(qbittorrentPort) || seriesFields["username"] != "household" || seriesFields["password"] != "fixture-qbittorrent-password" || seriesFields["tvCategory"] != "series" {
 		t.Errorf("Sonarr qBittorrent contract = %v", seriesFields)
 	}
 	if len(indexers) != 1 || indexers[0]["definitionName"] != "internetarchive" {
@@ -692,7 +715,7 @@ func TestApplyRedactsCredentialsFromUnhealthyGluetunFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(binDirectory, "sops"), []byte(`#!/bin/sh
-printf 'nordvpn:\n  openvpn:\n    serviceUsername: failure-service-user\n    servicePassword: failure-service-password\nprofilarr:\n  apiKey: fixture-profilarr-api-key-32-characters\njellyfin:\n  username: household\n  password: fixture-jellyfin-password\n'
+printf 'nordvpn:\n  openvpn:\n    serviceUsername: failure-service-user\n    servicePassword: failure-service-password\nprofilarr:\n  apiKey: fixture-profilarr-api-key-32-characters\njellyfin:\n  username: household\n  password: fixture-jellyfin-password\nqbittorrent:\n  username: household\n  password: fixture-qbittorrent-password\n'
 `), 0o700)
 	writeFile(t, filepath.Join(binDirectory, "docker"), []byte(`#!/bin/sh
 cat >/dev/null

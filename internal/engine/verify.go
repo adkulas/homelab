@@ -155,6 +155,17 @@ func (engine localEngine) Verify(ctx context.Context, request VerifyRequest) (re
 		return report, nil
 	}
 	report.add("VERIFY_TUNNEL_RECOVERED", "tunneled qBittorrent egress recovery", "", true)
+	environment := declared.Spec.Environments[request.plan.environment]
+	secrets, err := decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment)
+	if err != nil {
+		report.add("VERIFY_QBITTORRENT_AUTH_FAILED", "stable qBittorrent authentication after recreation", err.Error(), false)
+		return report, nil
+	}
+	if err := verifyQBittorrentPeerAuthentication(ctx, versions.Images["qbittorrent"], environment.ProjectName+"_application", environment.Ports.QBittorrent, secrets.QBittorrent); err != nil {
+		report.add("VERIFY_QBITTORRENT_AUTH_FAILED", "stable qBittorrent authentication after recreation", "Re-run apply to reconcile the declared credential, then verify the application-network alias and canonical port.", false)
+		return report, nil
+	}
+	report.add("VERIFY_QBITTORRENT_AUTH_PERSISTED", "stable qBittorrent authentication after recreation from an application-network peer", "", true)
 	if request.suite == "promotion" {
 		if request.legalFixturePath != "" {
 			verifyLegalMovie(ctx, plan, declared, request, &report)

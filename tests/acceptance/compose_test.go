@@ -142,7 +142,7 @@ func TestPlanRendersHealthyNordVPNOpenVPNTunnel(t *testing.T) {
 
 	wantEnvironment := map[string]string{
 		"FIREWALL":                    "on",
-		"FIREWALL_INPUT_PORTS":        "8080",
+		"FIREWALL_INPUT_PORTS":        "18080",
 		"OPENVPN_PASSWORD_SECRETFILE": "/run/secrets/openvpn_password",
 		"OPENVPN_PROTOCOL":            "udp",
 		"OPENVPN_USER_SECRETFILE":     "/run/secrets/openvpn_user",
@@ -225,8 +225,11 @@ func TestPlanConfinesQBittorrentToGluetunNetworkNamespace(t *testing.T) {
 	if !reflect.DeepEqual(gluetun.Networks["application"].Aliases, []string{"qbittorrent"}) {
 		problems = append(problems, fmt.Sprintf("Gluetun application aliases = %#v, want qbittorrent", gluetun.Networks["application"].Aliases))
 	}
-	if !reflect.DeepEqual(gluetun.Ports, []composePort{{Published: "18080", Target: 8080}}) {
-		problems = append(problems, fmt.Sprintf("Gluetun ports = %#v, want qBittorrent Web UI 18080:8080", gluetun.Ports))
+	if !reflect.DeepEqual(gluetun.Ports, []composePort{{Published: "18080", Target: 18080}}) {
+		problems = append(problems, fmt.Sprintf("Gluetun ports = %#v, want canonical qBittorrent Web UI port 18080", gluetun.Ports))
+	}
+	if qbittorrent.Environment["WEBUI_PORT"] != "18080" {
+		problems = append(problems, fmt.Sprintf("qBittorrent WEBUI_PORT = %q, want 18080", qbittorrent.Environment["WEBUI_PORT"]))
 	}
 	for _, forbidden := range []string{"FIREWALL_OUTBOUND_SUBNETS", "DNS_ADDRESS"} {
 		if _, exists := gluetun.Environment[forbidden]; exists {
@@ -293,7 +296,7 @@ func TestPlanRendersCoexistingEnvironmentResources(t *testing.T) {
 			dataRoot:        "/srv/media/staging",
 			secretDirectory: "/media-stack/media-staging/",
 			ports: map[string]composePort{
-				"gluetun": {Published: "18080", Target: 8080}, "prowlarr": {Published: "19696", Target: 9696},
+				"gluetun": {Published: "18080", Target: 18080}, "prowlarr": {Published: "19696", Target: 9696},
 				"sonarr": {Published: "18989", Target: 8989}, "radarr": {Published: "17878", Target: 7878},
 				"profilarr": {Published: "16868", Target: 6868}, "jellyfin": {Published: "18096", Target: 8096},
 				"seerr": {Published: "15055", Target: 5055},

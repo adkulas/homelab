@@ -2,6 +2,7 @@ package topology_test
 
 import (
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/adkulas/homelab/internal/config"
@@ -9,6 +10,37 @@ import (
 	"github.com/adkulas/homelab/internal/topology"
 	"gopkg.in/yaml.v3"
 )
+
+func TestRenderUsesEnvironmentQBittorrentPortEndToEnd(t *testing.T) {
+	const port = 18080
+	rendered, err := topology.Render(
+		config.Defaults{Timezone: "America/Toronto", RuntimeUID: 1000, RuntimeGID: 1000, LANBindAddress: "127.0.0.1"},
+		config.Environment{ProjectName: "media-staging", DataRoot: "/srv/media/staging", Ports: config.Ports{QBittorrent: port}},
+		config.VPN{}, imageFixtures(), "/run/media-stack/media-staging", hardware.Transcoding{},
+	)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	var project struct {
+		Services map[string]struct {
+			Environment map[string]string `yaml:"environment"`
+			Ports       []string          `yaml:"ports"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(rendered, &project); err != nil {
+		t.Fatalf("decode rendered Compose: %v", err)
+	}
+	wantPort := strconv.Itoa(port)
+	if got := project.Services["qbittorrent"].Environment["WEBUI_PORT"]; got != wantPort {
+		t.Errorf("qBittorrent WEBUI_PORT = %q, want %q", got, wantPort)
+	}
+	if got := project.Services["gluetun"].Environment["FIREWALL_INPUT_PORTS"]; got != wantPort {
+		t.Errorf("Gluetun FIREWALL_INPUT_PORTS = %q, want %q", got, wantPort)
+	}
+	if got := project.Services["gluetun"].Ports; !reflect.DeepEqual(got, []string{"127.0.0.1:18080:18080"}) {
+		t.Errorf("Gluetun ports = %#v, want canonical qBittorrent port", got)
+	}
+}
 
 func TestRenderAppliesDetectedHardwareTranscodingOverlay(t *testing.T) {
 	tests := []struct {
