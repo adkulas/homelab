@@ -73,9 +73,15 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 		return ApplyReport{}, err
 	}
 	environment := declared.Spec.Environments[request.plan.environment]
-	secrets, err := decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment)
+	secrets, restoreDrillConfirmed, err := restoreDrillSecretsForApply(ctx, environment.BackupRoot, environment.ProjectName)
 	if err != nil {
 		return ApplyReport{}, err
+	}
+	if !restoreDrillConfirmed {
+		secrets, err = decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment)
+		if err != nil {
+			return ApplyReport{}, err
+		}
 	}
 	credentials := secrets.OpenVPN
 	if err := materializeRuntimeSecrets(runtimeSecretDirectory(environment.ProjectName), secrets); err != nil {
@@ -199,6 +205,11 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	seerrCredentials := seerr.Credentials{Username: secrets.Jellyfin.Username, Password: secrets.Jellyfin.Password}
 	if err := waitForSeerrAuthentication(ctx, seerrClient, seerrCredentials, 120*time.Second); err != nil {
 		return ApplyReport{}, err
+	}
+	if restoreDrillConfirmed {
+		if err := completeRestoreDrillGate(environment.BackupRoot); err != nil {
+			return ApplyReport{}, fmt.Errorf("complete Restore Drill integration gate: %w", err)
+		}
 	}
 	return ApplyReport{Environment: request.plan.environment}, nil
 }

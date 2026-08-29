@@ -8,8 +8,8 @@ independent Production and Staging Environments so changes can be proven before 
 > This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, the
 > VPN-confined qBittorrent, Radarr Movie Library, Sonarr Series Library, Prowlarr Movie and Series Library discovery, guided Profilarr connections, authenticated Jellyfin Movie and Series Library reconciliation, and Seerr household authentication phases of `apply`; VPN-focused
 > `verify --suite full`; legal movie and series-episode acquisition, hardlink, and playback proofs through `verify --suite promotion`; and verified application-state archives through `backup` are available now.
-> Ordinary matching-Environment state replacement through `restore` is also available. Restore Drill execution, the other verification suites and
-> artifacts, and `destroy` remain planned. Ubuntu is the authoritative implementation and
+> Ordinary matching-Environment state replacement and isolated Production-to-Staging Restore Drill execution through `restore` are also available. The other verification suites,
+> Verification Artifacts, and `destroy` remain planned. Ubuntu is the authoritative implementation and
 > completion platform. Docker
 > Desktop WSL2 compatibility is verified independently and does not block Ubuntu work. Sections below label planned behavior explicitly.
 > The authoritative target design is in the
@@ -606,7 +606,7 @@ application cannot provide it; a later run observes current state and safely res
 | `promotion` | Full plus legal discovery, acquisition, hardlink import, authenticated Jellyfin discovery, and direct-play readiness |
 | `restore-drill` | Recovered state, isolation, rotated credentials, disabled acquisition, and gated integrations |
 
-Disruptive checks are confined to disposable resources or Staging and restore any perturbed state. Run `MEDIA_STACK_LIVE_JELLYFIN=1 go test ./tests/acceptance -run TestDisposableJellyfinServesImportedMovieReadOnly` to prove authenticated discovery, direct-play readiness, and read-only media access against a real Jellyfin API. Run
+Disruptive checks are confined to disposable resources or Staging and restore any perturbed state. Run `MEDIA_STACK_LIVE_JELLYFIN=1 go test ./tests/acceptance -run TestDisposableJellyfinRestoreDrillRotatesCredentialsAndServesRecoveredMediaReadOnly` to prove credential rotation, authenticated discovery, direct-play readiness, and read-only media access against a real Jellyfin API. Run `MEDIA_STACK_LIVE_RESTORE_DRILL=1 go test ./tests/acceptance -run TestDisposableStagingRestoreDrillRestoresProductionBackupSafely` to exercise a complete real-Docker Production backup and isolated Staging restore. Run
 `MEDIA_STACK_LIVE_SEERR=1 go test ./tests/acceptance -run TestDisposableSeerrAuthenticatesHouseholdAndEmergencyLocalUsers`
 to launch the pinned Jellyfin and Seerr images, prove household Jellyfin sign-in, stop Jellyfin, and prove emergency local
 administrator sign-in remains available. Production permits only non-disruptive smoke observations. The detailed testing
@@ -623,7 +623,11 @@ media-stack restore \
   --backup <production-backup-id> \
   --as-restore-drill \
   --credentials stacks/media/secrets/staging-drill.sops.yaml
-media-stack verify --environment staging --suite restore-drill
+media-stack restore \
+  --environment staging \
+  --as-restore-drill \
+  --credentials stacks/media/secrets/staging-drill.sops.yaml \
+  --confirm-integrations
 ```
 
 A backup quiesces services when required, archives every mutable service configuration volume, calculates checksums, and
@@ -659,10 +663,24 @@ and the safety-backup path are atomically recorded under
 `<backupRoot>/.restore-operations/<operation-id>.json`; successful JSON output includes that journal and safety manifest.
 Media and torrent payloads are bind-mounted data and are never replaced by restore.
 
-Restore Drill execution remains planned under the next recovery ticket. The command currently validates and previews the
-Production-to-Staging exception, including its credential override, acquisition-disabled, and integration-gated intent, but
-does not mutate Staging. Production Profilarr state embeds Production-specific connections, so the eventual execution keeps
-Staging's Profilarr state and records Production Profilarr as an explicit drill exclusion.
+A Restore Drill is the only cross-Environment restore: it accepts a complete Production backup only when the target is
+Staging and a separate SOPS credential document is supplied. The preview is bound to the encrypted credential document
+without recording its path or values. Confirmation creates the same protected safety backup and operation journal as an
+ordinary restore, then restores every Production mutable volume except Profilarr into the isolated Staging namespace.
+Production Profilarr state embeds Production-specific connections, so the drill preserves Staging Profilarr and records
+Profilarr as an explicit exclusion.
+
+Before any recovered service starts, the command decrypts and validates the drill credentials and materializes the rotated
+OpenVPN and Profilarr runtime values. It starts only Jellyfin with no dependencies, authenticates with the Production
+administrator restored from the backup, rotates that administrator to the drill identity, and verifies the recovered Movie
+and Series Libraries through Jellyfin's supported API; Gluetun, qBittorrent, Radarr, Sonarr,
+Prowlarr, Profilarr, and Seerr remain stopped. This makes recovered read-only library behavior available while acquisition
+and cross-service integrations remain gated. A replacement or Jellyfin startup failure restores the pre-drill Staging
+volumes and Staging runtime credentials before services restart. The drill stores only an encrypted copy of its credentials
+behind a durable integration gate, so a normal `apply` refuses until `restore --confirm-integrations` receives the same
+encrypted document. The next successful `apply` uses those drill credentials—including qBittorrent authentication—and
+then removes the gate and encrypted copy; a failed apply remains safely gated for retry. The
+`verify --suite restore-drill` command remains planned.
 
 ## Command reference
 
@@ -672,9 +690,10 @@ Staging's Profilarr state and records Production Profilarr as an explicit drill 
 | `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
 | `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, render-only | Writes rendered Compose YAML to stdout without mutation. Use it to inspect the selected Environment topology or pipe it to `docker compose config`. Application observation and saved Plan Artifacts are not implemented yet. |
-| `media-stack apply --environment production|staging [--config path]` | Available through Seerr household authentication | Uses the selected Environment's OpenVPN, Profilarr, Jellyfin, and stable qBittorrent credentials without printing them; reconciles qBittorrent, Radarr, Sonarr, Prowlarr, Profilarr, and Jellyfin, then starts Seerr, enables new Jellyfin users with request-only default permission, and preserves the Jellyfin administrator as an emergency local Seerr administrator. An incomplete Profilarr connection still prints the exact UI checklist and exits `1`. |
+| `media-stack apply --environment production|staging [--config path]` | Available through Seerr household authentication | Uses the selected Environment's OpenVPN, Profilarr, Jellyfin, and stable qBittorrent credentials without printing them; reconciles qBittorrent, Radarr, Sonarr, Prowlarr, Profilarr, and Jellyfin, then starts Seerr, enables new Jellyfin users with request-only default permission, and preserves the Jellyfin administrator as an emergency local Seerr administrator. A pending Restore Drill gate refuses apply; after confirmation, the next successful apply uses the preserved drill credentials and clears the gate. An incomplete Profilarr connection still prints the exact UI checklist and exits `1`. |
 | `media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--now RFC3339] [--output human|json]` | Available | Stops only running services with mutable named volumes, archives each volume through a read-only Docker mount, resumes those services, independently verifies every checksum, atomically publishes the selected Environment manifest last, then expires unprotected archives according to `backupRetention`. Use `--protect` for an archive that retention must preserve and `--now` only to fix the clock for deterministic verification. |
-| `media-stack restore --environment production|staging --backup manifest.json [--config path] [--confirm] [--output human|json]` | Available for matching Environments | Validates complete compatible application-state coverage and checksums and persists the exact preview. Rerun unchanged with `--confirm` to create a protected safety backup, stage and verify temporary volumes, transactionally replace mutable state, restart through Compose dependency handling, and record an operation journal; failures roll back before services restart. Restore Drill execution remains planned. |
+| `media-stack restore --environment production|staging --backup manifest.json [--config path] [--confirm] [--as-restore-drill --credentials path] [--output human|json]` | Available | Validates complete compatible application-state coverage and checksums and persists the exact preview. Matching-Environment confirmation performs transactional replacement and restart. Restore Drill confirmation restores Production into Staging while preserving Profilarr, applying rotated runtime credentials, leaving acquisition and integrations stopped, and starting only Jellyfin. Both modes create a protected safety backup and operation journal and roll back on failure. |
+| `media-stack restore --environment staging --as-restore-drill --credentials path --confirm-integrations [--config path] [--output human|json]` | Available | Confirms reconnection only when the encrypted credential document matches the completed Restore Drill. The next successful `apply` uses those credentials, including qBittorrent authentication, and clears the durable gate; failures remain gated and retryable. |
 | `media-stack verify --environment staging --suite full [--config path] [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, recovery, and stable declared authentication from an application-network peer after qBittorrent recreation. Use it after `apply` in Staging; it is deliberately rejected for Production. |
 | `media-stack verify --environment staging --suite promotion --legal-fixture path [--config path] [--output human|json]` | Available through Movie Library playback proof | Runs the full VPN proof, registers the fixture movie in Radarr, grabs the exact Internet Archive release into qBittorrent, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported path, and requires direct-play readiness. Use only in a disposable Staging Environment. Verification Artifact behavior remains planned. |
 | `media-stack verify --environment staging --suite promotion --legal-series-fixture path [--config path] [--output human|json]` | Available through Series Library playback proof | Runs the full VPN proof, registers the fixture series and episode in Sonarr, grabs the exact Internet Archive release into qBittorrent, waits for Sonarr import, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported episode, and requires direct-play readiness. Supply both legal fixture flags to prove both libraries in one run. Use only in a disposable Staging Environment. |

@@ -23,6 +23,7 @@ const usage = `usage:
   media-stack promote --environment production [--config path] --verification path --backup path [--output human|json]
   media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--now RFC3339] [--output human|json]
   media-stack restore --environment production|staging --backup path [--config path] [--confirm] [--as-restore-drill] [--credentials path] [--output human|json]
+  media-stack restore --environment staging --as-restore-drill --credentials path --confirm-integrations [--config path] [--output human|json]
   media-stack verify --environment production|staging [--config path] --suite full|promotion [--legal-fixture path] [--legal-series-fixture path] [--output human|json]
   media-stack test [--run pattern]`
 
@@ -201,6 +202,7 @@ func runRestore(ctx context.Context, arguments []string) error {
 	confirm := flags.Bool("confirm", false, "confirm the restore preview")
 	asRestoreDrill := flags.Bool("as-restore-drill", false, "permit production-to-staging drill restores")
 	credentialsPath := flags.String("credentials", "", "restore drill credentials override")
+	confirmIntegrations := flags.Bool("confirm-integrations", false, "allow the next apply to reconnect Restore Drill integrations")
 	output := flags.String("output", "human", "human or json")
 	if err := flags.Parse(arguments); err != nil {
 		return err
@@ -208,7 +210,7 @@ func runRestore(ctx context.Context, arguments []string) error {
 	if *environmentName == "" {
 		return fmt.Errorf("environment is required\n%s", usage)
 	}
-	if *backupPath == "" {
+	if *backupPath == "" && !*confirmIntegrations {
 		return fmt.Errorf("backup is required\n%s", usage)
 	}
 	if *output != "human" && *output != "json" {
@@ -218,7 +220,7 @@ func runRestore(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("locate working directory: %w", err)
 	}
-	request, err := engine.NewRestoreRequest(workingDirectory, *environmentName, *configPath, *backupPath, *credentialsPath, *confirm, *asRestoreDrill)
+	request, err := engine.NewRestoreRequest(workingDirectory, *environmentName, *configPath, *backupPath, *credentialsPath, *confirm, *asRestoreDrill, *confirmIntegrations)
 	if err != nil {
 		return err
 	}
