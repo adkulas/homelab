@@ -15,6 +15,7 @@ import (
 )
 
 const usage = `usage:
+  media-stack config describe [--service name] [--output human|json]
   media-stack init --environment production|staging [--config path] --non-interactive --answers path
   media-stack doctor --environment production|staging [--config path] [--output human|json]
   media-stack plan --environment production|staging [--config path]
@@ -54,6 +55,8 @@ func run(ctx context.Context, arguments []string) error {
 		return fmt.Errorf("%s", usage)
 	}
 	switch arguments[0] {
+	case "config":
+		return runConfig(arguments[1:])
 	case "init":
 		return runInit(ctx, arguments[1:])
 	case "doctor":

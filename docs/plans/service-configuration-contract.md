@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. This document specifies a required operator-facing contract; it does not describe an implemented command.
+Implemented by `media-stack config describe`.
 
 ## Problem
 

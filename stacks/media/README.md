@@ -14,8 +14,8 @@ independent Production and Staging Environments so changes can be proven before 
 > Desktop WSL2 compatibility is verified independently and does not block Ubuntu work. Sections below label planned behavior explicitly.
 > The authoritative target design is in the
 > [implementation plan](../../docs/plans/media-stack.md) and
-> [CLI contract](../../docs/plans/media-stack-cli.md). A read-only `media-stack config describe` command implementing the
-> [Service Configuration Contract](../../docs/plans/service-configuration-contract.md) is planned but not yet available.
+> [CLI contract](../../docs/plans/media-stack-cli.md). The read-only `media-stack config describe` command implements the
+> [Service Configuration Contract](../../docs/plans/service-configuration-contract.md) and is available now.
 
 ## What the stack provides
 
@@ -32,12 +32,9 @@ independent Production and Staging Environments so changes can be proven before 
 Every web interface is intended for the trusted LAN and requires authentication. Nothing is intentionally exposed to the
 public internet.
 
-## Discovering service configuration (planned)
+## Discovering service configuration
 
-The current CLI does not enumerate which settings it controls for each service. Until the planned discovery command exists,
-the checked-in YAML, policy fixtures, and this runbook must be read together; this is a known interface gap.
-
-The planned interface is:
+The CLI publishes its complete, versioned Service Configuration Contract without selecting an Environment or contacting Docker, the network, SOPS, the filesystem, or an application. Use the human view for operator guidance and deterministic JSON for tooling:
 
 ```bash
 media-stack config describe
@@ -45,11 +42,9 @@ media-stack config describe --service sonarr
 media-stack config describe --service sonarr --output json
 ```
 
-It will cover Gluetun, qBittorrent, Prowlarr, Sonarr, Radarr, Profilarr, Jellyfin, and Seerr. Each setting will be identified
-as declared, secret, derived, fixed by Stack Policy, externally synchronized, or unmanaged. In particular, Sonarr file
-naming will be shown as an Externally Synchronized Policy owned by the pinned Profilarr policy: it is recorded in
-`fixtures/profilarr-series-policy.yaml` and verified by `apply`, but it is not currently configurable through
-`media-stack.yaml`.
+The command covers Gluetun, qBittorrent, Prowlarr, Sonarr, Radarr, Profilarr, Jellyfin, and Seerr. Omitting `--service` returns all eight in stable order; `--service` accepts exactly those lowercase names. Human output groups settings by control class, while `--output json` emits `homelab.media-stack/configuration-contract/v1alpha1`. Each setting includes its semantic source, type or allowed values when applicable, sensitivity, lifecycle, implementation status, and operator-change guidance. Secret entries describe only their SOPS path or generated source and never include resolved values.
+
+Sonarr and Radarr naming are Externally Synchronized Policies owned by the pinned Profilarr fixtures, not Declared Configuration. Every service also states that absent upstream settings are Unmanaged Configuration that `media-stack` does not promise to observe, apply, or repair. A service-setting change must update its source-adjacent contract metadata and this runbook in the same change.
 
 ## Quick start
 
