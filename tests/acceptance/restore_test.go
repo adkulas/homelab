@@ -1,10 +1,14 @@
 package acceptance_test
 
 import (
+	"context"
 	"encoding/json"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -259,20 +263,86 @@ func TestRestoreRejectsRestoreDrillWithoutCredentials(t *testing.T) {
 	}
 }
 
-func TestRestoreDrillPreviewsProductionIntoStagingIsolation(t *testing.T) {
+func TestRestoreDrillRestoresSafeStagingStateWithRotatedCredentials(t *testing.T) {
 	temporary := t.TempDir()
 	configPath, backupPath, fixtureRoot := createRestorableBackup(t, temporary, "production")
-	credentialsPath := filepath.Join(temporary, "staging-drill.sops.yaml")
-	if err := os.WriteFile(credentialsPath, []byte("credentials: rotated\n"), 0o600); err != nil {
-		t.Fatalf("write drill credentials: %v", err)
+	recoveredBehaviorObserved := make(chan struct{}, 1)
+	username, password := "production-household", "production-jellyfin-password"
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for recovered Jellyfin API: %v", err)
 	}
-	preview := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", backupPath, "--as-restore-drill", "--credentials", credentialsPath)
-	preview.Env = restoreEnvironment(t, temporary, fixtureRoot)
-	if output, err := preview.CombinedOutput(); err == nil || !strings.Contains(string(output), "restore requires --confirm") {
-		t.Fatalf("media-stack restore drill did not produce the required preview:\n%s", output)
+	server := &http.Server{Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.Method + " " + request.URL.Path {
+		case "GET /System/Info/Public":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"StartupWizardCompleted": true})
+		case "POST /Users/AuthenticateByName":
+			var body map[string]string
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			if body["Username"] != username || body["Pw"] != password {
+				http.Error(writer, "invalid credentials", http.StatusUnauthorized)
+				return
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"AccessToken": "restore-drill-token",
+				"User":        map[string]any{"Id": "recovered-user", "Name": username, "Policy": map[string]any{"IsAdministrator": true}},
+			})
+		case "GET /Users/recovered-user":
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"Id": "recovered-user", "Name": username, "Policy": map[string]any{"IsAdministrator": true}, "Configuration": map[string]any{},
+			})
+		case "POST /Users/Password":
+			var body map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			if body["CurrentPw"] != "production-jellyfin-password" || body["NewPw"] != "drill-jellyfin-password" {
+				http.Error(writer, "wrong password rotation", http.StatusBadRequest)
+				return
+			}
+			password = "drill-jellyfin-password"
+			writer.WriteHeader(http.StatusNoContent)
+		case "POST /Users":
+			var body map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			if body["Name"] != "drill-household" {
+				http.Error(writer, "wrong administrator rotation", http.StatusBadRequest)
+				return
+			}
+			username = "drill-household"
+			writer.WriteHeader(http.StatusNoContent)
+		case "GET /Library/VirtualFolders":
+			_ = json.NewEncoder(writer).Encode([]any{
+				map[string]any{"Name": "Movie Library", "CollectionType": "movies", "Locations": []string{"/data/media/movies"}},
+				map[string]any{"Name": "Series Library", "CollectionType": "tvshows", "Locations": []string{"/data/media/series"}},
+			})
+			select {
+			case recoveredBehaviorObserved <- struct{}{}:
+			default:
+			}
+		default:
+			http.NotFound(writer, request)
+		}
+	})}
+	go func() { _ = server.Serve(listener) }()
+	defer func() { _ = server.Shutdown(context.Background()) }()
+	configContents, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read drill configuration: %v", err)
 	}
+	jellyfinPort := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+	configContents = []byte(strings.Replace(string(configContents), "jellyfin: 18096", "jellyfin: "+jellyfinPort, 1))
+	if err := os.WriteFile(configPath, configContents, 0o600); err != nil {
+		t.Fatalf("write drill Jellyfin port: %v", err)
+	}
+	createBackupVolumeFixtures(t, fixtureRoot, "media-staging")
+	for _, serviceName := range backupFixtureServiceNames {
+		path := filepath.Join(fixtureRoot, "media-staging_"+serviceName+"-config", "identity.txt")
+		if err := os.WriteFile(path, []byte("staging-"+serviceName+"\n"), 0o600); err != nil {
+			t.Fatalf("write pre-drill %s state: %v", serviceName, err)
+		}
+	}
+	credentialsPath, runtimeDirectory, drillEnvironment := prepareRestoreDrill(t, temporary, fixtureRoot, configPath, backupPath)
 	command := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", backupPath, "--confirm", "--as-restore-drill", "--credentials", credentialsPath, "--output", "json")
-	command.Env = restoreEnvironment(t, temporary, fixtureRoot)
+	command.Env = drillEnvironment
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("media-stack restore drill failed: %v\n%s", err, output)
@@ -283,14 +353,148 @@ func TestRestoreDrillPreviewsProductionIntoStagingIsolation(t *testing.T) {
 		`"sourceEnvironment":"production"`,
 		`"acquisitionDisabled":true`,
 		`"integrationsGated":true`,
-		`"credentialsPath":"`,
-		filepath.Base(credentialsPath),
-		`"preview":"restore drill: replace staging Environment state from production backup with acquisition disabled, integrations gated, and credentials overridden from staging-drill.sops.yaml"`,
+		`"excludedServices":["profilarr"]`,
+		`"startedServices":["jellyfin"]`,
+		`"completed":true`,
 	} {
 		if !strings.Contains(string(output), want) {
 			t.Fatalf("restore drill report missing %s: %s", want, output)
 		}
 	}
+	for _, sensitive := range []string{credentialsPath, filepath.Base(credentialsPath), "drill-user", "drill-password"} {
+		if strings.Contains(string(output), sensitive) {
+			t.Fatalf("restore drill report exposed sensitive credential reference %q: %s", sensitive, output)
+		}
+	}
+	for _, serviceName := range backupFixtureServiceNames {
+		path := filepath.Join(fixtureRoot, "media-staging_"+serviceName+"-config", "identity.txt")
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read post-drill %s state: %v", serviceName, err)
+		}
+		want := serviceName + "\n"
+		if serviceName == "profilarr" {
+			want = "staging-profilarr\n"
+		}
+		if string(contents) != want {
+			t.Fatalf("post-drill %s state = %q, want %q", serviceName, contents, want)
+		}
+	}
+	secretRoot := filepath.Join(runtimeDirectory, "media-stack", "media-staging")
+	for path, want := range map[string]string{
+		filepath.Join(secretRoot, "openvpn_user"):     "drill-user\n",
+		filepath.Join(secretRoot, "openvpn_password"): "drill-password\n",
+		filepath.Join(secretRoot, "profilarr.env"):    "PROFILARR_API_KEY=drill-profilarr-api-key-32-characters\n",
+	} {
+		contents, err := os.ReadFile(path)
+		if err != nil || string(contents) != want {
+			t.Fatalf("materialized drill credential %s = %q (%v), want %q", filepath.Base(path), contents, err, want)
+		}
+	}
+	dockerCalls, err := os.ReadFile(filepath.Join(temporary, "restore-docker.log"))
+	if err != nil {
+		t.Fatalf("read restore Docker calls: %v", err)
+	}
+	if !strings.Contains(string(dockerCalls), " up -d --no-deps jellyfin") {
+		t.Fatalf("restore drill did not start only recovered Jellyfin:\n%s", dockerCalls)
+	}
+	select {
+	case <-recoveredBehaviorObserved:
+	default:
+		t.Fatal("restore drill did not rotate credentials and verify recovered Jellyfin libraries through its supported API")
+	}
+	blockedApply := applyCommand(t, "--environment", "staging", "--config", configPath)
+	blockedApply.Env = drillEnvironment
+	blockedOutput, blockedErr := blockedApply.CombinedOutput()
+	if blockedErr == nil {
+		t.Fatalf("apply bypassed the Restore Drill integration gate:\n%s", blockedOutput)
+	}
+	if !strings.Contains(string(blockedOutput), "Restore Drill integrations require explicit confirmation") {
+		t.Fatalf("apply integration-gate error = %s", blockedOutput)
+	}
+	confirmIntegrations := restoreCommand(t,
+		"--environment", "staging",
+		"--config", configPath,
+		"--as-restore-drill",
+		"--credentials", credentialsPath,
+		"--confirm-integrations",
+		"--output", "json",
+	)
+	confirmIntegrations.Env = drillEnvironment
+	confirmedOutput, confirmedErr := confirmIntegrations.CombinedOutput()
+	if confirmedErr != nil {
+		t.Fatalf("confirm Restore Drill integrations: %v\n%s", confirmedErr, confirmedOutput)
+	}
+	if !strings.Contains(string(confirmedOutput), `"integrationsGated":false`) {
+		t.Fatalf("integration confirmation report = %s", confirmedOutput)
+	}
+}
+
+func TestRestoreDrillRollsBackStagingStateAndCredentialsWhenSafeStartupFails(t *testing.T) {
+	temporary := t.TempDir()
+	configPath, backupPath, fixtureRoot := createRestorableBackup(t, temporary, "production")
+	createBackupVolumeFixtures(t, fixtureRoot, "media-staging")
+	writeRestoreFixtureState(t, fixtureRoot, "before-drill-")
+	credentialsPath, runtimeDirectory, drillEnvironment := prepareRestoreDrill(t, temporary, fixtureRoot, configPath, backupPath)
+
+	marker := filepath.Join(temporary, "drill-start-failed-once")
+	command := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", backupPath, "--confirm", "--as-restore-drill", "--credentials", credentialsPath)
+	command.Env = append(drillEnvironment, "FAKE_DOCKER_FAIL_COMPOSE_UP_ONCE_MARKER="+marker)
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("media-stack restore drill unexpectedly hid safe startup failure:\n%s", output)
+	}
+	if !strings.Contains(string(output), "start recovered Jellyfin with acquisition and integrations gated") {
+		t.Fatalf("restore drill startup error = %s", output)
+	}
+	assertRestoreFixtureState(t, fixtureRoot, "before-drill-")
+	assertLatestRestoreJournalStatus(t, temporary, "rolled-back")
+
+	secretRoot := filepath.Join(runtimeDirectory, "media-stack", "media-staging")
+	for path, want := range map[string]string{
+		filepath.Join(secretRoot, "openvpn_user"):     "staging-user\n",
+		filepath.Join(secretRoot, "openvpn_password"): "staging-password\n",
+		filepath.Join(secretRoot, "profilarr.env"):    "PROFILARR_API_KEY=staging-profilarr-api-key-32-characters\n",
+	} {
+		contents, readErr := os.ReadFile(path)
+		if readErr != nil || string(contents) != want {
+			t.Fatalf("restored Staging credential %s = %q (%v), want %q", filepath.Base(path), contents, readErr, want)
+		}
+	}
+}
+
+func prepareRestoreDrill(t *testing.T, temporary, fixtureRoot, configPath, backupPath string) (string, string, []string) {
+	t.Helper()
+	credentialsPath := filepath.Join(temporary, "staging-drill.sops.yaml")
+	writeFile(t, credentialsPath, []byte("encrypted: true\n"), 0o600)
+	binDirectory := fakeDockerPath(t, temporary)
+	writeFile(t, filepath.Join(binDirectory, "sops"), []byte(`#!/bin/sh
+case "${4##*/}" in
+	staging-drill.sops.yaml) prefix=drill ;;
+	production.sops.yaml) prefix=production ;;
+	*) prefix=staging ;;
+esac
+printf 'nordvpn:\n  openvpn:\n    serviceUsername: %s-user\n    servicePassword: %s-password\nprofilarr:\n  apiKey: %s-profilarr-api-key-32-characters\njellyfin:\n  username: %s-household\n  password: %s-jellyfin-password\nqbittorrent:\n  username: %s-household\n  password: %s-qbittorrent-password\n' "$prefix" "$prefix" "$prefix" "$prefix" "$prefix" "$prefix" "$prefix"
+`), 0o700)
+	runtimeDirectory := filepath.Join(temporary, "runtime")
+	drillEnvironment := append(restoreEnvironment(t, temporary, fixtureRoot),
+		"PATH="+binDirectory+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"XDG_RUNTIME_DIR="+runtimeDirectory,
+	)
+	preview := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", backupPath, "--as-restore-drill", "--credentials", credentialsPath)
+	preview.Env = drillEnvironment
+	if output, err := preview.CombinedOutput(); err == nil || !strings.Contains(string(output), "restore requires --confirm") {
+		t.Fatalf("media-stack Restore Drill did not produce the required preview:\n%s", output)
+	}
+	return credentialsPath, runtimeDirectory, drillEnvironment
+}
+
+func applyCommand(t *testing.T, arguments ...string) *exec.Cmd {
+	t.Helper()
+	goArguments := append([]string{"run", "../../cmd/media-stack", "apply"}, arguments...)
+	command := exec.Command("go", goArguments...)
+	command.Dir = filepath.Join(repositoryRoot(t), "stacks", "media")
+	return command
 }
 
 func restoreCommand(t *testing.T, arguments ...string) *exec.Cmd {

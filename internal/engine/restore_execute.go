@@ -10,12 +10,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/adkulas/homelab/internal/jellyfin"
 )
 
 type restoreOperationStatus string
@@ -45,7 +48,11 @@ type restoreOperation struct {
 	Failure            string                 `json:"failure,omitempty"`
 }
 
-func (engine localEngine) executeRestore(ctx context.Context, request RestoreRequest, backup BackupReport, sources []backupSource, compose []byte, report RestoreReport) (result RestoreReport, returnErr error) {
+func (engine localEngine) executeRestore(ctx context.Context, request RestoreRequest, backup BackupReport, sources []backupSource, compose []byte, report RestoreReport, drillSecrets, stagingSecrets, sourceSecrets environmentSecrets, jellyfinURL string) (result RestoreReport, returnErr error) {
+	helperImage, err := restoreHelperImage(backup.Services)
+	if err != nil {
+		return RestoreReport{}, err
+	}
 	safety, err := engine.executeBackup(ctx, BackupRequest{
 		plan: request.plan, label: "before-restore", protect: true, generatedAt: time.Now().UTC(), skipRetention: true,
 	})
@@ -115,7 +122,7 @@ func (engine localEngine) executeRestore(ctx context.Context, request RestoreReq
 		if err := writeRestoreOperation(journalPath, operation); err != nil {
 			return RestoreReport{}, err
 		}
-		if err := restoreAndVerifyDockerVolume(ctx, temporaryVolume, service.Image, archivePath); err != nil {
+		if err := restoreAndVerifyDockerVolume(ctx, temporaryVolume, helperImage, archivePath); err != nil {
 			return RestoreReport{}, fmt.Errorf("stage %s restore: %w", service.Name, err)
 		}
 	}
@@ -166,7 +173,7 @@ func (engine localEngine) executeRestore(ctx context.Context, request RestoreReq
 		if err != nil {
 			return RestoreReport{}, err
 		}
-		if err := replaceDockerVolumeFromVolume(ctx, operation.TemporaryVolumes[index], source.dockerVolume, service.Image); err != nil {
+		if err := replaceDockerVolumeFromVolume(ctx, operation.TemporaryVolumes[index], source.dockerVolume, helperImage); err != nil {
 			return RestoreReport{}, fmt.Errorf("replace %s mutable volume: %w", service.Name, err)
 		}
 		operation.ReplacedServices = append(operation.ReplacedServices, service.Name)
@@ -178,7 +185,30 @@ func (engine localEngine) executeRestore(ctx context.Context, request RestoreReq
 	if err := writeRestoreOperation(journalPath, operation); err != nil {
 		return RestoreReport{}, err
 	}
-	if err := runCompose(ctx, composePath, report.ProjectName, "up", "-d"); err != nil {
+	if request.asRestoreDrill {
+		if err := materializeRuntimeSecrets(runtimeSecretDirectory(report.ProjectName), drillSecrets); err != nil {
+			return RestoreReport{}, fmt.Errorf("materialize restore drill credentials: %w", err)
+		}
+		defer func() {
+			if returnErr == nil {
+				return
+			}
+			if err := materializeRuntimeSecrets(runtimeSecretDirectory(report.ProjectName), stagingSecrets); err != nil {
+				returnErr = errors.Join(returnErr, fmt.Errorf("restore staging runtime credentials after failed drill: %w", err))
+			}
+		}()
+		if err := runCompose(ctx, composePath, report.ProjectName, "up", "-d", "--no-deps", "jellyfin"); err != nil {
+			return RestoreReport{}, fmt.Errorf("start recovered Jellyfin with acquisition and integrations gated: %w", err)
+		}
+		client := jellyfin.New(jellyfinURL, &http.Client{Timeout: 10 * time.Second})
+		if err := waitForRecoveredJellyfin(ctx, client, 120*time.Second); err != nil {
+			return RestoreReport{}, err
+		}
+		if err := client.PrepareRestoreDrill(ctx, sourceSecrets.Jellyfin, drillSecrets.Jellyfin); err != nil {
+			return RestoreReport{}, fmt.Errorf("rotate credentials and verify recovered Jellyfin behavior: %w", err)
+		}
+		report.StartedServices = []string{"jellyfin"}
+	} else if err := runCompose(ctx, composePath, report.ProjectName, "up", "-d"); err != nil {
 		return RestoreReport{}, fmt.Errorf("start restored services in dependency order: %w", err)
 	}
 	stackDown = false
@@ -190,6 +220,33 @@ func (engine localEngine) executeRestore(ctx context.Context, request RestoreReq
 	report.SafetyBackupPath = safety.ManifestPath
 	report.OperationJournalPath = journalPath
 	return report, nil
+}
+
+func waitForRecoveredJellyfin(ctx context.Context, client *jellyfin.Client, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		err := client.Ready(ctx)
+		if err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("recovered Jellyfin API did not become ready within %s: %w", timeout, err)
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func restoreHelperImage(services []BackupService) (string, error) {
+	for _, service := range services {
+		if service.Name == "jellyfin" && service.Image != "" {
+			return service.Image, nil
+		}
+	}
+	return "", fmt.Errorf("backup does not contain the Jellyfin restore helper image")
 }
 
 func restoreServiceArchive(root string, services []BackupService, name string) (BackupService, string, error) {
@@ -282,11 +339,23 @@ func copyAndVerifyDockerVolume(ctx context.Context, sourceVolume, targetVolume, 
 
 func rollbackRestore(ctx context.Context, composePath, projectName string, safety BackupReport, sources []backupSource) error {
 	var rollbackErr error
-	if err := validateRestoreCoverage(safety.Services, sources, false); err != nil {
+	selectedServices := make([]BackupService, 0, len(sources))
+	for _, source := range sources {
+		service, _, err := restoreServiceArchive(filepath.Dir(safety.ManifestPath), safety.Services, source.serviceName)
+		if err != nil {
+			return fmt.Errorf("verify safety backup coverage: %w", err)
+		}
+		selectedServices = append(selectedServices, service)
+	}
+	if err := validateRestoreCoverage(selectedServices, sources, false); err != nil {
 		return fmt.Errorf("verify safety backup coverage: %w", err)
 	}
-	if err := verifyBackupArchives(filepath.Dir(safety.ManifestPath), safety.Services); err != nil {
+	if err := verifyBackupArchives(filepath.Dir(safety.ManifestPath), selectedServices); err != nil {
 		return fmt.Errorf("verify safety backup checksums: %w", err)
+	}
+	helperImage, err := restoreHelperImage(safety.Services)
+	if err != nil {
+		return err
 	}
 	if err := runCompose(ctx, composePath, projectName, "down"); err != nil {
 		return fmt.Errorf("remove partial service containers before rollback: %w", err)
@@ -310,7 +379,7 @@ func rollbackRestore(ctx context.Context, composePath, projectName string, safet
 			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("recreate %s volume during rollback: %w", service.Name, err))
 			continue
 		}
-		if err := restoreAndVerifyDockerVolume(ctx, source.dockerVolume, service.Image, archivePath); err != nil {
+		if err := restoreAndVerifyDockerVolume(ctx, source.dockerVolume, helperImage, archivePath); err != nil {
 			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore %s safety archive: %w", service.Name, err))
 		}
 	}

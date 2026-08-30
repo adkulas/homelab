@@ -18,6 +18,7 @@ type restorePreviewArtifact struct {
 	SourceManifestSHA256 string   `json:"sourceManifestSHA256"`
 	Preview              string   `json:"preview"`
 	Services             []string `json:"services"`
+	CredentialsSHA256    string   `json:"credentialsSHA256,omitempty"`
 }
 
 func prepareOrConfirmRestorePreview(backupRoot string, manifest []byte, report RestoreReport, confirm bool) (string, error) {
@@ -29,6 +30,7 @@ func prepareOrConfirmRestorePreview(backupRoot string, manifest []byte, report R
 		SourceManifestSHA256: checksum(manifest),
 		Preview:              report.Preview,
 		Services:             report.Services,
+		CredentialsSHA256:    report.credentialsSHA256,
 	}
 	contents, err := json.MarshalIndent(artifact, "", "  ")
 	if err != nil {

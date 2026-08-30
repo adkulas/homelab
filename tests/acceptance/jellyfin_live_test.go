@@ -16,9 +16,9 @@ import (
 	"github.com/adkulas/homelab/internal/jellyfin"
 )
 
-func TestDisposableJellyfinServesImportedMediaReadOnly(t *testing.T) {
+func TestDisposableJellyfinRestoreDrillRotatesCredentialsAndServesRecoveredMediaReadOnly(t *testing.T) {
 	if os.Getenv("MEDIA_STACK_LIVE_JELLYFIN") != "1" {
-		t.Skip("set MEDIA_STACK_LIVE_JELLYFIN=1 to run the pinned disposable Jellyfin acceptance test")
+		t.Skip("set MEDIA_STACK_LIVE_JELLYFIN=1 to run the pinned disposable Jellyfin Restore Drill acceptance test")
 	}
 	versions, err := config.LoadVersions(filepath.Join(repositoryRoot(t), "stacks", "media", "versions.yaml"))
 	if err != nil {
@@ -77,6 +77,11 @@ func TestDisposableJellyfinServesImportedMediaReadOnly(t *testing.T) {
 	pollJellyfin(t, deadline, "reconcile disposable Jellyfin", func() (bool, error) {
 		return true, client.ReconcileLibraries(context.Background(), credentials)
 	})
+	drillCredentials := jellyfin.Credentials{Username: "restore-drill-admin", Password: "restore-drill-password"}
+	if err := client.PrepareRestoreDrill(context.Background(), credentials, drillCredentials); err != nil {
+		t.Fatalf("rotate Restore Drill credentials and verify recovered libraries: %v", err)
+	}
+	credentials = drillCredentials
 	pollJellyfin(t, deadline, "discover the legal movie with direct-play readiness", func() (bool, error) {
 		return client.MoviePlaybackReady(context.Background(), credentials, "/data/media/movies/legal-fixture.mp4")
 	})

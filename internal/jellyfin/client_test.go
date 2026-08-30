@@ -119,6 +119,71 @@ func TestReconcileLibrariesBootstrapsAuthenticationAndDisablesDeletion(t *testin
 	}
 }
 
+func TestRestoreDrillRotatesAdministratorAndVerifiesRecoveredLibraries(t *testing.T) {
+	current := Credentials{Username: "production-admin", Password: "production-password"}
+	drill := Credentials{Username: "drill-admin", Password: "drill-password"}
+	username, password := current.Username, current.Password
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.Method + " " + request.URL.Path {
+		case "GET /System/Info/Public":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"StartupWizardCompleted": true})
+		case "POST /Users/AuthenticateByName":
+			var body map[string]string
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			if body["Username"] != username || body["Pw"] != password {
+				http.Error(writer, "invalid credentials", http.StatusUnauthorized)
+				return
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"AccessToken": "fixture-access-token",
+				"User":        map[string]any{"Id": "recovered-user", "Name": username, "Policy": map[string]any{"IsAdministrator": true}},
+			})
+		case "POST /Users/Password":
+			requireToken(t, request)
+			if request.URL.Query().Get("userId") != "recovered-user" {
+				t.Errorf("password userId = %q", request.URL.Query().Get("userId"))
+			}
+			var body map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			if body["CurrentPw"] != current.Password || body["NewPw"] != drill.Password || body["ResetPassword"] != false {
+				t.Errorf("password rotation = %#v", body)
+			}
+			password = drill.Password
+			writer.WriteHeader(http.StatusNoContent)
+		case "GET /Users/recovered-user":
+			requireToken(t, request)
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"Id": "recovered-user", "Name": username, "Policy": map[string]any{"IsAdministrator": true}, "Configuration": map[string]any{},
+			})
+		case "POST /Users":
+			requireToken(t, request)
+			if request.URL.Query().Get("userId") != "recovered-user" {
+				t.Errorf("rename userId = %q", request.URL.Query().Get("userId"))
+			}
+			var body map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			if body["Name"] != drill.Username {
+				t.Errorf("renamed user = %#v", body)
+			}
+			username = drill.Username
+			writer.WriteHeader(http.StatusNoContent)
+		case "GET /Library/VirtualFolders":
+			requireToken(t, request)
+			_ = json.NewEncoder(writer).Encode([]any{
+				map[string]any{"Name": "Movie Library", "CollectionType": "movies", "Locations": []string{"/data/media/movies"}},
+				map[string]any{"Name": "Series Library", "CollectionType": "tvshows", "Locations": []string{"/data/media/series"}},
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	if err := New(server.URL, server.Client()).PrepareRestoreDrill(context.Background(), current, drill); err != nil {
+		t.Fatalf("prepare recovered Jellyfin: %v", err)
+	}
+}
+
 func TestMovieIsDiscoverableAndPlaybackReadyForAuthenticatedUser(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.Method + " " + request.URL.Path {

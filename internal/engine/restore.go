@@ -15,11 +15,12 @@ import (
 var ErrRestoreConfirmationRequired = errors.New("restore requires --confirm")
 
 type RestoreRequest struct {
-	plan            PlanRequest
-	backupPath      string
-	credentialsPath string
-	confirm         bool
-	asRestoreDrill  bool
+	plan                PlanRequest
+	backupPath          string
+	credentialsPath     string
+	confirm             bool
+	asRestoreDrill      bool
+	confirmIntegrations bool
 }
 
 type RestoreReport struct {
@@ -27,20 +28,22 @@ type RestoreReport struct {
 	Environment          string   `json:"environment"`
 	ProjectName          string   `json:"projectName"`
 	BackupPath           string   `json:"backupPath"`
-	CredentialsPath      string   `json:"credentialsPath,omitempty"`
 	Preview              string   `json:"preview"`
 	RestoreDrill         bool     `json:"restoreDrill"`
 	SourceEnvironment    string   `json:"sourceEnvironment"`
 	AcquisitionDisabled  bool     `json:"acquisitionDisabled"`
 	IntegrationsGated    bool     `json:"integrationsGated"`
 	Services             []string `json:"services"`
-	PreviewPath          string   `json:"previewPath,omitempty"`
-	Completed            bool     `json:"completed"`
-	SafetyBackupPath     string   `json:"safetyBackupPath,omitempty"`
-	OperationJournalPath string   `json:"operationJournalPath,omitempty"`
+	ExcludedServices     []string `json:"excludedServices,omitempty"`
+	StartedServices      []string `json:"startedServices,omitempty"`
+	credentialsSHA256    string
+	PreviewPath          string `json:"previewPath,omitempty"`
+	Completed            bool   `json:"completed"`
+	SafetyBackupPath     string `json:"safetyBackupPath,omitempty"`
+	OperationJournalPath string `json:"operationJournalPath,omitempty"`
 }
 
-func NewRestoreRequest(workingDirectory, environment, configPath, backupPath, credentialsPath string, confirm, asRestoreDrill bool) (RestoreRequest, error) {
+func NewRestoreRequest(workingDirectory, environment, configPath, backupPath, credentialsPath string, confirm, asRestoreDrill, confirmIntegrations bool) (RestoreRequest, error) {
 	plan, err := NewPlanRequest(workingDirectory, environment, configPath)
 	if err != nil {
 		return RestoreRequest{}, err
@@ -51,7 +54,7 @@ func NewRestoreRequest(workingDirectory, environment, configPath, backupPath, cr
 	if credentialsPath != "" && !filepath.IsAbs(credentialsPath) {
 		credentialsPath = filepath.Join(workingDirectory, credentialsPath)
 	}
-	return RestoreRequest{plan: plan, backupPath: backupPath, credentialsPath: credentialsPath, confirm: confirm, asRestoreDrill: asRestoreDrill}, nil
+	return RestoreRequest{plan: plan, backupPath: backupPath, credentialsPath: credentialsPath, confirm: confirm, asRestoreDrill: asRestoreDrill, confirmIntegrations: confirmIntegrations}, nil
 }
 
 func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (RestoreReport, error) {
@@ -70,6 +73,32 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 		return RestoreReport{}, fmt.Errorf("plan restore coverage: %w", err)
 	}
 	environment := declared.Spec.Environments[request.plan.environment]
+	if request.confirmIntegrations {
+		if request.plan.environment != "staging" || !request.asRestoreDrill {
+			return RestoreReport{}, fmt.Errorf("integration confirmation requires --environment staging and --as-restore-drill")
+		}
+		if request.credentialsPath == "" {
+			return RestoreReport{}, fmt.Errorf("integration confirmation requires --credentials")
+		}
+		credentialsContents, err := os.ReadFile(request.credentialsPath)
+		if err != nil {
+			return RestoreReport{}, fmt.Errorf("read Restore Drill confirmation credentials: %w", err)
+		}
+		if _, err := decryptEnvironmentSecrets(ctx, request.credentialsPath); err != nil {
+			return RestoreReport{}, fmt.Errorf("validate Restore Drill confirmation credentials: %w", err)
+		}
+		if err := confirmRestoreDrillGate(environment.BackupRoot, environment.ProjectName, credentialsContents); err != nil {
+			return RestoreReport{}, err
+		}
+		return RestoreReport{
+			SchemaVersion:     backupSchemaVersion,
+			Environment:       request.plan.environment,
+			ProjectName:       environment.ProjectName,
+			Preview:           "confirmed Restore Drill integrations for the next apply",
+			RestoreDrill:      true,
+			IntegrationsGated: false,
+		}, nil
+	}
 	sources, err := backupSources(plan.Compose(), environment.ProjectName)
 	if err != nil {
 		return RestoreReport{}, err
@@ -97,6 +126,10 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	if !request.asRestoreDrill && backup.ProjectName != environment.ProjectName {
 		return RestoreReport{}, fmt.Errorf("restore backup project %q does not match %q", backup.ProjectName, environment.ProjectName)
 	}
+	var drillSecrets environmentSecrets
+	var stagingSecrets environmentSecrets
+	var sourceSecrets environmentSecrets
+	var credentialsContents []byte
 	if request.asRestoreDrill {
 		if request.plan.environment != "staging" {
 			return RestoreReport{}, fmt.Errorf("restore drill requires the staging Environment")
@@ -107,6 +140,26 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 		if request.credentialsPath == "" {
 			return RestoreReport{}, fmt.Errorf("restore drill requires --credentials")
 		}
+		credentialsContents, err = os.ReadFile(request.credentialsPath)
+		if err != nil {
+			return RestoreReport{}, fmt.Errorf("read restore drill credentials: %w", err)
+		}
+		drillSecrets, err = decryptEnvironmentSecrets(ctx, request.credentialsPath)
+		if err != nil {
+			return RestoreReport{}, fmt.Errorf("validate restore drill credentials: %w", err)
+		}
+		stagingSecrets, err = decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment)
+		if err != nil {
+			return RestoreReport{}, fmt.Errorf("validate staging Environment credentials: %w", err)
+		}
+		sourceEnvironment, ok := declared.Spec.Environments[backup.Environment]
+		if !ok {
+			return RestoreReport{}, fmt.Errorf("restore drill source Environment %q is not declared", backup.Environment)
+		}
+		sourceSecrets, err = decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, sourceEnvironment)
+		if err != nil {
+			return RestoreReport{}, fmt.Errorf("validate production Environment credentials: %w", err)
+		}
 	}
 	serviceNames := make([]string, 0, len(backup.Services))
 	if err := validateRestoreCoverage(backup.Services, sources, request.asRestoreDrill); err != nil {
@@ -115,25 +168,33 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	if err := verifyBackupArchives(filepath.Dir(request.backupPath), backup.Services); err != nil {
 		return RestoreReport{}, fmt.Errorf("verify backup checksums: %w", err)
 	}
-	for _, service := range backup.Services {
-		serviceNames = append(serviceNames, service.Name)
+	excludedServices := []string(nil)
+	if request.asRestoreDrill {
+		excludedServices = []string{"profilarr"}
+		sources = excludeRestoreSources(sources, excludedServices)
+	}
+	for _, source := range sources {
+		serviceNames = append(serviceNames, source.serviceName)
 	}
 	preview := fmt.Sprintf("replace %s Environment state from %s backup", request.plan.environment, backup.Environment)
 	if request.asRestoreDrill {
-		preview = fmt.Sprintf("restore drill: replace %s Environment state from %s backup with acquisition disabled, integrations gated, and credentials overridden from %s", request.plan.environment, backup.Environment, filepath.Base(request.credentialsPath))
+		preview = fmt.Sprintf("restore drill: replace %s Environment state from %s backup with acquisition disabled, integrations gated, rotated credentials, and Production Profilarr excluded", request.plan.environment, backup.Environment)
 	}
 	report := RestoreReport{
 		SchemaVersion:       backupSchemaVersion,
 		Environment:         request.plan.environment,
 		ProjectName:         environment.ProjectName,
 		BackupPath:          request.backupPath,
-		CredentialsPath:     request.credentialsPath,
 		Preview:             preview,
 		RestoreDrill:        request.asRestoreDrill,
 		SourceEnvironment:   backup.Environment,
 		AcquisitionDisabled: request.asRestoreDrill,
 		IntegrationsGated:   request.asRestoreDrill,
 		Services:            serviceNames,
+		ExcludedServices:    excludedServices,
+	}
+	if request.asRestoreDrill {
+		report.credentialsSHA256 = checksum(credentialsContents)
 	}
 	previewPath, err := prepareOrConfirmRestorePreview(environment.BackupRoot, backupFile, report, request.confirm)
 	if err != nil {
@@ -143,10 +204,35 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	if !request.confirm {
 		return report, ErrRestoreConfirmationRequired
 	}
+	jellyfinURL := "http://" + environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Jellyfin)
+	gateCreated := false
 	if request.asRestoreDrill {
-		return report, nil
+		if err := writeRestoreDrillGate(environment.BackupRoot, environment.ProjectName, credentialsContents); err != nil {
+			return RestoreReport{}, err
+		}
+		gateCreated = true
 	}
-	return engine.executeRestore(ctx, request, backup, sources, plan.Compose(), report)
+	result, err := engine.executeRestore(ctx, request, backup, sources, plan.Compose(), report, drillSecrets, stagingSecrets, sourceSecrets, jellyfinURL)
+	if err != nil && gateCreated {
+		if cleanupErr := completeRestoreDrillGate(environment.BackupRoot); cleanupErr != nil {
+			return RestoreReport{}, errors.Join(err, cleanupErr)
+		}
+	}
+	return result, err
+}
+
+func excludeRestoreSources(sources []backupSource, excluded []string) []backupSource {
+	excludedSet := make(map[string]bool, len(excluded))
+	for _, name := range excluded {
+		excludedSet[name] = true
+	}
+	selected := make([]backupSource, 0, len(sources)-len(excluded))
+	for _, source := range sources {
+		if !excludedSet[source.serviceName] {
+			selected = append(selected, source)
+		}
+	}
+	return selected
 }
 
 func validateRestoreCoverage(services []BackupService, sources []backupSource, restoreDrill bool) error {

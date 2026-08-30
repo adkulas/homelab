@@ -43,17 +43,26 @@ func New(baseURL string, httpClient *http.Client) *Client {
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: httpClient}
 }
 
+func (client *Client) Ready(ctx context.Context) error {
+	complete, err := client.startupComplete(ctx)
+	if err != nil {
+		return err
+	}
+	if !complete {
+		return fmt.Errorf("Jellyfin startup wizard is incomplete")
+	}
+	return nil
+}
+
 func (client *Client) ReconcileLibraries(ctx context.Context, credentials Credentials) error {
 	if credentials.Username == "" || credentials.Password == "" {
 		return fmt.Errorf("Jellyfin username and password are required")
 	}
-	var publicInfo struct {
-		StartupWizardCompleted bool `json:"StartupWizardCompleted"`
+	startupComplete, err := client.startupComplete(ctx)
+	if err != nil {
+		return err
 	}
-	if err := client.doJSON(ctx, http.MethodGet, "/System/Info/Public", nil, "", &publicInfo); err != nil {
-		return fmt.Errorf("observe Jellyfin startup: %w", err)
-	}
-	if !publicInfo.StartupWizardCompleted {
+	if !startupComplete {
 		steps := []struct {
 			method string
 			path   string
@@ -124,6 +133,76 @@ func (client *Client) ReconcileLibraries(ctx context.Context, credentials Creden
 		}
 	}
 	return nil
+}
+
+func (client *Client) PrepareRestoreDrill(ctx context.Context, current, drill Credentials) error {
+	if current.Username == "" || current.Password == "" || drill.Username == "" || drill.Password == "" {
+		return fmt.Errorf("current and Restore Drill Jellyfin credentials are required")
+	}
+	if current == drill {
+		return fmt.Errorf("Restore Drill Jellyfin credentials must differ from Production")
+	}
+	if err := client.Ready(ctx); err != nil {
+		return err
+	}
+	auth, err := client.authenticate(ctx, current)
+	if err != nil {
+		return fmt.Errorf("authenticate recovered Production Jellyfin administrator: %w", err)
+	}
+	var recoveredUser map[string]any
+	if err := client.doJSON(ctx, http.MethodGet, "/Users/"+url.PathEscape(auth.User.ID), nil, auth.AccessToken, &recoveredUser); err != nil {
+		return fmt.Errorf("observe recovered Jellyfin administrator: %w", err)
+	}
+	if err := client.doJSON(ctx, http.MethodPost, "/Users/Password?userId="+url.QueryEscape(auth.User.ID), map[string]any{
+		"CurrentPw": current.Password, "NewPw": drill.Password, "ResetPassword": false,
+	}, auth.AccessToken, nil); err != nil {
+		return fmt.Errorf("rotate recovered Jellyfin administrator password: %w", err)
+	}
+	recoveredUser["Name"] = drill.Username
+	if err := client.doJSON(ctx, http.MethodPost, "/Users?userId="+url.QueryEscape(auth.User.ID), recoveredUser, auth.AccessToken, nil); err != nil {
+		return fmt.Errorf("rotate recovered Jellyfin administrator name: %w", err)
+	}
+	rotated, err := client.authenticate(ctx, drill)
+	if err != nil {
+		return fmt.Errorf("authenticate rotated Restore Drill Jellyfin administrator: %w", err)
+	}
+	var libraries []struct {
+		Name           string   `json:"Name"`
+		CollectionType string   `json:"CollectionType"`
+		Locations      []string `json:"Locations"`
+	}
+	if err := client.doJSON(ctx, http.MethodGet, "/Library/VirtualFolders", nil, rotated.AccessToken, &libraries); err != nil {
+		return fmt.Errorf("observe recovered Jellyfin libraries: %w", err)
+	}
+	for _, expected := range []struct {
+		name, collectionType, path string
+	}{
+		{name: "Movie Library", collectionType: "movies", path: movieLibraryPath},
+		{name: "Series Library", collectionType: "tvshows", path: seriesLibraryPath},
+	} {
+		found := false
+		for _, library := range libraries {
+			if library.Name == expected.name && library.CollectionType == expected.collectionType &&
+				len(library.Locations) == 1 && library.Locations[0] == expected.path {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("recovered Jellyfin omitted %s at %s", expected.name, expected.path)
+		}
+	}
+	return nil
+}
+
+func (client *Client) startupComplete(ctx context.Context) (bool, error) {
+	var publicInfo struct {
+		StartupWizardCompleted bool `json:"StartupWizardCompleted"`
+	}
+	if err := client.doJSON(ctx, http.MethodGet, "/System/Info/Public", nil, "", &publicInfo); err != nil {
+		return false, fmt.Errorf("observe Jellyfin startup: %w", err)
+	}
+	return publicInfo.StartupWizardCompleted, nil
 }
 
 func (client *Client) DestructiveDeletionDisabled(ctx context.Context, credentials Credentials) (bool, error) {
