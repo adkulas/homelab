@@ -53,8 +53,8 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 		{"id": 103, "name": "BR-DISK"},
 	}
 	movieQualityDefinitions := []map[string]any{
-		{"quality": map[string]any{"name": "Bluray-1080p"}, "minSize": 51, "maxSize": 2000, "preferredSize": 1999},
-		{"quality": map[string]any{"name": "WEBDL-1080p"}, "minSize": 13, "maxSize": 2000, "preferredSize": 1999},
+		{"quality": map[string]any{"name": "Bluray-1080p"}, "minSize": 50.8, "maxSize": nil, "preferredSize": 1999},
+		{"quality": map[string]any{"name": "WEBDL-1080p"}, "minSize": 12.5, "maxSize": nil, "preferredSize": 1999},
 	}
 	movieNaming := map[string]any{
 		"renameMovies":             true,
@@ -117,8 +117,9 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 		{"id": 204, "name": "Repack/Proper"},
 	}
 	seriesQualityDefinitions := []map[string]any{
-		{"quality": map[string]any{"name": "WEBDL-1080p"}, "minSize": 15, "maxSize": 0, "preferredSize": 995},
-		{"quality": map[string]any{"name": "WEBRip-1080p"}, "minSize": 15, "maxSize": 0, "preferredSize": 995},
+		{"quality": map[string]any{"name": "WEBDL-1080p"}, "minSize": 15, "maxSize": nil, "preferredSize": 995},
+		{"quality": map[string]any{"name": "WEBRip-1080p"}, "minSize": 15, "maxSize": nil, "preferredSize": 995},
+		{"quality": map[string]any{"name": "Bluray-1080p"}, "minSize": 50.4, "maxSize": nil, "preferredSize": 995},
 	}
 	seriesNaming := map[string]any{
 		"renameEpisodes":           true,
@@ -613,6 +614,34 @@ EOF
 	if seerrWrites != seerrWritesAfterFirstRun {
 		t.Errorf("repeated apply made %d Seerr policy writes, want none", seerrWrites-seerrWritesAfterFirstRun)
 	}
+
+	originalMovieMinimum := movieQualityDefinitions[1]["minSize"]
+	movieQualityDefinitions[1]["minSize"] = 11.5
+	decimalDriftCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
+	decimalDriftCommand.Dir = command.Dir
+	decimalDriftCommand.Env = command.Env
+	decimalDriftOutput, err := decimalDriftCommand.CombinedOutput()
+	if err == nil {
+		t.Fatalf("apply accepted material decimal quality-definition drift: %s", decimalDriftOutput)
+	}
+	if !strings.Contains(string(decimalDriftOutput), `Movie Library policy drift: quality definition "WEBDL-1080p" differs`) {
+		t.Errorf("decimal quality-definition drift = %q, want affected quality", decimalDriftOutput)
+	}
+	movieQualityDefinitions[1]["minSize"] = originalMovieMinimum
+
+	originalSeriesPreferred := seriesQualityDefinitions[0]["preferredSize"]
+	seriesQualityDefinitions[0]["preferredSize"] = nil
+	nullDriftCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
+	nullDriftCommand.Dir = command.Dir
+	nullDriftCommand.Env = command.Env
+	nullDriftOutput, err := nullDriftCommand.CombinedOutput()
+	if err == nil {
+		t.Fatalf("apply accepted null finite quality-definition size: %s", nullDriftOutput)
+	}
+	if !strings.Contains(string(nullDriftOutput), `Series Library policy drift: quality definition "WEBDL-1080p" differs`) {
+		t.Errorf("null quality-definition drift = %q, want affected quality", nullDriftOutput)
+	}
+	seriesQualityDefinitions[0]["preferredSize"] = originalSeriesPreferred
 
 	originalMovieQualityProfiles := movieQualityProfiles
 	originalSeriesQualityProfiles := seriesQualityProfiles
