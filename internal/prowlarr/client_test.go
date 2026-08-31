@@ -36,13 +36,20 @@ func TestReconcileLibraryDiscoveryConvergesPinnedContractFixtures(t *testing.T) 
 			_, _ = writer.Write(applications)
 		case "POST /api/v1/applications":
 			body, _ := io.ReadAll(request.Body)
+			var created map[string]any
+			_ = json.Unmarshal(body, &created)
+			if created["name"] == "Radarr" {
+				syncCategories, present := fieldValues(created["fields"])["syncCategories"].([]any)
+				if !present || len(syncCategories) == 0 {
+					http.Error(writer, "'Sync Categories' must not be empty.", http.StatusBadRequest)
+					return
+				}
+			}
 			if string(applications) == "[]\n" {
 				applications = []byte("[" + string(body) + "]")
 			} else {
 				applications = append(applications[:len(applications)-1], append([]byte(","+string(body)), ']')...)
 			}
-			var created map[string]any
-			_ = json.Unmarshal(body, &created)
 			mutations = append(mutations, strings.ToLower(created["name"].(string))+"-application")
 			writer.WriteHeader(http.StatusCreated)
 		default:
@@ -83,6 +90,10 @@ func TestReconcileLibraryDiscoveryConvergesPinnedContractFixtures(t *testing.T) 
 	fields := fieldValues(createdApplications[0]["fields"])
 	if fields["baseUrl"] != "http://radarr:7878" || fields["prowlarrUrl"] != "http://prowlarr:9696" || fields["apiKey"] != "fixture-radarr-api-key" {
 		t.Fatalf("Radarr application contract = %v", fields)
+	}
+	wantMovieCategories := []any{float64(2000), float64(2010), float64(2020), float64(2030), float64(2040), float64(2045), float64(2050), float64(2060), float64(2070), float64(2080), float64(2090)}
+	if !reflect.DeepEqual(fields["syncCategories"], wantMovieCategories) {
+		t.Fatalf("Radarr category sync contract = %v", fields)
 	}
 	fields = fieldValues(createdApplications[1]["fields"])
 	if fields["baseUrl"] != "http://sonarr:8989" || fields["prowlarrUrl"] != "http://prowlarr:9696" || fields["apiKey"] != "fixture-sonarr-api-key" {
