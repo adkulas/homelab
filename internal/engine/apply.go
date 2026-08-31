@@ -276,7 +276,7 @@ func verifyProfilarrBootstrap(ctx context.Context, baseURL, apiKey string) error
 }
 
 func observeProfilarrBootstrap(ctx context.Context, baseURL, apiKey string) (bool, bool, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/api/v1/arr/instances", nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/api/v1/arr", nil)
 	if err != nil {
 		return false, false, fmt.Errorf("prepare Profilarr connection verification: %w", err)
 	}

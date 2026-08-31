@@ -179,7 +179,7 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	}))
 	defer sonarrAPI.Close()
 	api := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/api/v1/arr/instances" {
+		if request.URL.Path == "/api/v1/arr" {
 			profilarrObservations++
 			if profilarrObservations == 1 {
 				http.Error(writer, "starting", http.StatusServiceUnavailable)
