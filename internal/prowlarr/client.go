@@ -143,6 +143,7 @@ func declaredInternetArchive() indexer {
 }
 
 func declaredRadarrApplication(apiKey string) application {
+	standardMovieCategories := []int{2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060, 2070, 2080, 2090}
 	return application{
 		Enable: true, Name: "Radarr", SyncLevel: "fullSync",
 		ImplementationName: "Radarr", Implementation: "Radarr", ConfigContract: "RadarrSettings", Tags: []int{},
@@ -150,7 +151,7 @@ func declaredRadarrApplication(apiKey string) application {
 			{Name: "prowlarrUrl", Value: internalProwlarrURL},
 			{Name: "baseUrl", Value: internalRadarrURL},
 			{Name: "apiKey", Value: apiKey},
-			{Name: "syncCategories", Value: []int{}},
+			{Name: "syncCategories", Value: standardMovieCategories},
 		},
 	}
 }
