@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/adkulas/homelab/internal/arrquality"
 	"gopkg.in/yaml.v3"
 )
 
@@ -103,15 +104,6 @@ type observedCustomFormat struct {
 	Name string `json:"name"`
 }
 
-type observedQualityDefinition struct {
-	Quality struct {
-		Name string `json:"name"`
-	} `json:"quality"`
-	MinSize       int `json:"minSize"`
-	MaxSize       int `json:"maxSize"`
-	PreferredSize int `json:"preferredSize"`
-}
-
 func LoadSeriesPolicy(path, pinnedRevision string) (SeriesPolicy, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -139,7 +131,7 @@ func LoadSeriesPolicy(path, pinnedRevision string) (SeriesPolicy, error) {
 func (client *Client) VerifySeriesPolicy(ctx context.Context, policy SeriesPolicy) error {
 	var profiles []observedQualityProfile
 	var formats []observedCustomFormat
-	var definitions []observedQualityDefinition
+	var definitions []arrquality.Definition
 	var naming SeriesNamingPolicy
 	var media SeriesMediaManagement
 	for _, observation := range []struct {
@@ -194,13 +186,13 @@ func (client *Client) VerifySeriesPolicy(ctx context.Context, policy SeriesPolic
 		}
 	}
 
-	definitionsByName := make(map[string]observedQualityDefinition, len(definitions))
+	definitionsByName := make(map[string]arrquality.Definition, len(definitions))
 	for _, definition := range definitions {
 		definitionsByName[definition.Quality.Name] = definition
 	}
 	for _, expected := range policy.QualityDefinitions {
 		observed, ok := definitionsByName[expected.Quality]
-		if !ok || observed.MinSize != expected.Minimum || observed.MaxSize != expected.Maximum || observed.PreferredSize != expected.Preferred {
+		if !ok || !observed.Equivalent(expected.Minimum, expected.Maximum, expected.Preferred, 0) {
 			drift = append(drift, fmt.Sprintf("quality definition %q differs", expected.Quality))
 		}
 	}
