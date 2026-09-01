@@ -12,5 +12,15 @@ func ConfigurationContract() []contractmodel.Setting {
 		contractmodel.Fixed("defaultRequestPermission", "New household request permission", "request-only", "New Jellyfin-authenticated users receive request permission without administration.", "reconcile"),
 		contractmodel.Fixed("jellyfinConnection", "Internal Jellyfin connection", "http://jellyfin:8096", "Seerr bootstraps against the application-network Jellyfin endpoint without TLS or URL base.", "initialize"),
 		contractmodel.Fixed("initialization", "Initialization state", "complete after authentication policy", "Seerr initialization completes only after the authentication contract is established.", "initialize"),
+		contractmodel.Fixed("radarrConnection.endpoint", "Internal Radarr connection", "http://radarr:7878", "Movie requests use the selected Environment's application-network Radarr endpoint without TLS or URL base.", "reconcile", "verify"),
+		contractmodel.SensitiveDerived("radarrConnection.apiKey", "Radarr API key", "selected Environment Radarr supported API discovery", "Seerr receives the selected Environment's discovered Radarr API key without exposing it.", "Rotate the key in Radarr and rerun apply so Seerr receives the replacement.", "reconcile"),
+		contractmodel.Derived("radarrConnection.profile", "Movie request quality profile", "Radarr API profile matching pinned Profilarr Movie Library policy", "Seerr stores the target Environment's numeric Radarr profile identity resolved by policy name.", "reconcile", "verify"),
+		contractmodel.Fixed("radarrConnection.directory", "Movie request root", "/data/media/movies", "Approved movie requests enter the shared Movie Library root.", "reconcile", "verify"),
+		contractmodel.Fixed("radarrConnection.default", "Default non-4K Radarr destination", true, "The Environment's single Radarr service is the default destination for ordinary movie requests.", "reconcile", "verify"),
+		contractmodel.Fixed("radarrConnection.4k", "4K movie requests", false, "This milestone routes ordinary non-4K movie requests only.", "reconcile", "verify"),
+		contractmodel.Fixed("radarrConnection.minimumAvailability", "Movie request minimum availability", "released", "Seerr submits this per-item request value without modifying Radarr's service-wide media-management policy.", "reconcile", "verify"),
+		contractmodel.Fixed("radarrConnection.search", "Automatic movie search", true, "Approved Seerr movie requests ask Radarr to search automatically.", "reconcile", "verify"),
+		contractmodel.Fixed("radarrConnection.scan", "Radarr availability scan", true, "Seerr scans Radarr so request state follows acquisition progress.", "reconcile", "verify"),
+		contractmodel.Fixed("radarrConnection.requestTags", "Per-request Radarr tags", false, "Movie requests do not create requester-specific Radarr tags.", "reconcile", "verify"),
 	}
 }

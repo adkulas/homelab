@@ -341,6 +341,7 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	seerrInitialized := false
 	seerrLocalPassword := ""
 	seerrMain := map[string]any{"localLogin": false, "mediaServerLogin": false, "newPlexLogin": false, "defaultPermissions": float64(0), "mediaServerType": float64(4)}
+	var seerrRadarr []map[string]any
 	seerrWrites := 0
 	seerrAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.Method + " " + request.URL.Path {
@@ -371,6 +372,29 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 			seerrWrites++
 			_ = json.NewDecoder(request.Body).Decode(&seerrMain)
 			_ = json.NewEncoder(writer).Encode(seerrMain)
+		case "GET /api/v1/settings/radarr":
+			_ = json.NewEncoder(writer).Encode(seerrRadarr)
+		case "POST /api/v1/settings/radarr/test":
+			var body map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			if body["hostname"] != "radarr" || body["port"] != float64(7878) || body["apiKey"] != "fixture-radarr-api-key" || body["useSsl"] != false {
+				http.Error(writer, "unexpected Radarr connection", http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"profiles":    []any{map[string]any{"id": 7, "name": "HD Bluray + WEB"}},
+				"rootFolders": []any{map[string]any{"id": 1, "path": "/data/media/movies"}},
+				"tags":        []any{},
+				"urlBase":     "",
+			})
+		case "POST /api/v1/settings/radarr":
+			seerrWrites++
+			var body map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			body["id"] = float64(0)
+			seerrRadarr = append(seerrRadarr, body)
+			writer.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(writer).Encode(body)
 		case "POST /api/v1/user/1/settings/password":
 			seerrWrites++
 			var body map[string]string
@@ -586,6 +610,14 @@ EOF
 	}
 	if seerrLocalPassword != "fixture-jellyfin-password" {
 		t.Error("apply did not preserve an emergency local Seerr administrator")
+	}
+	if len(seerrRadarr) != 1 {
+		t.Fatalf("apply did not reconcile one Seerr Radarr destination: %v", seerrRadarr)
+	}
+	if destination := seerrRadarr[0]; destination["hostname"] != "radarr" || destination["port"] != float64(7878) || destination["activeProfileId"] != float64(7) ||
+		destination["activeProfileName"] != "HD Bluray + WEB" || destination["activeDirectory"] != "/data/media/movies" || destination["isDefault"] != true ||
+		destination["is4k"] != false || destination["preventSearch"] != false {
+		t.Errorf("Seerr Radarr destination = %v", destination)
 	}
 	if profilarrObservations != 2 {
 		t.Errorf("apply observed Profilarr connections %d times, want startup retry plus successful verification", profilarrObservations)

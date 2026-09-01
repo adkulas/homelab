@@ -12,6 +12,7 @@ import (
 	"github.com/adkulas/homelab/internal/config"
 	"github.com/adkulas/homelab/internal/qbittorrent"
 	"github.com/adkulas/homelab/internal/radarr"
+	"github.com/adkulas/homelab/internal/seerr"
 	"gopkg.in/yaml.v3"
 )
 
@@ -61,6 +62,7 @@ func verifyLegalMovie(ctx context.Context, plan Plan, declared config.MediaStack
 		return
 	}
 	environment := declared.Spec.Environments[request.plan.environment]
+	deadline := time.Now().Add(timeout)
 	secrets, err := decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment)
 	if err != nil {
 		report.add("VERIFY_MOVIE_ACQUISITION_FAILED", "legal movie acquisition", err.Error(), false)
@@ -72,6 +74,18 @@ func verifyLegalMovie(ctx context.Context, plan Plan, declared config.MediaStack
 		report.add("VERIFY_MOVIE_ACQUISITION_FAILED", "legal movie acquisition", err.Error(), false)
 		return
 	}
+	seerrAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Seerr)
+	seerrClient, err := seerr.New("http://"+seerrAddress, &http.Client{Timeout: 10 * time.Second})
+	if err != nil {
+		report.add("VERIFY_MOVIE_REQUEST_FAILED", "approved Seerr movie request", err.Error(), false)
+		return
+	}
+	credentials := seerr.Credentials{Username: secrets.Jellyfin.Username, Password: secrets.Jellyfin.Password}
+	if err := seerrClient.RequestMovie(ctx, credentials, fixture.Spec.TMDBID); err != nil {
+		report.add("VERIFY_MOVIE_REQUEST_FAILED", "approved Seerr movie request", err.Error(), false)
+		return
+	}
+	report.add("VERIFY_MOVIE_REQUESTED", fmt.Sprintf("approved Seerr movie request (%s)", fixture.Spec.Title), "", true)
 	apiKey, err := waitForRadarrAPIKey(ctx, plan, 120*time.Second)
 	if err != nil {
 		report.add("VERIFY_MOVIE_ACQUISITION_FAILED", "legal movie acquisition", err.Error(), false)
@@ -79,13 +93,27 @@ func verifyLegalMovie(ctx context.Context, plan Plan, declared config.MediaStack
 	}
 	radarrAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Radarr)
 	radarrClient := radarr.New("http://"+radarrAddress, apiKey, &http.Client{Timeout: 10 * time.Second})
-	movieID, err := radarrClient.AcquireLegalMovie(ctx, fixture.Spec.TMDBID, fixture.Spec.ReleaseTitle, fixture.Spec.Indexer)
-	if err != nil {
-		report.add("VERIFY_MOVIE_ACQUISITION_FAILED", "legal movie acquisition", err.Error(), false)
-		return
+	movieID := 0
+	for {
+		var found bool
+		movieID, found, err = radarrClient.RequestedMovieID(ctx, fixture.Spec.TMDBID)
+		if err != nil {
+			report.add("VERIFY_MOVIE_ACQUISITION_FAILED", "Seerr-to-Radarr movie request", err.Error(), false)
+			return
+		}
+		if found {
+			break
+		}
+		if time.Now().After(deadline) {
+			report.add("VERIFY_MOVIE_ACQUISITION_FAILED", "Seerr-to-Radarr movie request", "Confirm Seerr has a default Radarr destination and retry the approved request.", false)
+			return
+		}
+		if !waitForMediaPoll(ctx, deadline) {
+			report.add("VERIFY_MOVIE_ACQUISITION_FAILED", "Seerr-to-Radarr movie request", ctx.Err().Error(), false)
+			return
+		}
 	}
 
-	deadline := time.Now().Add(timeout)
 	var torrent qbittorrent.Torrent
 	var torrentFiles []qbittorrent.TorrentFile
 	for {
