@@ -12,9 +12,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
-func TestPromotionVerifyAcquiresAndHardlinkImportsLegalMovie(t *testing.T) {
+func TestPromotionVerifyRequestsAndPlaysLegalMovieThroughSeerr(t *testing.T) {
 	temporary := t.TempDir()
 	dataRoot := filepath.Join(temporary, "data")
 	sourcePath := filepath.Join(dataRoot, "torrents", "movies", "Night.of.the.Living.Dead.1968.mp4")
@@ -26,7 +27,7 @@ func TestPromotionVerifyAcquiresAndHardlinkImportsLegalMovie(t *testing.T) {
 	}
 
 	var mutex sync.Mutex
-	movieAdded, releaseGrabbed, imported := false, false, false
+	movieAdded, movieRequested, releaseGrabbed, imported := false, false, false, false
 	api := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		mutex.Lock()
 		defer mutex.Unlock()
@@ -42,36 +43,6 @@ func TestPromotionVerifyAcquiresAndHardlinkImportsLegalMovie(t *testing.T) {
 				} else {
 					_, _ = io.WriteString(writer, `[]`)
 				}
-			case "GET /api/v3/movie/lookup":
-				if request.URL.Query().Get("term") != "tmdb:10331" {
-					http.Error(writer, "unexpected lookup", http.StatusBadRequest)
-					return
-				}
-				_, _ = io.WriteString(writer, `[{"title":"Night of the Living Dead","year":1968,"tmdbId":10331}]`)
-			case "GET /api/v3/qualityprofile":
-				_, _ = io.WriteString(writer, `[{"id":7,"name":"Fixture 1080p"}]`)
-			case "POST /api/v3/movie":
-				var movie map[string]any
-				_ = json.NewDecoder(request.Body).Decode(&movie)
-				if movie["tmdbId"] != float64(10331) || movie["rootFolderPath"] != "/data/media/movies" || movie["qualityProfileId"] != float64(7) {
-					http.Error(writer, "unexpected movie declaration", http.StatusBadRequest)
-					return
-				}
-				movieAdded = true
-				movie["id"] = 41
-				_ = json.NewEncoder(writer).Encode(movie)
-			case "GET /api/v3/release":
-				if request.URL.Query().Get("movieId") != "41" {
-					http.Error(writer, "unexpected movie", http.StatusBadRequest)
-					return
-				}
-				_, _ = io.WriteString(writer, `[{"guid":"fixture-release","title":"Night Of The Living Dead 1968","indexer":"Internet Archive","downloadUrl":"https://archive.org/download/night_of_the_living_dead/night_of_the_living_dead_archive.torrent","movieId":41}]`)
-			case "POST /api/v3/release":
-				if err := os.WriteFile(sourcePath, []byte("public-domain fixture movie\n"), 0o640); err != nil {
-					http.Error(writer, err.Error(), http.StatusInternalServerError)
-					return
-				}
-				releaseGrabbed = true
 			case "GET /api/v3/moviefile":
 				if !releaseGrabbed {
 					_, _ = io.WriteString(writer, `[]`)
@@ -113,6 +84,48 @@ func TestPromotionVerifyAcquiresAndHardlinkImportsLegalMovie(t *testing.T) {
 		}
 	}))
 	defer api.Close()
+	seerrAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		mutex.Lock()
+		defer mutex.Unlock()
+		switch request.Method + " " + request.URL.Path {
+		case "POST /api/v1/auth/jellyfin":
+			var body map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			if body["username"] != "household" || body["password"] != "fixture-jellyfin-password" {
+				http.Error(writer, "unexpected household authentication", http.StatusUnauthorized)
+				return
+			}
+			http.SetCookie(writer, &http.Cookie{Name: "connect.sid", Value: "request-session", Path: "/"})
+			_ = json.NewEncoder(writer).Encode(map[string]any{"id": 1, "email": "household", "permissions": 2})
+		case "POST /api/v1/request":
+			if cookie, err := request.Cookie("connect.sid"); err != nil || cookie.Value != "request-session" {
+				http.Error(writer, "missing household session", http.StatusUnauthorized)
+				return
+			}
+			var body map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			if body["mediaType"] != "movie" || body["mediaId"] != float64(10331) || body["is4k"] != false {
+				http.Error(writer, "unexpected movie request", http.StatusBadRequest)
+				return
+			}
+			movieRequested = true
+			go func() {
+				time.Sleep(100 * time.Millisecond)
+				mutex.Lock()
+				defer mutex.Unlock()
+				if err := os.WriteFile(sourcePath, []byte("public-domain fixture movie\n"), 0o640); err != nil {
+					return
+				}
+				movieAdded = true
+				releaseGrabbed = true
+			}()
+			writer.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(writer).Encode(map[string]any{"id": 9, "status": 2, "type": "movie"})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer seerrAPI.Close()
 	jellyfinAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.Method + " " + request.URL.Path {
 		case "POST /Users/AuthenticateByName":
@@ -138,6 +151,10 @@ func TestPromotionVerifyAcquiresAndHardlinkImportsLegalMovie(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seerrURL, err := url.Parse(seerrAPI.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	configPath := filepath.Join(temporary, "media-stack.yaml")
 	declared := string(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")))
@@ -145,6 +162,7 @@ func TestPromotionVerifyAcquiresAndHardlinkImportsLegalMovie(t *testing.T) {
 	declared = strings.Replace(declared, "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "radarr: 17878", "radarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "jellyfin: 18096", "jellyfin: "+jellyfinURL.Port(), 1)
+	declared = strings.Replace(declared, "seerr: 15055", "seerr: "+seerrURL.Port(), 1)
 	writeFile(t, configPath, []byte(declared), 0o600)
 	if err := os.Mkdir(filepath.Join(temporary, "secrets"), 0o700); err != nil {
 		t.Fatal(err)
@@ -197,7 +215,7 @@ esac
 		"PATH="+binDirectory+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"VERIFY_PROBE_COUNT="+filepath.Join(temporary, "probe-count"),
 	)
-	output, err := command.Output()
+	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("media-stack promotion verification failed: %v\n%s", err, output)
 	}
@@ -214,10 +232,13 @@ esac
 	for _, diagnostic := range report.Diagnostics {
 		passed[diagnostic.Code] = diagnostic.Status == "pass"
 	}
-	for _, code := range []string{"VERIFY_MOVIE_ACQUIRED", "VERIFY_MOVIE_HARDLINKED", "VERIFY_MOVIE_PLAYBACK_READY"} {
+	for _, code := range []string{"VERIFY_MOVIE_REQUESTED", "VERIFY_MOVIE_ACQUIRED", "VERIFY_MOVIE_HARDLINKED", "VERIFY_MOVIE_PLAYBACK_READY"} {
 		if !passed[code] {
 			t.Errorf("promotion verification did not report %s: %s", code, output)
 		}
+	}
+	if !movieRequested {
+		t.Fatal("promotion verification bypassed the approved Seerr movie request")
 	}
 	sourceInfo, err := os.Stat(sourcePath)
 	if err != nil {

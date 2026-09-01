@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"reflect"
 	"strings"
 )
 
@@ -37,6 +38,49 @@ type mainSettings struct {
 	MediaServerLogin   bool `json:"mediaServerLogin"`
 	NewJellyfinLogin   bool `json:"newPlexLogin"`
 	DefaultPermissions int  `json:"defaultPermissions"`
+}
+
+type radarrDestination struct {
+	ID                  int    `json:"id,omitempty"`
+	Name                string `json:"name"`
+	Hostname            string `json:"hostname"`
+	Port                int    `json:"port"`
+	APIKey              string `json:"apiKey"`
+	UseSSL              bool   `json:"useSsl"`
+	BaseURL             string `json:"baseUrl"`
+	ActiveProfileID     int    `json:"activeProfileId"`
+	ActiveProfileName   string `json:"activeProfileName"`
+	ActiveDirectory     string `json:"activeDirectory"`
+	Tags                []int  `json:"tags"`
+	Is4K                bool   `json:"is4k"`
+	IsDefault           bool   `json:"isDefault"`
+	MinimumAvailability string `json:"minimumAvailability"`
+	ExternalURL         string `json:"externalUrl"`
+	SyncEnabled         bool   `json:"syncEnabled"`
+	PreventSearch       bool   `json:"preventSearch"`
+	TagRequests         bool   `json:"tagRequests"`
+	OverrideRule        []int  `json:"overrideRule"`
+}
+
+type radarrTestResponse struct {
+	Profiles []struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	} `json:"profiles"`
+	RootFolders []struct {
+		Path string `json:"path"`
+	} `json:"rootFolders"`
+}
+
+func internalRadarrDestination(apiKey string) radarrDestination {
+	return radarrDestination{Hostname: "radarr", Port: 7878, APIKey: apiKey, UseSSL: false, BaseURL: ""}
+}
+
+func (destination radarrDestination) hasSameEndpoint(other radarrDestination) bool {
+	return destination.Hostname == other.Hostname &&
+		destination.Port == other.Port &&
+		destination.UseSSL == other.UseSSL &&
+		destination.BaseURL == other.BaseURL
 }
 
 func New(baseURL string, httpClient *http.Client) (*Client, error) {
@@ -126,6 +170,94 @@ func (client *Client) VerifyLocalAdministrator(ctx context.Context, credentials 
 	}
 	if current.Permissions&administratorPermission == 0 {
 		return fmt.Errorf("verify Seerr emergency local administrator: user %d lacks administrator permission", current.ID)
+	}
+	return nil
+}
+
+func (client *Client) RequestMovie(ctx context.Context, credentials Credentials, tmdbID int) error {
+	if tmdbID <= 0 {
+		return fmt.Errorf("request movie through Seerr: TMDB identity must be positive")
+	}
+	if _, err := client.authenticateJellyfin(ctx, credentials, false); err != nil {
+		return fmt.Errorf("request movie through Seerr: %w", err)
+	}
+	payload := map[string]any{"mediaType": "movie", "mediaId": tmdbID, "is4k": false}
+	var created struct {
+		ID     int `json:"id"`
+		Status int `json:"status"`
+	}
+	if err := client.doJSON(ctx, http.MethodPost, "/api/v1/request", payload, &created); err != nil {
+		return fmt.Errorf("request movie through Seerr: %w", err)
+	}
+	if created.ID == 0 || created.Status != 2 {
+		return fmt.Errorf("request movie through Seerr: response did not contain an approved request")
+	}
+	return nil
+}
+
+func (client *Client) ReconcileRadarr(ctx context.Context, apiKey, profileName string) error {
+	connection := internalRadarrDestination(apiKey)
+	var tested radarrTestResponse
+	if err := client.doJSON(ctx, http.MethodPost, "/api/v1/settings/radarr/test", connection, &tested); err != nil {
+		return fmt.Errorf("test Seerr Radarr destination: %w", err)
+	}
+	profileID := 0
+	profileMatches := 0
+	for _, profile := range tested.Profiles {
+		if profile.Name != profileName {
+			continue
+		}
+		profileMatches++
+		profileID = profile.ID
+	}
+	if profileMatches == 0 || profileID <= 0 {
+		return fmt.Errorf("reconcile Seerr Radarr destination: Radarr profile %q is missing", profileName)
+	}
+	if profileMatches > 1 {
+		return fmt.Errorf("reconcile Seerr Radarr destination: Radarr returned duplicate %q profiles", profileName)
+	}
+	rootFound := false
+	for _, root := range tested.RootFolders {
+		if root.Path == "/data/media/movies" {
+			rootFound = true
+			break
+		}
+	}
+	if !rootFound {
+		return fmt.Errorf("reconcile Seerr Radarr destination: Movie Library root is missing")
+	}
+	desired := internalRadarrDestination(apiKey)
+	desired.Name = "Radarr"
+	desired.ActiveProfileID, desired.ActiveProfileName, desired.ActiveDirectory = profileID, profileName, "/data/media/movies"
+	desired.Tags, desired.Is4K, desired.IsDefault = []int{}, false, true
+	desired.MinimumAvailability, desired.ExternalURL, desired.SyncEnabled = "released", "", true
+	desired.PreventSearch, desired.TagRequests, desired.OverrideRule = false, false, []int{}
+	var destinations []radarrDestination
+	if err := client.doJSON(ctx, http.MethodGet, "/api/v1/settings/radarr", nil, &destinations); err != nil {
+		return fmt.Errorf("observe Seerr Radarr destination: %w", err)
+	}
+	match := -1
+	for index, destination := range destinations {
+		if destination.hasSameEndpoint(desired) {
+			if match != -1 {
+				return fmt.Errorf("reconcile Seerr Radarr destination: multiple internal Radarr destinations exist")
+			}
+			match = index
+		}
+	}
+	if match == -1 {
+		if err := client.doJSON(ctx, http.MethodPost, "/api/v1/settings/radarr", desired, nil); err != nil {
+			return fmt.Errorf("create Seerr Radarr destination: %w", err)
+		}
+		return nil
+	}
+	desired.ID = destinations[match].ID
+	if reflect.DeepEqual(destinations[match], desired) {
+		return nil
+	}
+	path := fmt.Sprintf("/api/v1/settings/radarr/%d", desired.ID)
+	if err := client.doJSON(ctx, http.MethodPut, path, desired, nil); err != nil {
+		return fmt.Errorf("repair Seerr Radarr destination: %w", err)
 	}
 	return nil
 }

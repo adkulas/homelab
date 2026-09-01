@@ -206,6 +206,9 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if err := waitForSeerrAuthentication(ctx, seerrClient, seerrCredentials, 120*time.Second); err != nil {
 		return ApplyReport{}, err
 	}
+	if err := seerrClient.ReconcileRadarr(ctx, apiKey, moviePolicy.Profile.Name); err != nil {
+		return ApplyReport{}, fmt.Errorf("reconcile Seerr Movie Library requests: %w", err)
+	}
 	if restoreDrillConfirmed {
 		if err := completeRestoreDrillGate(environment.BackupRoot); err != nil {
 			return ApplyReport{}, fmt.Errorf("complete Restore Drill integration gate: %w", err)

@@ -199,71 +199,20 @@ type MovieFile struct {
 	Size int64  `json:"size"`
 }
 
-func (client *Client) AcquireLegalMovie(ctx context.Context, tmdbID int, releaseTitle, indexer string) (int, error) {
+func (client *Client) RequestedMovieID(ctx context.Context, tmdbID int) (int, bool, error) {
 	var movies []struct {
 		ID int `json:"id"`
 	}
 	if err := client.getJSON(ctx, fmt.Sprintf("/api/v3/movie?tmdbId=%d", tmdbID), &movies); err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	movieID := 0
-	if len(movies) > 0 {
-		movieID = movies[0].ID
-	} else {
-		var lookup []map[string]any
-		if err := client.getJSON(ctx, fmt.Sprintf("/api/v3/movie/lookup?term=tmdb:%d", tmdbID), &lookup); err != nil {
-			return 0, err
-		}
-		if len(lookup) == 0 {
-			return 0, fmt.Errorf("Radarr did not find TMDB movie %d", tmdbID)
-		}
-		var profiles []struct {
-			ID int `json:"id"`
-		}
-		if err := client.getJSON(ctx, "/api/v3/qualityprofile", &profiles); err != nil {
-			return 0, err
-		}
-		if len(profiles) == 0 {
-			return 0, fmt.Errorf("Radarr has no quality profile for legal verification")
-		}
-		movie := lookup[0]
-		movie["qualityProfileId"] = profiles[0].ID
-		movie["rootFolderPath"] = movieLibraryRoot
-		movie["monitored"] = true
-		movie["minimumAvailability"] = "released"
-		movie["addOptions"] = map[string]any{"searchForMovie": false}
-		var created struct {
-			ID int `json:"id"`
-		}
-		if err := client.sendJSONResult(ctx, http.MethodPost, "/api/v3/movie", movie, &created); err != nil {
-			return 0, err
-		}
-		movieID = created.ID
+	if len(movies) == 0 {
+		return 0, false, nil
 	}
-	if movieID == 0 {
-		return 0, fmt.Errorf("Radarr did not provide a movie identity for TMDB movie %d", tmdbID)
+	if movies[0].ID == 0 {
+		return 0, false, fmt.Errorf("Radarr did not provide a movie identity for TMDB movie %d", tmdbID)
 	}
-
-	var releases []json.RawMessage
-	if err := client.getJSON(ctx, fmt.Sprintf("/api/v3/release?movieId=%d", movieID), &releases); err != nil {
-		return 0, err
-	}
-	for _, raw := range releases {
-		var release struct {
-			Title   string `json:"title"`
-			Indexer string `json:"indexer"`
-		}
-		if err := json.Unmarshal(raw, &release); err != nil {
-			return 0, fmt.Errorf("decode Radarr release: %w", err)
-		}
-		if release.Title == releaseTitle && release.Indexer == indexer {
-			if err := client.sendJSON(ctx, http.MethodPost, "/api/v3/release", raw); err != nil {
-				return 0, err
-			}
-			return movieID, nil
-		}
-	}
-	return 0, fmt.Errorf("Radarr did not discover release %q from %s", releaseTitle, indexer)
+	return movies[0].ID, true, nil
 }
 
 func (client *Client) ImportedMovieFiles(ctx context.Context, movieID int) ([]MovieFile, error) {
