@@ -10,6 +10,7 @@ import (
 
 	"github.com/adkulas/homelab/internal/config"
 	"github.com/adkulas/homelab/internal/qbittorrent"
+	"github.com/adkulas/homelab/internal/seerr"
 	"github.com/adkulas/homelab/internal/sonarr"
 	"gopkg.in/yaml.v3"
 )
@@ -21,6 +22,7 @@ type legalSeriesFixture struct {
 	Kind       string `yaml:"kind"`
 	Spec       struct {
 		Title         string `yaml:"title"`
+		TMDBID        int    `yaml:"tmdbId"`
 		TVDBID        int    `yaml:"tvdbId"`
 		SeasonNumber  int    `yaml:"seasonNumber"`
 		EpisodeNumber int    `yaml:"episodeNumber"`
@@ -45,8 +47,8 @@ func loadLegalSeriesFixture(path string) (legalSeriesFixture, time.Duration, err
 	if fixture.APIVersion != legalSeriesSchemaVersion || fixture.Kind != "LegalSeriesFixture" {
 		return fixture, 0, fmt.Errorf("unsupported legal series fixture %q %q", fixture.APIVersion, fixture.Kind)
 	}
-	if fixture.Spec.Title == "" || fixture.Spec.TVDBID <= 0 || fixture.Spec.SeasonNumber < 0 || fixture.Spec.EpisodeNumber <= 0 || fixture.Spec.ReleaseTitle == "" || fixture.Spec.Indexer != "Internet Archive" {
-		return fixture, 0, fmt.Errorf("legal series fixture requires title, positive tvdbId, non-negative seasonNumber, positive episodeNumber, releaseTitle, and approved Internet Archive indexer")
+	if fixture.Spec.Title == "" || fixture.Spec.TMDBID <= 0 || fixture.Spec.TVDBID <= 0 || fixture.Spec.SeasonNumber < 0 || fixture.Spec.EpisodeNumber <= 0 || fixture.Spec.ReleaseTitle == "" || fixture.Spec.Indexer != "Internet Archive" {
+		return fixture, 0, fmt.Errorf("legal series fixture requires title, positive tmdbId, positive tvdbId, non-negative seasonNumber, positive episodeNumber, releaseTitle, and approved Internet Archive indexer")
 	}
 	timeout, err := time.ParseDuration(fixture.Spec.Timeout)
 	if err != nil || timeout <= 0 {
@@ -62,6 +64,7 @@ func verifyLegalSeries(ctx context.Context, plan Plan, declared config.MediaStac
 		return
 	}
 	environment := declared.Spec.Environments[request.plan.environment]
+	deadline := time.Now().Add(timeout)
 	secrets, err := decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment)
 	if err != nil {
 		report.add("VERIFY_SERIES_EPISODE_ACQUISITION_FAILED", "legal series episode acquisition", err.Error(), false)
@@ -72,19 +75,46 @@ func verifyLegalSeries(ctx context.Context, plan Plan, declared config.MediaStac
 		report.add("VERIFY_SERIES_EPISODE_ACQUISITION_FAILED", "legal series episode acquisition", err.Error(), false)
 		return
 	}
+	seerrClient, err := seerr.New("http://"+environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Seerr), &http.Client{Timeout: 10 * time.Second})
+	if err != nil {
+		report.add("VERIFY_SERIES_REQUEST_FAILED", "approved Seerr series request", err.Error(), false)
+		return
+	}
+	credentials := seerr.Credentials{Username: secrets.Jellyfin.Username, Password: secrets.Jellyfin.Password}
+	if err := seerrClient.RequestSeries(ctx, credentials, fixture.Spec.TMDBID, fixture.Spec.SeasonNumber); err != nil {
+		report.add("VERIFY_SERIES_REQUEST_FAILED", "approved Seerr series request", err.Error(), false)
+		return
+	}
+	report.add("VERIFY_SERIES_REQUESTED", fmt.Sprintf("approved Seerr series request (%s season %d)", fixture.Spec.Title, fixture.Spec.SeasonNumber), "", true)
 	apiKey, err := waitForServiceAPIKey(ctx, plan, "sonarr", "Sonarr", 120*time.Second)
 	if err != nil {
 		report.add("VERIFY_SERIES_EPISODE_ACQUISITION_FAILED", "legal series episode acquisition", err.Error(), false)
 		return
 	}
 	sonarrClient := sonarr.New("http://"+environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Sonarr), apiKey, &http.Client{Timeout: 10 * time.Second})
+	for {
+		_, found, observeErr := sonarrClient.RequestedSeriesID(ctx, fixture.Spec.TVDBID)
+		if observeErr != nil {
+			report.add("VERIFY_SERIES_EPISODE_ACQUISITION_FAILED", "Seerr-to-Sonarr series request", observeErr.Error(), false)
+			return
+		}
+		if found {
+			break
+		}
+		if time.Now().After(deadline) {
+			report.add("VERIFY_SERIES_EPISODE_ACQUISITION_FAILED", "Seerr-to-Sonarr series request", "Confirm Seerr has a default Sonarr destination and retry the approved request.", false)
+			return
+		}
+		if !waitForMediaPoll(ctx, deadline) {
+			report.add("VERIFY_SERIES_EPISODE_ACQUISITION_FAILED", "Seerr-to-Sonarr series request", ctx.Err().Error(), false)
+			return
+		}
+	}
 	seriesID, _, err := sonarrClient.AcquireLegalEpisode(ctx, fixture.Spec.TVDBID, fixture.Spec.SeasonNumber, fixture.Spec.EpisodeNumber, fixture.Spec.ReleaseTitle, fixture.Spec.Indexer)
 	if err != nil {
 		report.add("VERIFY_SERIES_EPISODE_ACQUISITION_FAILED", "legal series episode acquisition", err.Error(), false)
 		return
 	}
-
-	deadline := time.Now().Add(timeout)
 	var torrent qbittorrent.Torrent
 	var torrentFiles []qbittorrent.TorrentFile
 	for {

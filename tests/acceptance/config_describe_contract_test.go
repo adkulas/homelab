@@ -112,6 +112,41 @@ func TestConfigDescribePublishesACompleteValidatedContract(t *testing.T) {
 		}
 	}
 }
+func TestConfigDescribePublishesSeerrSeriesRequestRouting(t *testing.T) {
+	output, err := configDescribeCommand(t, "--service", "seerr", "--output", "json").CombinedOutput()
+	if err != nil {
+		t.Fatalf("media-stack config describe failed: %v\n%s", err, output)
+	}
+	var document contractOutput
+	if err := json.Unmarshal(output, &document); err != nil {
+		t.Fatalf("decode configuration contract: %v", err)
+	}
+	settings := map[string]contractSetting{}
+	for _, setting := range document.Services[0].Settings {
+		settings[setting.ID] = setting
+	}
+	for _, id := range []string{
+		"sonarrConnection.4k",
+		"sonarrConnection.apiKey",
+		"sonarrConnection.default",
+		"sonarrConnection.directory",
+		"sonarrConnection.endpoint",
+		"sonarrConnection.monitorNewItems",
+		"sonarrConnection.profile",
+		"sonarrConnection.requestTags",
+		"sonarrConnection.scan",
+		"sonarrConnection.search",
+		"sonarrConnection.seasonFolders",
+		"sonarrConnection.seriesType",
+	} {
+		if _, ok := settings[id]; !ok {
+			t.Errorf("Seerr contract is missing %s", id)
+		}
+	}
+	if setting := settings["sonarrConnection.apiKey"]; !setting.Sensitive || setting.Default != nil {
+		t.Errorf("Sonarr API key contract is not sensitive: %#v", setting)
+	}
+}
 
 func TestConfigDescribeFiltersEveryServiceIndependently(t *testing.T) {
 	for _, name := range []string{"gluetun", "jellyfin", "profilarr", "prowlarr", "qbittorrent", "radarr", "seerr", "sonarr"} {

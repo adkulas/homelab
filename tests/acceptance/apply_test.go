@@ -342,6 +342,7 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	seerrLocalPassword := ""
 	seerrMain := map[string]any{"localLogin": false, "mediaServerLogin": false, "newPlexLogin": false, "defaultPermissions": float64(0), "mediaServerType": float64(4)}
 	var seerrRadarr []map[string]any
+	var seerrSonarr []map[string]any
 	seerrWrites := 0
 	seerrAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.Method + " " + request.URL.Path {
@@ -374,6 +375,8 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 			_ = json.NewEncoder(writer).Encode(seerrMain)
 		case "GET /api/v1/settings/radarr":
 			_ = json.NewEncoder(writer).Encode(seerrRadarr)
+		case "GET /api/v1/settings/sonarr":
+			_ = json.NewEncoder(writer).Encode(seerrSonarr)
 		case "POST /api/v1/settings/radarr/test":
 			var body map[string]any
 			_ = json.NewDecoder(request.Body).Decode(&body)
@@ -393,6 +396,27 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 			_ = json.NewDecoder(request.Body).Decode(&body)
 			body["id"] = float64(0)
 			seerrRadarr = append(seerrRadarr, body)
+			writer.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(writer).Encode(body)
+		case "POST /api/v1/settings/sonarr/test":
+			var body map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			if body["hostname"] != "sonarr" || body["port"] != float64(8989) || body["apiKey"] != "fixture-sonarr-api-key" || body["useSsl"] != false {
+				http.Error(writer, "unexpected Sonarr connection", http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"profiles":    []any{map[string]any{"id": 11, "name": "WEB-1080p"}},
+				"rootFolders": []any{map[string]any{"id": 2, "path": "/data/media/series"}},
+				"tags":        []any{},
+				"urlBase":     "",
+			})
+		case "POST /api/v1/settings/sonarr":
+			seerrWrites++
+			var body map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			body["id"] = float64(0)
+			seerrSonarr = append(seerrSonarr, body)
 			writer.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(writer).Encode(body)
 		case "POST /api/v1/user/1/settings/password":
@@ -618,6 +642,14 @@ EOF
 		destination["activeProfileName"] != "HD Bluray + WEB" || destination["activeDirectory"] != "/data/media/movies" || destination["isDefault"] != true ||
 		destination["is4k"] != false || destination["preventSearch"] != false {
 		t.Errorf("Seerr Radarr destination = %v", destination)
+	}
+	if len(seerrSonarr) != 1 {
+		t.Fatalf("apply did not reconcile one Seerr Sonarr destination: %v", seerrSonarr)
+	}
+	if destination := seerrSonarr[0]; destination["hostname"] != "sonarr" || destination["port"] != float64(8989) || destination["activeProfileId"] != float64(11) ||
+		destination["activeProfileName"] != "WEB-1080p" || destination["activeDirectory"] != "/data/media/series" || destination["seriesType"] != "standard" ||
+		destination["isDefault"] != true || destination["is4k"] != false || destination["enableSeasonFolders"] != true || destination["preventSearch"] != false {
+		t.Errorf("Seerr Sonarr destination = %v", destination)
 	}
 	if profilarrObservations != 2 {
 		t.Errorf("apply observed Profilarr connections %d times, want startup retry plus successful verification", profilarrObservations)
