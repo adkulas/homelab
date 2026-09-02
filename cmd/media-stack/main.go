@@ -424,6 +424,9 @@ func runPlan(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return err
 	}
+	if _, err := os.Stdout.Write(engine.FormatPlanActions(engine.ObserveConfiguration(ctx, request, plan))); err != nil {
+		return err
+	}
 	_, err = os.Stdout.Write(plan.Compose())
 	return err
 }
