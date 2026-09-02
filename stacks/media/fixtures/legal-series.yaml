@@ -2,6 +2,7 @@ apiVersion: homelab.media-stack/legal-series/v1alpha1
 kind: LegalSeriesFixture
 spec:
   title: The Lucy Show
+  tmdbId: 2144
   tvdbId: 103354
   seasonNumber: 1
   episodeNumber: 1

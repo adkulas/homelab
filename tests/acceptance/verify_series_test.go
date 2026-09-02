@@ -12,9 +12,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
-func TestPromotionVerifyAcquiresAndHardlinkImportsLegalSeriesEpisode(t *testing.T) {
+func TestPromotionVerifyRequestsAndPlaysLegalSeriesEpisodeThroughSeerr(t *testing.T) {
 	temporary := t.TempDir()
 	dataRoot := filepath.Join(temporary, "data")
 	sourcePath := filepath.Join(dataRoot, "torrents", "series", "The.Lucy.Show.S01E01.mp4")
@@ -26,7 +27,7 @@ func TestPromotionVerifyAcquiresAndHardlinkImportsLegalSeriesEpisode(t *testing.
 	}
 
 	var mutex sync.Mutex
-	seriesAdded, releaseGrabbed, imported := false, false, false
+	seriesAdded, seriesRequested, releaseGrabbed, imported := false, false, false, false
 	api := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		mutex.Lock()
 		defer mutex.Unlock()
@@ -42,24 +43,6 @@ func TestPromotionVerifyAcquiresAndHardlinkImportsLegalSeriesEpisode(t *testing.
 				} else {
 					_, _ = io.WriteString(writer, `[]`)
 				}
-			case "GET /api/v3/series/lookup":
-				if request.URL.Query().Get("term") != "tvdb:103354" {
-					http.Error(writer, "unexpected lookup", http.StatusBadRequest)
-					return
-				}
-				_, _ = io.WriteString(writer, `[{"title":"The Lucy Show","tvdbId":103354,"seasons":[{"seasonNumber":1}]}]`)
-			case "GET /api/v3/qualityprofile":
-				_, _ = io.WriteString(writer, `[{"id":7,"name":"Fixture 1080p"}]`)
-			case "POST /api/v3/series":
-				var series map[string]any
-				_ = json.NewDecoder(request.Body).Decode(&series)
-				if series["tvdbId"] != float64(103354) || series["rootFolderPath"] != "/data/media/series" || series["qualityProfileId"] != float64(7) {
-					http.Error(writer, "unexpected series declaration", http.StatusBadRequest)
-					return
-				}
-				seriesAdded = true
-				series["id"] = 42
-				_ = json.NewEncoder(writer).Encode(series)
 			case "GET /api/v3/episode":
 				_, _ = io.WriteString(writer, `[{"id":84,"seriesId":42,"seasonNumber":1,"episodeNumber":1}]`)
 			case "GET /api/v3/release":
@@ -115,6 +98,45 @@ func TestPromotionVerifyAcquiresAndHardlinkImportsLegalSeriesEpisode(t *testing.
 		}
 	}))
 	defer api.Close()
+	seerrAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		mutex.Lock()
+		defer mutex.Unlock()
+		switch request.Method + " " + request.URL.Path {
+		case "POST /api/v1/auth/jellyfin":
+			var body map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			if body["username"] != "household" || body["password"] != "fixture-jellyfin-password" {
+				http.Error(writer, "unexpected household authentication", http.StatusUnauthorized)
+				return
+			}
+			http.SetCookie(writer, &http.Cookie{Name: "connect.sid", Value: "request-session", Path: "/"})
+			_ = json.NewEncoder(writer).Encode(map[string]any{"id": 1, "email": "household", "permissions": 2})
+		case "POST /api/v1/request":
+			if cookie, err := request.Cookie("connect.sid"); err != nil || cookie.Value != "request-session" {
+				http.Error(writer, "missing household session", http.StatusUnauthorized)
+				return
+			}
+			var body map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			seasons, _ := body["seasons"].([]any)
+			if body["mediaType"] != "tv" || body["mediaId"] != float64(2144) || body["is4k"] != false || len(seasons) != 1 || seasons[0] != float64(1) {
+				http.Error(writer, "unexpected series request", http.StatusBadRequest)
+				return
+			}
+			seriesRequested = true
+			go func() {
+				time.Sleep(100 * time.Millisecond)
+				mutex.Lock()
+				defer mutex.Unlock()
+				seriesAdded = true
+			}()
+			writer.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(writer).Encode(map[string]any{"id": 10, "status": 2, "type": "tv"})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer seerrAPI.Close()
 	jellyfinAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		mutex.Lock()
 		defer mutex.Unlock()
@@ -138,6 +160,10 @@ func TestPromotionVerifyAcquiresAndHardlinkImportsLegalSeriesEpisode(t *testing.
 		}
 	}))
 	defer jellyfinAPI.Close()
+	seerrURL, err := url.Parse(seerrAPI.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
 	jellyfinURL, err := url.Parse(jellyfinAPI.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -153,6 +179,7 @@ func TestPromotionVerifyAcquiresAndHardlinkImportsLegalSeriesEpisode(t *testing.
 	declared = strings.Replace(declared, "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "sonarr: 18989", "sonarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "jellyfin: 18096", "jellyfin: "+jellyfinURL.Port(), 1)
+	declared = strings.Replace(declared, "seerr: 15055", "seerr: "+seerrURL.Port(), 1)
 	writeFile(t, configPath, []byte(declared), 0o600)
 	if err := os.Mkdir(filepath.Join(temporary, "secrets"), 0o700); err != nil {
 		t.Fatal(err)
@@ -163,6 +190,7 @@ func TestPromotionVerifyAcquiresAndHardlinkImportsLegalSeriesEpisode(t *testing.
 kind: LegalSeriesFixture
 spec:
   title: The Lucy Show
+  tmdbId: 2144
   tvdbId: 103354
   seasonNumber: 1
   episodeNumber: 1
@@ -224,10 +252,13 @@ esac
 	for _, diagnostic := range report.Diagnostics {
 		passed[diagnostic.Code] = diagnostic.Status == "pass"
 	}
-	for _, code := range []string{"VERIFY_SERIES_EPISODE_ACQUIRED", "VERIFY_SERIES_EPISODE_HARDLINKED", "VERIFY_SERIES_EPISODE_PLAYBACK_READY"} {
+	for _, code := range []string{"VERIFY_SERIES_REQUESTED", "VERIFY_SERIES_EPISODE_ACQUIRED", "VERIFY_SERIES_EPISODE_HARDLINKED", "VERIFY_SERIES_EPISODE_PLAYBACK_READY"} {
 		if !passed[code] {
 			t.Errorf("promotion verification did not report %s: %s", code, output)
 		}
+	}
+	if !seriesRequested {
+		t.Fatal("promotion verification bypassed the approved Seerr series request")
 	}
 	sourceInfo, err := os.Stat(sourcePath)
 	if err != nil {

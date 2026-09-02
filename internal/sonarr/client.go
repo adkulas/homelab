@@ -198,17 +198,28 @@ type EpisodeFile struct {
 	Size int64  `json:"size"`
 }
 
-func (client *Client) AcquireLegalEpisode(ctx context.Context, tvdbID, seasonNumber, episodeNumber int, releaseTitle, indexer string) (int, int, error) {
+func (client *Client) RequestedSeriesID(ctx context.Context, tvdbID int) (int, bool, error) {
 	var seriesItems []struct {
 		ID int `json:"id"`
 	}
 	if err := client.getJSON(ctx, fmt.Sprintf("/api/v3/series?tvdbId=%d", tvdbID), &seriesItems); err != nil {
+		return 0, false, err
+	}
+	if len(seriesItems) == 0 {
+		return 0, false, nil
+	}
+	if seriesItems[0].ID <= 0 {
+		return 0, false, fmt.Errorf("Sonarr did not provide a series identity for TVDB series %d", tvdbID)
+	}
+	return seriesItems[0].ID, true, nil
+}
+
+func (client *Client) AcquireLegalEpisode(ctx context.Context, tvdbID, seasonNumber, episodeNumber int, releaseTitle, indexer string) (int, int, error) {
+	seriesID, found, err := client.RequestedSeriesID(ctx, tvdbID)
+	if err != nil {
 		return 0, 0, err
 	}
-	seriesID := 0
-	if len(seriesItems) > 0 {
-		seriesID = seriesItems[0].ID
-	} else {
+	if !found {
 		var lookup []map[string]any
 		if err := client.getJSON(ctx, fmt.Sprintf("/api/v3/series/lookup?term=tvdb:%d", tvdbID), &lookup); err != nil {
 			return 0, 0, err
