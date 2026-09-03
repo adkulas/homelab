@@ -1,0 +1,5 @@
+# Model Sites with Host-assigned Stack Instances
+
+The repository will keep reusable, independently deployable Stacks under `stacks/` and describe each real installation through a separate Site Inventory under `sites/`. A Site contains one or more Hosts and Stack Instances; each Stack Instance is initially assigned to exactly one Host and owns the Site- and Host-dependent inputs needed to instantiate its Stack, while Hosts describe identity and capabilities rather than copying Stack configuration. This separates reusable opinionated behavior from installation placement, permits Home and Parents to adopt different subsets of the same Stacks, and avoids both one repository-wide Compose project and divergent per-Host copies of service topology.
+
+Production and Staging remain Environments inside a Stack Instance rather than becoming Sites. Low-impact Site Inventory remains cleartext; precise personal topology may live in a small Site-specific SOPS document, while credentials remain in SOPS documents owned by the Stack that consumes them. Runtime state remains outside Git and is recovered through each Stack's backup and restore contract.
