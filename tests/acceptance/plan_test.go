@@ -1,10 +1,12 @@
 package acceptance_test
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -63,4 +65,61 @@ func repositoryRoot(t *testing.T) string {
 		t.Fatal("locate acceptance test source")
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(filename), "..", ".."))
+}
+func TestPlanReportsDeclaredTopologyDriftAndRetainsUnknownProjectResources(t *testing.T) {
+	temporary := t.TempDir()
+	binDirectory := filepath.Join(temporary, "bin")
+	if err := os.Mkdir(binDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dockerLog := filepath.Join(temporary, "docker.log")
+	writeFile(t, filepath.Join(binDirectory, "docker"), []byte(`#!/bin/sh
+printf '%s\n' "$*" >> "$PLAN_DOCKER_LOG"
+case "$*" in
+  "compose -f - config --hash *")
+    cat >/dev/null
+    printf '%s\n' 'qbittorrent declared-qbittorrent-hash'
+    ;;
+  "ps --all --filter label=com.docker.compose.project=media-staging --format {{json .}}")
+    printf '%s\n' '{"Labels":"com.docker.compose.project=media-staging,com.docker.compose.service=qbittorrent,com.docker.compose.config-hash=drifted","Names":"media-staging-qbittorrent-1","State":"running"}'
+    printf '%s\n' '{"Image":"alpine:3.22","Labels":"com.docker.compose.project=media-staging,com.docker.compose.service=debug-shell","Names":"media-staging-debug-shell-1","State":"running"}'
+    ;;
+  "network ls --filter label=com.docker.compose.project=media-staging --format {{json .}}")
+    printf '%s\n' '{"Labels":"com.docker.compose.project=media-staging,com.docker.compose.network=debug","Name":"media-staging_debug"}'
+    ;;
+  "volume ls --filter label=com.docker.compose.project=media-staging --format {{json .}}")
+    printf '%s\n' '{"Labels":"com.docker.compose.project=media-staging,com.docker.compose.volume=scratch","Name":"media-staging_scratch"}'
+    ;;
+  *) exit 99 ;;
+esac
+`), 0o700)
+
+	command := planCommand(t, "--environment", "staging")
+	command.Env = append(os.Environ(),
+		"PATH="+binDirectory+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"PLAN_DOCKER_LOG="+dockerLog,
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("media-stack plan failed: %v\n%s", err, output)
+	}
+
+	for _, want := range []string{
+		"# create gluetun: declared service is absent",
+		"# update qbittorrent: rendered configuration differs from Declared Configuration",
+		"# unknown service/debug-shell: project resource is outside the Service Configuration Contract; retained",
+		"# unknown network/debug: project resource is outside the Service Configuration Contract; retained",
+		"# unknown volume/scratch: project resource is outside the Service Configuration Contract; retained",
+	} {
+		if !strings.Contains(string(output), want) {
+			t.Errorf("plan output does not contain %q:\n%s", want, output)
+		}
+	}
+	wantDocker := "compose -f - config --hash *\n" +
+		"ps --all --filter label=com.docker.compose.project=media-staging --format {{json .}}\n" +
+		"network ls --filter label=com.docker.compose.project=media-staging --format {{json .}}\n" +
+		"volume ls --filter label=com.docker.compose.project=media-staging --format {{json .}}"
+	if got := strings.TrimSpace(string(readFile(t, dockerLog))); got != wantDocker {
+		t.Errorf("plan Docker calls = %q, want one read-only project observation", got)
+	}
 }

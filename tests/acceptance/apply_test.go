@@ -486,8 +486,52 @@ EOF
 	dockerLog := filepath.Join(temporary, "docker-arguments")
 	composeCapture := filepath.Join(temporary, "compose.yaml")
 	healthCount := filepath.Join(temporary, "health-count")
+	topologyReady := filepath.Join(temporary, "topology-ready")
 	writeFile(t, filepath.Join(binDirectory, "docker"), []byte(`#!/bin/sh
 	printf '%s\n' "$*" >> "$APPLY_DOCKER_LOG"
+	case "$*" in
+	  "compose -f - config --hash *")
+	    cat >/dev/null
+	    printf '%s\n' \
+	      'gluetun hash-gluetun' \
+	      'jellyfin hash-jellyfin' \
+	      'profilarr hash-profilarr' \
+	      'prowlarr hash-prowlarr' \
+	      'qbittorrent hash-qbittorrent' \
+	      'radarr hash-radarr' \
+	      'seerr hash-seerr' \
+	      'sonarr hash-sonarr'
+	    exit 0 ;;
+	  "ps --all --filter label=com.docker.compose.project=media-staging --format {{json .}}")
+	    printf '%s\n' '{"Labels":"com.docker.compose.project=media-staging,com.docker.compose.service=debug-shell","Names":"media-staging-debug-shell-1","State":"running"}'
+	    [ -f "$APPLY_TOPOLOGY_READY" ] || exit 0
+	    printf '%s\n' \
+	      '{"Labels":"com.docker.compose.service=gluetun,com.docker.compose.config-hash=hash-gluetun","State":"running"}' \
+	      '{"Labels":"com.docker.compose.service=jellyfin,com.docker.compose.config-hash=hash-jellyfin","State":"running"}' \
+	      '{"Labels":"com.docker.compose.service=profilarr,com.docker.compose.config-hash=hash-profilarr","State":"running"}' \
+	      '{"Labels":"com.docker.compose.service=prowlarr,com.docker.compose.config-hash=hash-prowlarr","State":"running"}' \
+	      '{"Labels":"com.docker.compose.service=qbittorrent,com.docker.compose.config-hash=hash-qbittorrent","State":"running"}' \
+	      '{"Labels":"com.docker.compose.service=radarr,com.docker.compose.config-hash=hash-radarr","State":"running"}' \
+	      '{"Labels":"com.docker.compose.service=seerr,com.docker.compose.config-hash=hash-seerr","State":"running"}' \
+	      '{"Labels":"com.docker.compose.service=sonarr,com.docker.compose.config-hash=hash-sonarr","State":"running"}'
+	    exit 0 ;;
+	  "network ls --filter label=com.docker.compose.project=media-staging --format {{json .}}")
+	    printf '%s\n' '{"Labels":"com.docker.compose.project=media-staging,com.docker.compose.network=debug","Name":"media-staging_debug"}'
+	    [ -f "$APPLY_TOPOLOGY_READY" ] && printf '%s\n' '{"Labels":"com.docker.compose.project=media-staging,com.docker.compose.network=application","Name":"media-staging_application"}'
+	    exit 0 ;;
+	  "volume ls --filter label=com.docker.compose.project=media-staging --format {{json .}}")
+	    printf '%s\n' '{"Labels":"com.docker.compose.project=media-staging,com.docker.compose.volume=scratch","Name":"media-staging_scratch"}'
+	    [ -f "$APPLY_TOPOLOGY_READY" ] && printf '%s\n' \
+	      '{"Labels":"com.docker.compose.volume=gluetun-config","Name":"media-staging_gluetun-config"}' \
+	      '{"Labels":"com.docker.compose.volume=jellyfin-config","Name":"media-staging_jellyfin-config"}' \
+	      '{"Labels":"com.docker.compose.volume=profilarr-config","Name":"media-staging_profilarr-config"}' \
+	      '{"Labels":"com.docker.compose.volume=prowlarr-config","Name":"media-staging_prowlarr-config"}' \
+	      '{"Labels":"com.docker.compose.volume=qbittorrent-config","Name":"media-staging_qbittorrent-config"}' \
+	      '{"Labels":"com.docker.compose.volume=radarr-config","Name":"media-staging_radarr-config"}' \
+	      '{"Labels":"com.docker.compose.volume=seerr-config","Name":"media-staging_seerr-config"}' \
+	      '{"Labels":"com.docker.compose.volume=sonarr-config","Name":"media-staging_sonarr-config"}'
+	    exit 0 ;;
+	esac
 	cat > "$APPLY_COMPOSE_CAPTURE"
 	case "$*" in
 	  "compose -f - up -d gluetun") exit 0 ;;
@@ -504,7 +548,7 @@ EOF
 	  "compose -f - exec -T prowlarr cat /config/config.xml") printf '<Config><ApiKey>fixture-prowlarr-api-key</ApiKey></Config>\n'; exit 0 ;;
 	  "compose -f - up -d profilarr") exit 0 ;;
 	  "compose -f - up -d jellyfin") exit 0 ;;
-	  "compose -f - up -d seerr") exit 0 ;;
+	  "compose -f - up -d seerr") touch "$APPLY_TOPOLOGY_READY"; exit 0 ;;
 	  "compose -f - ps --format json gluetun")
 	    count=0
 	    [ -f "$APPLY_HEALTH_COUNT" ] && count=$(cat "$APPLY_HEALTH_COUNT")
@@ -524,7 +568,27 @@ EOF
 		"APPLY_DOCKER_LOG="+dockerLog,
 		"APPLY_COMPOSE_CAPTURE="+composeCapture,
 		"APPLY_HEALTH_COUNT="+healthCount,
+		"APPLY_TOPOLOGY_READY="+topologyReady,
 	)
+	initialPlan := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)
+	initialPlan.Dir = command.Dir
+	initialPlan.Env = command.Env
+	initialPlanOutput, err := initialPlan.CombinedOutput()
+	if err != nil {
+		t.Fatalf("initial media-stack plan failed: %v\n%s", err, initialPlanOutput)
+	}
+	for _, want := range []string{
+		"# create gluetun: declared service is absent",
+		"# unknown service/debug-shell: project resource is outside the Service Configuration Contract; retained",
+		"# unknown network/debug: project resource is outside the Service Configuration Contract; retained",
+		"# unknown volume/scratch: project resource is outside the Service Configuration Contract; retained",
+	} {
+		if !strings.Contains(string(initialPlanOutput), want) {
+			t.Errorf("initial plan output does not contain %q:\n%s", want, initialPlanOutput)
+		}
+	}
+	writeFile(t, dockerLog, nil, 0o600)
+
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("media-stack apply failed: %v\n%s", err, output)
@@ -665,6 +729,21 @@ EOF
 		}
 	}
 	seerrWritesAfterFirstRun := seerrWrites
+	preferences["save_path"] = "/data/torrents/drifted"
+	driftPlan := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)
+	driftPlan.Dir = command.Dir
+	driftPlan.Env = command.Env
+	driftPlanOutput, err := driftPlan.CombinedOutput()
+	if err != nil {
+		t.Fatalf("media-stack drift plan failed: %v\n%s", err, driftPlanOutput)
+	}
+	if !strings.Contains(string(driftPlanOutput), "# update qbittorrent: application settings differ from Declared Configuration") {
+		t.Errorf("plan did not report qBittorrent application drift:\n%s", driftPlanOutput)
+	}
+	if preferences["save_path"] != "/data/torrents/drifted" {
+		t.Errorf("plan mutated qBittorrent preferences: %v", preferences)
+	}
+
 	secondCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
 	secondCommand.Dir = command.Dir
 	secondCommand.Env = command.Env
@@ -677,6 +756,22 @@ EOF
 	}
 	if seerrWrites != seerrWritesAfterFirstRun {
 		t.Errorf("repeated apply made %d Seerr policy writes, want none", seerrWrites-seerrWritesAfterFirstRun)
+	}
+
+	convergedPlan := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)
+	convergedPlan.Dir = command.Dir
+	convergedPlan.Env = command.Env
+	planOutput, err := convergedPlan.CombinedOutput()
+	if err != nil {
+		t.Fatalf("media-stack plan after apply failed: %v\n%s", err, planOutput)
+	}
+	if !strings.Contains(string(planOutput), "# plan: no changes") {
+		t.Errorf("plan after apply is not empty:\n%s", planOutput)
+	}
+	for _, unexpected := range []string{"# create ", "# update ", "# restart "} {
+		if strings.Contains(string(planOutput), unexpected) {
+			t.Errorf("plan after apply contains %q:\n%s", unexpected, planOutput)
+		}
 	}
 
 	originalMovieMinimum := movieQualityDefinitions[1]["minSize"]
