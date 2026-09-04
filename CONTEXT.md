@@ -1,8 +1,33 @@
-# Home Media Stack
+# Homelab
 
-This context describes the household media libraries and the system that manages them.
+This context describes independently administered Sites, their Hosts and reusable Stacks, including the Media Stack that
+manages the household media libraries.
 
 ## Language
+
+**Site**:
+An independent administrative boundary whose inventory explicitly selects its Hosts and Stack Instances.
+_Avoid_: Location, installation, Environment
+
+**Site Inventory**:
+The versioned declaration of one Site's Hosts, Stack Instances, placement, capabilities, and Site-owned inputs.
+_Avoid_: Host config, global configuration
+
+**Host**:
+A machine within a Site that has a stable identity and a controlled set of declared capabilities.
+_Avoid_: Node, server
+
+**Stack**:
+An independently deployable, reusable service bundle whose policy is shared across Sites.
+_Avoid_: App, Site, Compose project
+
+**Stack Instance**:
+A Site-owned use of one Stack, assigned to exactly one Host with its own placement-dependent inputs and runtime identity.
+_Avoid_: Deployment, Host stack
+
+**Environment**:
+An operational isolation boundary within a Stack Instance; Production and Staging are Media Stack Environments.
+_Avoid_: Site, Host
 
 **Movie Library**:
 The household's managed collection of movies.

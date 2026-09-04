@@ -1,0 +1,9 @@
+apiVersion: homelab.site/v1alpha1
+kind: Host
+metadata:
+    name: media
+spec:
+    capabilities:
+        - containers.compose
+        - network.tun
+        - network.net-admin

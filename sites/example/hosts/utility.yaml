@@ -1,0 +1,7 @@
+apiVersion: homelab.site/v1alpha1
+kind: Host
+metadata:
+    name: utility
+spec:
+    capabilities:
+        - containers.compose

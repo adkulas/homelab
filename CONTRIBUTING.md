@@ -7,6 +7,7 @@ Build the Go CLI from source and run it directly from the repo root:
 
 ```bash
 CGO_ENABLED=0 go build -o bin/media-stack ./cmd/media-stack
+CGO_ENABLED=0 go build -o bin/homelab ./cmd/homelab
 ./bin/media-stack init --environment staging
 ```
 
@@ -24,6 +25,13 @@ disposable storage probes, and a binary linked against the host's C library may 
 3. Run `./bin/media-stack init --environment staging` and complete the prompts.
 4. Follow with `./bin/media-stack doctor --environment staging` and `./bin/media-stack plan --environment staging`.
 5. Run the full test suite with `./bin/media-stack test` or `go test ./...` before opening a pull request.
+
+For repository-wide read-only inventory work, validate and plan through the compiled `homelab` CLI:
+
+```bash
+./bin/homelab site validate --site example
+./bin/homelab plan --site example --instance media --environment staging
+```
 
 ## Notes
 

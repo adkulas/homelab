@@ -22,6 +22,15 @@ type PlanRequest struct {
 	environment  string
 	configPath   string
 	versionsPath string
+	declared     *config.MediaStack
+}
+
+func NewResolvedPlanRequest(repositoryRoot, environment string, declared config.MediaStack) PlanRequest {
+	return PlanRequest{
+		environment:  environment,
+		versionsPath: filepath.Join(repositoryRoot, filepath.FromSlash(checkedVersionsPath)),
+		declared:     &declared,
+	}
 }
 
 type Plan struct {
@@ -66,9 +75,15 @@ func (localEngine) Plan(ctx context.Context, request PlanRequest) (Plan, error) 
 	if err := ctx.Err(); err != nil {
 		return Plan{}, err
 	}
-	declared, err := config.Load(request.configPath)
-	if err != nil {
-		return Plan{}, err
+	var declared config.MediaStack
+	if request.declared == nil {
+		loaded, err := config.Load(request.configPath)
+		if err != nil {
+			return Plan{}, err
+		}
+		declared = loaded
+	} else {
+		declared = *request.declared
 	}
 	if err := declared.ValidateEnvironment(request.environment); err != nil {
 		return Plan{}, err
