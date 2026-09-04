@@ -1,0 +1,10 @@
+apiVersion: homelab.site/v1alpha1
+kind: Site
+metadata:
+    name: example
+spec:
+    hosts:
+        - hosts/media.yaml
+        - hosts/utility.yaml
+    stackInstances:
+        - instances/media.yaml
