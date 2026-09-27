@@ -230,7 +230,7 @@ func FormatPlanActions(actions []PlanAction) []byte {
 	hasChanges := false
 	hasDeferred := false
 	for _, action := range actions {
-		fmt.Fprintf(&output, "# %s %s: %s\n", action.Kind, action.Subject, action.Explanation)
+		fmt.Fprintf(&output, "# %s %s: %s\n", action.Kind, planComment(action.Subject), planComment(action.Explanation))
 		switch action.Kind {
 		case planActionCreate, planActionGuide, planActionRestart, planActionUpdate:
 			hasChanges = true
@@ -242,4 +242,8 @@ func FormatPlanActions(actions []PlanAction) []byte {
 		output.WriteString("# plan: no changes\n")
 	}
 	return []byte(output.String())
+}
+
+func planComment(value string) string {
+	return strings.NewReplacer("\r", "\\r", "\n", "\\n").Replace(value)
 }

@@ -18,6 +18,7 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
 	preferences := map[string]any{}
+	preferenceFailure := false
 	categories := map[string]map[string]string{}
 	var rootFolders []map[string]any
 	var downloadClients []map[string]any
@@ -169,9 +170,15 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 			writer.WriteHeader(http.StatusCreated)
 		case "GET /api/v3/downloadclient":
 			_ = json.NewEncoder(writer).Encode(seriesDownloadClients)
+		case "PUT /api/v3/downloadclient/1":
+			var updated map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&updated)
+			seriesDownloadClients[0] = updated
+			writer.WriteHeader(http.StatusOK)
 		case "POST /api/v3/downloadclient":
 			var client map[string]any
 			_ = json.NewDecoder(request.Body).Decode(&client)
+			client["id"] = float64(len(seriesDownloadClients) + 1)
 			seriesDownloadClients = append(seriesDownloadClients, client)
 			writer.WriteHeader(http.StatusCreated)
 		default:
@@ -203,16 +210,28 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 				_ = json.NewEncoder(writer).Encode(map[string]string{"appName": "Prowlarr"})
 			case "GET /api/v1/indexer":
 				_ = json.NewEncoder(writer).Encode(indexers)
+			case "PUT /api/v1/indexer/1":
+				var updated map[string]any
+				_ = json.NewDecoder(request.Body).Decode(&updated)
+				indexers[0] = updated
+				writer.WriteHeader(http.StatusOK)
 			case "POST /api/v1/indexer":
 				var indexer map[string]any
 				_ = json.NewDecoder(request.Body).Decode(&indexer)
+				indexer["id"] = float64(len(indexers) + 1)
 				indexers = append(indexers, indexer)
 				writer.WriteHeader(http.StatusCreated)
 			case "GET /api/v1/applications":
 				_ = json.NewEncoder(writer).Encode(applications)
+			case "PUT /api/v1/applications/1":
+				var updated map[string]any
+				_ = json.NewDecoder(request.Body).Decode(&updated)
+				applications[0] = updated
+				writer.WriteHeader(http.StatusOK)
 			case "POST /api/v1/applications":
 				var application map[string]any
 				_ = json.NewDecoder(request.Body).Decode(&application)
+				application["id"] = float64(len(applications) + 1)
 				applications = append(applications, application)
 				writer.WriteHeader(http.StatusCreated)
 			default:
@@ -237,9 +256,15 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 				writer.WriteHeader(http.StatusCreated)
 			case "GET /api/v3/downloadclient":
 				_ = json.NewEncoder(writer).Encode(downloadClients)
+			case "PUT /api/v3/downloadclient/1":
+				var updated map[string]any
+				_ = json.NewDecoder(request.Body).Decode(&updated)
+				downloadClients[0] = updated
+				writer.WriteHeader(http.StatusOK)
 			case "POST /api/v3/downloadclient":
 				var client map[string]any
 				_ = json.NewDecoder(request.Body).Decode(&client)
+				client["id"] = float64(len(downloadClients) + 1)
 				downloadClients = append(downloadClients, client)
 				writer.WriteHeader(http.StatusCreated)
 			case "GET /api/v3/qualityprofile":
@@ -286,6 +311,10 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 		case "/api/v2/app/version":
 			_, _ = writer.Write([]byte("v5.1.2"))
 		case "/api/v2/app/preferences":
+			if preferenceFailure {
+				http.Error(writer, "upstream echoed fixture-qbittorrent-password\nservices: injected", http.StatusInternalServerError)
+				return
+			}
 			_ = json.NewEncoder(writer).Encode(preferences)
 		case "/api/v2/app/setPreferences":
 			body, _ := io.ReadAll(request.Body)
@@ -328,6 +357,29 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 			collectionType := request.URL.Query().Get("collectionType")
 			path := request.URL.Query().Get("paths")
 			jellyfinLibraries = append(jellyfinLibraries, map[string]any{"Name": name, "CollectionType": collectionType, "Locations": []string{path}})
+			writer.WriteHeader(http.StatusNoContent)
+		case "POST /Library/VirtualFolders/Paths":
+			var body map[string]string
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			for _, library := range jellyfinLibraries {
+				if library["Name"] == body["Name"] {
+					library["Locations"] = append(library["Locations"].([]string), body["Path"])
+				}
+			}
+			writer.WriteHeader(http.StatusNoContent)
+		case "DELETE /Library/VirtualFolders/Paths":
+			for _, library := range jellyfinLibraries {
+				if library["Name"] != request.URL.Query().Get("name") {
+					continue
+				}
+				var paths []string
+				for _, path := range library["Locations"].([]string) {
+					if path != request.URL.Query().Get("path") {
+						paths = append(paths, path)
+					}
+				}
+				library["Locations"] = paths
+			}
 			writer.WriteHeader(http.StatusNoContent)
 		case "POST /Users/jellyfin-user/Policy":
 			jellyfinPolicyWrites++
@@ -730,6 +782,11 @@ EOF
 	}
 	seerrWritesAfterFirstRun := seerrWrites
 	preferences["save_path"] = "/data/torrents/drifted"
+	jellyfinLibraries[0]["Locations"] = []string{"/data/media/wrong"}
+	downloadClients[0]["enable"] = false
+	seriesDownloadClients[0]["enable"] = false
+	indexers[0]["enable"] = false
+	applications[0]["syncLevel"] = "disabled"
 	driftPlan := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)
 	driftPlan.Dir = command.Dir
 	driftPlan.Env = command.Env
@@ -739,6 +796,11 @@ EOF
 	}
 	if !strings.Contains(string(driftPlanOutput), "# update qbittorrent: application settings differ from Declared Configuration") {
 		t.Errorf("plan did not report qBittorrent application drift:\n%s", driftPlanOutput)
+	}
+	for _, service := range []string{"radarr", "sonarr", "prowlarr", "jellyfin"} {
+		if !strings.Contains(string(driftPlanOutput), "# update "+service+":") {
+			t.Errorf("plan did not report %s drift:\n%s", service, driftPlanOutput)
+		}
 	}
 	if preferences["save_path"] != "/data/torrents/drifted" {
 		t.Errorf("plan mutated qBittorrent preferences: %v", preferences)
@@ -773,6 +835,82 @@ EOF
 			t.Errorf("plan after apply contains %q:\n%s", unexpected, planOutput)
 		}
 	}
+
+	seerrRadarr = append(seerrRadarr, map[string]any{"id": 99, "name": "Personal", "hostname": "other", "port": 7878})
+	seerrSonarr = append(seerrSonarr, map[string]any{"id": 99, "name": "Personal", "hostname": "other", "port": 8989})
+	// Unknown application configuration is reported and retained, even after apply.
+	categories["personal"] = map[string]string{"name": "personal", "savePath": "personal"}
+	downloadClients = append(downloadClients, map[string]any{"id": 99, "name": "Personal", "implementation": "Other"})
+	seriesDownloadClients = append(seriesDownloadClients, map[string]any{"id": 99, "name": "Personal", "implementation": "Other"})
+	indexers = append(indexers, map[string]any{"id": 99, "name": "Personal", "definitionName": "other"})
+	applications = append(applications, map[string]any{"id": 99, "name": "Personal", "implementation": "Other"})
+	jellyfinLibraries = append(jellyfinLibraries, map[string]any{"Name": "Personal", "Locations": []string{"/data/personal"}})
+	unknownPlan := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)
+	unknownPlan.Dir, unknownPlan.Env = command.Dir, command.Env
+	unknownOutput, err := unknownPlan.CombinedOutput()
+	if err != nil {
+		t.Fatalf("unknown resource plan: %v\n%s", err, unknownOutput)
+	}
+	for _, subject := range []string{"qbittorrent/category/personal", "radarr/downloadclient/99", "sonarr/downloadclient/99", "prowlarr/indexer/99", "prowlarr/application/99", "jellyfin/library/Personal", "seerr/radarr/99", "seerr/sonarr/99"} {
+		if !strings.Contains(string(unknownOutput), "# unknown "+subject+":") {
+			t.Errorf("missing unknown resource %s:\n%s", subject, unknownOutput)
+		}
+	}
+	if !strings.Contains(string(unknownOutput), "# plan: no changes") {
+		t.Errorf("unknown resources should be retained without changes:\n%s", unknownOutput)
+	}
+	retainCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
+	retainCommand.Dir, retainCommand.Env = command.Dir, command.Env
+	if output, err := retainCommand.CombinedOutput(); err != nil {
+		t.Fatalf("apply with unknown resources: %v\n%s", err, output)
+	}
+	if len(seerrRadarr) != 2 || len(seerrSonarr) != 2 || len(downloadClients) != 2 || len(seriesDownloadClients) != 2 || len(indexers) != 2 || len(applications) != 3 || len(jellyfinLibraries) != 3 || categories["personal"]["savePath"] != "personal" {
+		t.Fatal("apply changed unknown application resources")
+	}
+
+	seerrInitialized = false
+	seerrMain["mediaServerType"] = float64(4)
+	bootstrapPlan := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)
+	bootstrapPlan.Dir, bootstrapPlan.Env = command.Dir, command.Env
+	bootstrapOutput, err := bootstrapPlan.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bootstrap plan: %v\n%s", err, bootstrapOutput)
+	}
+	if seerrMain["mediaServerType"] != float64(4) || seerrInitialized {
+		t.Error("plan bootstrapped Seerr instead of reporting drift")
+	}
+	if !strings.Contains(string(bootstrapOutput), "# update seerr:") {
+		t.Errorf("missing Seerr bootstrap drift:\n%s", bootstrapOutput)
+	}
+	seerrInitialized = true
+	seerrMain["mediaServerType"] = float64(2)
+
+	jellyfinLibraries[0]["CollectionType"] = "music"
+	typePlan := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)
+	typePlan.Dir, typePlan.Env = command.Dir, command.Env
+	typeOutput, err := typePlan.CombinedOutput()
+	if err != nil {
+		t.Fatalf("library type plan: %v\n%s", err, typeOutput)
+	}
+	if !strings.Contains(string(typeOutput), "# guide jellyfin:") || jellyfinLibraries[0]["CollectionType"] != "music" {
+		t.Errorf("collection-type replacement must be guided and retain state:\n%s", typeOutput)
+	}
+	jellyfinLibraries[0]["CollectionType"] = "movies"
+
+	preferenceFailure = true
+	failedPlan := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)
+	failedPlan.Dir, failedPlan.Env = command.Dir, command.Env
+	failedOutput, err := failedPlan.CombinedOutput()
+	if err != nil {
+		t.Fatalf("unavailable observation plan: %v\n%s", err, failedOutput)
+	}
+	if !strings.Contains(string(failedOutput), "# deferred qbittorrent:") {
+		t.Errorf("missing failed observation diagnostic:\n%s", failedOutput)
+	}
+	if strings.Contains(string(failedOutput), "fixture-qbittorrent-password") || strings.Contains(string(failedOutput), "services: injected") {
+		t.Error("plan exposed an upstream response body")
+	}
+	preferenceFailure = false
 
 	originalMovieMinimum := movieQualityDefinitions[1]["minSize"]
 	movieQualityDefinitions[1]["minSize"] = 11.5

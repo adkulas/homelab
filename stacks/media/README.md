@@ -207,7 +207,21 @@ Dashboard, open **Playback > Transcoding**, select VA-API with `/dev/dri/renderD
 transcoding and its FFmpeg log must show the VA-API device. This live check is required because schema-valid Compose proves
 the device contract, but only the target GPU, kernel, and driver can prove codec execution.
 
-`plan` does not yet observe applications, create a saved Plan Artifact, or mutate the host.
+`plan` observes the selected Environment's Docker topology and, once that topology is ready, its application configuration.
+It prefixes the Compose output with YAML comments describing drift, retained unknown resources, or deferred observations.
+After repair, `# plan: no changes` means no actionable drift remains; retained unknown resources may still be listed.
+Unknown application resources include qBittorrent categories, Arr root folders and download clients, Prowlarr indexers and
+application links, Jellyfin libraries, and Seerr destinations. The command decrypts the selected Environment's secrets only
+when observing applications. It never bootstraps Seerr or changes service configuration.
+
+`apply` repairs the declared qBittorrent client in each Arr service and Prowlarr's declared indexer/application links in
+place, preserving their API identities. Identity is the declared name plus implementation (or indexer definition); renamed
+records are retained as unknown. Ambiguous duplicate declared identities stop reconciliation for operator resolution.
+Jellyfin library paths are repaired by adding the declared path before removing other path references, without deleting
+media. A changed library collection type is reported as `guide`: back up and recreate that named library with the declared
+type before applying again. This replacement is not performed automatically.
+
+Saved Plan Artifacts remain planned.
 Shell redirection is used above because `--out` is not implemented yet.
 
 ### 4. Start VPN-confined qBittorrent and prepare library discovery
@@ -474,7 +488,7 @@ from silently becoming ineffective configuration.
 | `spec.environments.<name>.projectName` | `plan`, `apply` | Compose project name; scopes networks, runtime secret paths, and config volumes independently for Production and Staging. |
 | `spec.environments.<name>.dataRoot` | `init`, `plan` | Absolute host root provisioned by `init`; mounted as the selected Environment `/data` seam. The other Environment root is never rendered. |
 | `spec.environments.<name>.backupRoot` | `backup` | Absolute host namespace for the Environment's application-state archives. Production and Staging roots must be non-overlapping and neither may overlap either Environment's `dataRoot`; `backup` creates the selected root privately and atomically publishes verified backup directories beneath it. |
-| `spec.environments.<name>.secretsFile` | `init`, `doctor`, `apply`, Promotion verification | Environment-specific SOPS document written by `init`; it contains isolated qBittorrent `username`/`password` keys alongside OpenVPN, Profilarr, and Jellyfin credentials. `apply` keeps qBittorrent credentials in memory, persists them through the supported API, and supplies them to both Arr clients. Existing documents missing either key fail with a migration remedy; `init` never silently overwrites them. `plan` never decrypts it. |
+| `spec.environments.<name>.secretsFile` | `init`, `doctor`, `apply`, Promotion verification | Environment-specific SOPS document written by `init`; it contains isolated qBittorrent `username`/`password` keys alongside OpenVPN, Profilarr, and Jellyfin credentials. `apply` keeps qBittorrent credentials in memory, persists them through the supported API, and supplies them to both Arr clients. Existing documents missing either key fail with a migration remedy; `init` never silently overwrites them. `plan` decrypts it only for authenticated application observation after topology convergence. |
 | `spec.environments.<name>.hardwareTranscoding` | `init`, `doctor`, `plan` | Must be `auto` or `disabled`. `auto` detects and validates `/dev/dri/renderD128`; supported hosts add the Jellyfin device and numeric render group, while missing hardware keeps the portable topology. `disabled` always keeps the portable topology. |
 | `spec.environments.<name>.ports.qbittorrent` | `plan`, `apply` | Canonical qBittorrent port used by `WEBUI_PORT`, Gluetun host/target publication and firewall admission, CLI/browser access, the application-network alias endpoint, and both Arr download clients. qBittorrent has no direct published port. |
 | `spec.environments.<name>.ports.prowlarr` | `plan` | Host port for Prowlarr target `9696`. |

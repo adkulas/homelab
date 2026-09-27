@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
-	"strings"
+	"sort"
 	"time"
 
 	"github.com/adkulas/homelab/internal/config"
@@ -26,7 +26,7 @@ type readOnlyTransport struct {
 }
 
 func (transport readOnlyTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	if request.Method == http.MethodGet || request.Method == http.MethodHead || observationPost(request.URL.Path) {
+	if request.Method == http.MethodGet || request.Method == http.MethodHead || (request.Method == http.MethodPost && observationPost(request.URL.Path)) {
 		return transport.base.RoundTrip(request)
 	}
 	return nil, errPlannedMutation
@@ -35,9 +35,8 @@ func (transport readOnlyTransport) RoundTrip(request *http.Request) (*http.Respo
 func observationPost(path string) bool {
 	return path == "/api/v2/auth/login" ||
 		path == "/Users/AuthenticateByName" ||
-		path == "/api/v1/auth/jellyfin" ||
 		path == "/api/v1/auth/local" ||
-		strings.HasSuffix(path, "/test")
+		path == "/api/v1/settings/radarr/test" || path == "/api/v1/settings/sonarr/test"
 }
 
 func observationHTTPClient() *http.Client {
@@ -86,6 +85,8 @@ func observeApplications(ctx context.Context, request PlanRequest, plan Plan) []
 	if err := qbitClient.Login(ctx, secrets.QBittorrent.Username, secrets.QBittorrent.Password); err != nil {
 		actions = append(actions, deferredApplication("qbittorrent", err)...)
 	} else {
+		unknown, observationErr := qbitClient.UnknownResources(ctx)
+		actions = append(actions, unknownApplicationActions("qbittorrent", unknown, observationErr)...)
 		_, err = qbitClient.ReconcileAcquisitionPolicy(ctx)
 		actions = append(actions, applicationPlanAction("qbittorrent", err)...)
 	}
@@ -99,6 +100,8 @@ func observeApplications(ctx context.Context, request PlanRequest, plan Plan) []
 		actions = append(actions, deferredApplication("radarr", radarrKeyErr)...)
 	} else {
 		client := radarr.New("http://"+environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Radarr), radarrKey, observationHTTPClient())
+		unknown, observationErr := client.UnknownResources(ctx)
+		actions = append(actions, unknownApplicationActions("radarr", unknown, observationErr)...)
 		_, err = client.ReconcileMovieLibrary(ctx, qbitConfiguration)
 		actions = append(actions, applicationPlanAction("radarr", err)...)
 		if err == nil {
@@ -109,6 +112,8 @@ func observeApplications(ctx context.Context, request PlanRequest, plan Plan) []
 		actions = append(actions, deferredApplication("sonarr", sonarrKeyErr)...)
 	} else {
 		client := sonarr.New("http://"+environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Sonarr), sonarrKey, observationHTTPClient())
+		unknown, observationErr := client.UnknownResources(ctx)
+		actions = append(actions, unknownApplicationActions("sonarr", unknown, observationErr)...)
 		_, err = client.ReconcileSeriesLibrary(ctx, qbitConfiguration)
 		actions = append(actions, applicationPlanAction("sonarr", err)...)
 		if err == nil {
@@ -119,6 +124,8 @@ func observeApplications(ctx context.Context, request PlanRequest, plan Plan) []
 		actions = append(actions, deferredApplication("prowlarr", errors.Join(prowlarrKeyErr, radarrKeyErr, sonarrKeyErr))...)
 	} else {
 		client := prowlarr.New("http://"+environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Prowlarr), prowlarrKey, observationHTTPClient())
+		unknown, observationErr := client.UnknownResources(ctx)
+		actions = append(actions, unknownApplicationActions("prowlarr", unknown, observationErr)...)
 		_, err = client.ReconcileLibraryDiscovery(ctx, radarrKey, sonarrKey)
 		actions = append(actions, applicationPlanAction("prowlarr", err)...)
 	}
@@ -133,13 +140,23 @@ func observeApplications(ctx context.Context, request PlanRequest, plan Plan) []
 
 	jellyfinClient := jellyfin.New("http://"+environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Jellyfin), observationHTTPClient())
 	actions = append(actions, applicationPlanAction("jellyfin", jellyfinClient.ReconcileLibraries(ctx, secrets.Jellyfin))...)
+	unknown, observationErr := jellyfinClient.UnknownLibraries(ctx, secrets.Jellyfin)
+	actions = append(actions, unknownApplicationActions("jellyfin", unknown, observationErr)...)
 
 	seerrClient, err := seerr.New("http://"+environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Seerr), observationHTTPClient())
 	if err != nil {
 		actions = append(actions, deferredApplication("seerr", err)...)
 	} else {
 		credentials := seerr.Credentials{Username: secrets.Jellyfin.Username, Password: secrets.Jellyfin.Password}
-		err = seerrClient.ReconcileAuthentication(ctx, credentials)
+		drift, observationErr := seerrClient.AuthenticationDrift(ctx, credentials)
+		err = observationErr
+		if drift && err == nil {
+			err = errPlannedMutation
+		}
+		if err == nil {
+			unknown, observationErr := seerrClient.UnknownDestinations(ctx)
+			actions = append(actions, unknownApplicationActions("seerr", unknown, observationErr)...)
+		}
 		if err == nil && radarrKeyErr == nil {
 			err = seerrClient.ReconcileRadarr(ctx, radarrKey, moviePolicy.Profile.Name)
 		}
@@ -169,6 +186,9 @@ func applicationPlanAction(service string, err error) []PlanAction {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, jellyfin.ErrLibraryTypeDrift) {
+		return []PlanAction{{Kind: planActionGuide, Subject: service, Explanation: err.Error()}}
+	}
 	if errors.Is(err, errPlannedMutation) {
 		return []PlanAction{{Kind: planActionUpdate, Subject: service, Explanation: "application settings differ from Declared Configuration"}}
 	}
@@ -182,6 +202,18 @@ func policyPlanAction(service string, err error) []PlanAction {
 	return []PlanAction{{Kind: planActionGuide, Subject: service, Explanation: "externally synchronized policy differs from the Service Configuration Contract"}}
 }
 
-func deferredApplication(service string, err error) []PlanAction {
-	return []PlanAction{{Kind: planActionDeferred, Subject: service, Explanation: "application observation is unavailable: " + err.Error()}}
+func deferredApplication(service string, _ error) []PlanAction {
+	return []PlanAction{{Kind: planActionDeferred, Subject: service, Explanation: "application observation is unavailable; check service readiness and selected Environment credentials"}}
+}
+
+func unknownApplicationActions(service string, subjects []string, err error) []PlanAction {
+	if err != nil {
+		return deferredApplication(service, err)
+	}
+	sort.Strings(subjects)
+	var actions []PlanAction
+	for _, subject := range subjects {
+		actions = append(actions, PlanAction{Kind: planActionUnknown, Subject: service + "/" + subject, Explanation: "application resource is outside the Service Configuration Contract; retained"})
+	}
+	return actions
 }

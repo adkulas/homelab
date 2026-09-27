@@ -87,15 +87,28 @@ func (client *Client) ReconcileLibraryDiscovery(ctx context.Context, radarrAPIKe
 	}
 	changed := false
 	desiredIndexer := declaredInternetArchive()
-	foundIndexer := false
-	for _, current := range indexers {
-		if current.DefinitionName == internetArchiveDefinition && indexerMatches(current, desiredIndexer) {
-			foundIndexer = true
-			break
+	var existingIndexer *indexer
+	for i := range indexers {
+		current := &indexers[i]
+		if current.DefinitionName != internetArchiveDefinition || current.Name != desiredIndexer.Name {
+			continue
 		}
+		if existingIndexer != nil {
+			return false, fmt.Errorf("multiple declared Internet Archive indexers; retain and resolve duplicates before applying")
+		}
+		existingIndexer = current
 	}
-	if !foundIndexer {
-		if err := client.sendJSON(ctx, http.MethodPost, "/api/v1/indexer", desiredIndexer); err != nil {
+	if existingIndexer == nil || !indexerMatches(*existingIndexer, desiredIndexer) {
+		method, endpoint := http.MethodPost, "/api/v1/indexer"
+		if existingIndexer != nil {
+			if existingIndexer.ID <= 0 {
+				return false, fmt.Errorf("declared Internet Archive indexer has no valid identity")
+			}
+			desiredIndexer.ID = existingIndexer.ID
+			desiredIndexer.Tags = existingIndexer.Tags
+			method, endpoint = http.MethodPut, fmt.Sprintf("/api/v1/indexer/%d", existingIndexer.ID)
+		}
+		if err := client.sendJSON(ctx, method, endpoint, desiredIndexer); err != nil {
 			return false, err
 		}
 		changed = true
@@ -107,17 +120,30 @@ func (client *Client) ReconcileLibraryDiscovery(ctx context.Context, radarrAPIKe
 	}
 	desiredApplications := []application{declaredRadarrApplication(radarrAPIKey), declaredSonarrApplication(sonarrAPIKey)}
 	for _, desiredApplication := range desiredApplications {
-		foundApplication := false
-		for _, current := range applications {
-			if current.Implementation == desiredApplication.Implementation && applicationMatches(current, desiredApplication) {
-				foundApplication = true
-				break
+		var existing *application
+		for i := range applications {
+			current := &applications[i]
+			if current.Implementation != desiredApplication.Implementation || current.Name != desiredApplication.Name {
+				continue
 			}
+			if existing != nil {
+				return false, fmt.Errorf("multiple declared %s application links; retain and resolve duplicates before applying", desiredApplication.Name)
+			}
+			existing = current
 		}
-		if foundApplication {
+		if existing != nil && applicationMatches(*existing, desiredApplication) {
 			continue
 		}
-		if err := client.sendJSON(ctx, http.MethodPost, "/api/v1/applications", desiredApplication); err != nil {
+		method, endpoint := http.MethodPost, "/api/v1/applications"
+		if existing != nil {
+			if existing.ID <= 0 {
+				return false, fmt.Errorf("declared %s application link has no valid identity", desiredApplication.Name)
+			}
+			desiredApplication.ID = existing.ID
+			desiredApplication.Tags = existing.Tags
+			method, endpoint = http.MethodPut, fmt.Sprintf("/api/v1/applications/%d", existing.ID)
+		}
+		if err := client.sendJSON(ctx, method, endpoint, desiredApplication); err != nil {
 			return false, err
 		}
 		changed = true

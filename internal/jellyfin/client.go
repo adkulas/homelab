@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,6 +54,8 @@ func (client *Client) Ready(ctx context.Context) error {
 	}
 	return nil
 }
+
+var ErrLibraryTypeDrift = errors.New("Jellyfin library collection type differs; back up and recreate the named library with its declared type")
 
 func (client *Client) ReconcileLibraries(ctx context.Context, credentials Credentials) error {
 	if credentials.Username == "" || credentials.Password == "" {
@@ -106,8 +109,27 @@ func (client *Client) ReconcileLibraries(ctx context.Context, credentials Creden
 			if library.Name != desired.name {
 				continue
 			}
-			if library.CollectionType != desired.collectionType || len(library.Locations) != 1 || library.Locations[0] != desired.path {
-				return fmt.Errorf("Jellyfin %s must use only %s", desired.name, desired.path)
+			if library.CollectionType != desired.collectionType {
+				return fmt.Errorf("%w: %s requires %s", ErrLibraryTypeDrift, desired.name, desired.collectionType)
+			}
+			containsPath := false
+			for _, path := range library.Locations {
+				containsPath = containsPath || path == desired.path
+			}
+			if !containsPath {
+				body := map[string]string{"Name": desired.name, "Path": desired.path}
+				if err := client.doJSON(ctx, http.MethodPost, "/Library/VirtualFolders/Paths", body, auth.AccessToken, nil); err != nil {
+					return fmt.Errorf("repair Jellyfin library path: %w", err)
+				}
+			}
+			for _, path := range library.Locations {
+				if path == desired.path {
+					continue
+				}
+				query := url.Values{"name": {desired.name}, "path": {path}, "refreshLibrary": {"false"}}
+				if err := client.doJSON(ctx, http.MethodDelete, "/Library/VirtualFolders/Paths?"+query.Encode(), nil, auth.AccessToken, nil); err != nil {
+					return fmt.Errorf("remove undeclared Jellyfin library path: %w", err)
+				}
 			}
 			found = true
 		}

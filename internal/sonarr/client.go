@@ -31,6 +31,7 @@ type field struct {
 }
 
 type downloadClient struct {
+	ID                       int     `json:"id,omitempty"`
 	Enable                   bool    `json:"enable"`
 	Protocol                 string  `json:"protocol"`
 	Priority                 int     `json:"priority"`
@@ -86,12 +87,30 @@ func (client *Client) ReconcileSeriesLibrary(ctx context.Context, qbittorrentCon
 		return false, err
 	}
 	desired := declaredDownloadClient(qbittorrentConfiguration)
-	for _, current := range observed {
-		if current.Implementation == desired.Implementation && downloadClientMatches(current, desired) {
+	var existing *downloadClient
+	for i := range observed {
+		current := &observed[i]
+		if current.Name != desired.Name || current.Implementation != desired.Implementation {
+			continue
+		}
+		if existing != nil {
+			return false, fmt.Errorf("multiple declared qBittorrent clients; retain and resolve duplicates before applying")
+		}
+		existing = current
+	}
+	method, endpoint := http.MethodPost, "/api/v3/downloadclient"
+	if existing != nil {
+		if downloadClientMatches(*existing, desired) {
 			return changed, nil
 		}
+		if existing.ID <= 0 {
+			return false, fmt.Errorf("declared qBittorrent client has no valid identity")
+		}
+		desired.ID = existing.ID
+		desired.Tags = existing.Tags
+		method, endpoint = http.MethodPut, fmt.Sprintf("/api/v3/downloadclient/%d", existing.ID)
 	}
-	if err := client.sendJSON(ctx, http.MethodPost, "/api/v3/downloadclient", desired); err != nil {
+	if err := client.sendJSON(ctx, method, endpoint, desired); err != nil {
 		return false, err
 	}
 	return true, nil

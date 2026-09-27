@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"encoding/xml"
 	"fmt"
 	"io"
 	"net"
@@ -324,14 +323,8 @@ func waitForServiceAPIKey(ctx context.Context, plan Plan, service, application s
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	for {
-		output, err := runDockerCompose(ctx, plan, "exec", "-T", service, "cat", "/config/config.xml")
-		if err == nil {
-			var document struct {
-				APIKey string `xml:"ApiKey"`
-			}
-			if xml.Unmarshal(output, &document) == nil && document.APIKey != "" {
-				return document.APIKey, nil
-			}
+		if key, err := observeServiceAPIKey(ctx, plan, service); err == nil {
+			return key, nil
 		}
 		select {
 		case <-ctx.Done():
