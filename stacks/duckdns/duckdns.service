@@ -1,0 +1,37 @@
+[Unit]
+Description=Update the DuckDNS IPv4 record when needed
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=duckdns
+Group=duckdns
+SupplementaryGroups=sops
+Environment=SOPS_AGE_KEY_FILE=/etc/sops/age/keys.txt
+ExecStart=/usr/local/lib/duckdns/update.sh
+StateDirectory=duckdns
+StateDirectoryMode=0700
+UMask=0077
+TimeoutStartSec=60s
+LimitCORE=0
+
+CapabilityBoundingSet=
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
