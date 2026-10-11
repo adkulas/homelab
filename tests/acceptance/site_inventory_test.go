@@ -355,7 +355,7 @@ func TestSiteOutputsAreDeterministicAndExplainSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("human plan failed: %v\n%s", err, planOutput)
 	}
-	for _, want := range []string{"SITE_PLAN Site example, Stack Instance media, Host media, staging Environment", "source: sites/example/site.yaml", "source: stacks/media/media-stack.yaml", "---\nname: media-staging"} {
+	for _, want := range []string{"SITE_PLAN Site example, Stack Instance media, Host media, staging Environment", "source: sites/example/site.yaml", "source: stacks/media/media-stack.yaml", "---\n", "\nname: media-staging"} {
 		if !strings.Contains(string(planOutput), want) {
 			t.Fatalf("human plan omitted %q:\n%s", want, planOutput)
 		}

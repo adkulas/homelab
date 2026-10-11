@@ -55,7 +55,8 @@ func Plan(ctx context.Context, repositoryRoot string, siteName SiteName, instanc
 	if err != nil {
 		return PlanReport{}, err
 	}
-	plan, err := engine.New().Plan(ctx, engine.NewResolvedPlanRequest(repositoryRoot, string(environment), declared))
+	request := engine.NewResolvedPlanRequest(repositoryRoot, string(environment), declared)
+	plan, err := engine.New().Plan(ctx, request)
 	if err != nil {
 		return PlanReport{}, CodedError{Code: "SITE_PLAN_FAILED", Explanation: "the selected Stack Instance and Environment could not be rendered.", Remedy: "Validate the typed Stack inputs and checked-in Stack policy."}
 	}
@@ -72,7 +73,8 @@ func Plan(ctx context.Context, repositoryRoot string, siteName SiteName, instanc
 	return PlanReport{
 		APIVersion: schemaVersion, Kind: "StackPlan", Site: siteName, Instance: instanceName,
 		Host: instance.Spec.Host, Stack: instance.Spec.Stack, Environment: environment,
-		Sources: sources, SensitiveReferences: redactedReferences, Plan: string(plan.Compose()),
+		Sources: sources, SensitiveReferences: redactedReferences,
+		Plan: string(append(engine.FormatPlanActions(engine.ObserveConfiguration(ctx, request, plan)), plan.Compose()...)),
 	}, nil
 }
 

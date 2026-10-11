@@ -868,6 +868,34 @@ EOF
 		t.Fatal("apply changed unknown application resources")
 	}
 
+	seerrLocalPassword = "drifted-password"
+	localDriftPlan := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)
+	localDriftPlan.Dir, localDriftPlan.Env = command.Dir, command.Env
+	localDriftOutput, err := localDriftPlan.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Seerr local login drift plan: %v\n%s", err, localDriftOutput)
+	}
+	if !strings.Contains(string(localDriftOutput), "# update seerr:") {
+		t.Errorf("missing Seerr local login drift:\n%s", localDriftOutput)
+	}
+	localDriftApply := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
+	localDriftApply.Dir, localDriftApply.Env = command.Dir, command.Env
+	if output, err := localDriftApply.CombinedOutput(); err != nil {
+		t.Fatalf("repair Seerr local login drift: %v\n%s", err, output)
+	}
+	if seerrLocalPassword != "fixture-jellyfin-password" {
+		t.Error("apply did not repair Seerr local login")
+	}
+	localConvergedPlan := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)
+	localConvergedPlan.Dir, localConvergedPlan.Env = command.Dir, command.Env
+	localConvergedOutput, err := localConvergedPlan.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Seerr local login convergence plan: %v\n%s", err, localConvergedOutput)
+	}
+	if !strings.Contains(string(localConvergedOutput), "# plan: no changes") {
+		t.Errorf("Seerr local login repair did not converge:\n%s", localConvergedOutput)
+	}
+
 	seerrInitialized = false
 	seerrMain["mediaServerType"] = float64(4)
 	bootstrapPlan := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)

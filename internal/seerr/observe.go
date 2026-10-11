@@ -19,7 +19,8 @@ func (client *Client) AuthenticationDrift(ctx context.Context, credentials Crede
 		return true, nil
 	}
 	if err := client.VerifyLocalAdministrator(ctx, credentials); err != nil {
-		return false, err
+		// apply can restore local login with the Jellyfin administrator session.
+		return true, nil
 	}
 	var main mainSettings
 	if err := client.doJSON(ctx, "GET", "/api/v1/settings/main", nil, &main); err != nil {
