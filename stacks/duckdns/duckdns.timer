@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the DuckDNS updater every five minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=30s
+RandomizedDelaySec=15s
+Unit=duckdns.service
+
+[Install]
+WantedBy=timers.target
