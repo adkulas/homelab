@@ -38,7 +38,7 @@ func planCommand(t *testing.T, arguments ...string) *exec.Cmd {
 	t.Helper()
 	goArguments := append([]string{"run", "../../cmd/media-stack", "plan"}, arguments...)
 	command := exec.Command("go", goArguments...)
-	command.Dir = filepath.Join(repositoryRoot(t), "stacks", "media")
+	command.Dir = filepath.Join(repositoryRoot(t), "services", "media")
 	return command
 }
 

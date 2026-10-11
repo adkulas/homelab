@@ -15,7 +15,7 @@ Implementation does not begin as part of this plan.
 The repository will contain independently deployable domain stacks. The Media Stack is the first:
 
 ```text
-stacks/
+services/
   media/
     compose.yaml
     compose.staging.yaml

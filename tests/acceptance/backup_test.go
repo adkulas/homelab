@@ -447,7 +447,7 @@ func createBackupVolumeFixtures(t *testing.T, fixtureRoot, projectName string) {
 
 func backupConfig(t *testing.T, repository, temporary string) string {
 	t.Helper()
-	contents, err := os.ReadFile(filepath.Join(repository, "stacks", "media", "media-stack.yaml"))
+	contents, err := os.ReadFile(filepath.Join(repository, "services", "media", "media-stack.yaml"))
 	if err != nil {
 		t.Fatalf("read Declared Configuration: %v", err)
 	}
@@ -586,6 +586,6 @@ func backupCommand(t *testing.T, arguments ...string) *exec.Cmd {
 	t.Helper()
 	goArguments := append([]string{"run", "../../cmd/media-stack", "backup"}, arguments...)
 	command := exec.Command("go", goArguments...)
-	command.Dir = filepath.Join(repositoryRoot(t), "stacks", "media")
+	command.Dir = filepath.Join(repositoryRoot(t), "services", "media")
 	return command
 }

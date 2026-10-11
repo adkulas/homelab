@@ -12,7 +12,7 @@ import (
 func TestVerifyProvesVPNEgressFailClosedAndRecovery(t *testing.T) {
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	writeFile(t, configPath, readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")), 0o600)
+	writeFile(t, configPath, readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml")), 0o600)
 
 	binDirectory := filepath.Join(temporary, "bin")
 	if err := os.Mkdir(binDirectory, 0o700); err != nil {
@@ -130,7 +130,7 @@ func TestVerifyReportsDistinctMachineReadableFailures(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			temporary := t.TempDir()
 			configPath := filepath.Join(temporary, "media-stack.yaml")
-			configuration := readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml"))
+			configuration := readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml"))
 			if test.scenario == "selection" {
 				configuration = []byte(strings.Replace(string(configuration), "countries:\n                    - Canada", "countries: []", 1))
 			}

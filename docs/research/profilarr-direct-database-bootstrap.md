@@ -4,7 +4,7 @@ Research performed 2026-08-31 against the repository's pinned Profilarr image,
 `ghcr.io/dictionarry-hub/profilarr@sha256:75a43c9c19c70f6e48315d4ed5cef3232d905da8fab397391a2078a5e0fd7ec1`.
 GitHub Container Registry identifies that digest as Profilarr `2.1.0`; the corresponding upstream tag resolves to commit
 [`395544b5dbd24c78f13a09226a87fe532ceb50d2`](https://github.com/Dictionarry-Hub/profilarr/commit/395544b5dbd24c78f13a09226a87fe532ceb50d2).
-[Repository pin](../../stacks/media/versions.yaml)
+[Repository pin](../../services/media/versions.yaml)
 [Official container package](https://github.com/dictionarry-hub/profilarr/pkgs/container/profilarr)
 
 ## Answer

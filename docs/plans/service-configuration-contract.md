@@ -12,7 +12,7 @@ cannot ask the CLI which settings it controls for a service, whether a setting i
 service.
 
 Sonarr file naming demonstrates the ambiguity. The repository records and verifies the naming policy in
-`stacks/media/fixtures/profilarr-series-policy.yaml`, but it is not an operator field in `media-stack.yaml` and the CLI does
+`services/media/fixtures/profilarr-series-policy.yaml`, but it is not an operator field in `media-stack.yaml` and the CLI does
 not apply it directly. Profilarr synchronizes the pinned policy and `media-stack apply` verifies the resulting Sonarr state.
 A user-visible contract must make that distinction explicit.
 
@@ -95,7 +95,7 @@ Human output for Sonarr must answer the original operator question directly:
 Sonarr
   naming.standardEpisodeFormat
     control: externally-synchronized
-    source: stacks/media/fixtures/profilarr-series-policy.yaml#naming.standardEpisodeFormat
+    source: services/media/fixtures/profilarr-series-policy.yaml#naming.standardEpisodeFormat
     owner: Profilarr pinned policy
     lifecycle: synchronize, verify
     operator change: not configurable through media-stack.yaml; propose a semantic Declared Configuration field before varying
@@ -127,7 +127,7 @@ JSON is a single versioned document on stdout:
         {
           "id": "naming.standardEpisodeFormat",
           "control": "externally-synchronized",
-          "source": "stacks/media/fixtures/profilarr-series-policy.yaml#naming.standardEpisodeFormat",
+          "source": "services/media/fixtures/profilarr-series-policy.yaml#naming.standardEpisodeFormat",
           "owner": "Profilarr pinned policy",
           "lifecycle": ["synchronize", "verify"],
           "sensitive": false,
@@ -165,7 +165,7 @@ CLI acceptance tests prove:
 ## Documentation rule
 
 Any change that adds, removes, reclassifies, or changes the lifecycle of a service setting must update its Service
-Configuration Contract entry and `stacks/media/README.md` in the same change. A service-setting change is incomplete until
+Configuration Contract entry and `services/media/README.md` in the same change. A service-setting change is incomplete until
 the human and JSON discovery surfaces describe it.
 
 ## Delivery dependency

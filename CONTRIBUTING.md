@@ -19,7 +19,7 @@ disposable storage probes, and a binary linked against the host's C library may 
 
 ## Recommended first loop
 
-1. Edit `stacks/media/media-stack.yaml` so the `production` and `staging` environments have absolute, non-overlapping
+1. Edit `services/media/media-stack.yaml` so the `production` and `staging` environments have absolute, non-overlapping
    `dataRoot` values and distinct LAN ports.
 2. Build the CLI locally with `CGO_ENABLED=0 go build -o bin/media-stack ./cmd/media-stack`.
 3. Run `./bin/media-stack init --environment staging` and complete the prompts.

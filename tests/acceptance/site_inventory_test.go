@@ -72,7 +72,7 @@ func TestSitePlanDelegatesToExistingMediaStackPlanner(t *testing.T) {
 	if got.Plan != string(legacyOutput) {
 		t.Fatalf("Site-resolved plan differs from legacy plan\nsite:\n%s\nlegacy:\n%s", got.Plan, legacyOutput)
 	}
-	wantSources := []string{"sites/example/site.yaml", "sites/example/hosts/media.yaml", "sites/example/instances/media.yaml", "stacks/media/media-stack.yaml", "stacks/media/versions.yaml"}
+	wantSources := []string{"sites/example/site.yaml", "sites/example/hosts/media.yaml", "sites/example/instances/media.yaml", "services/media/media-stack.yaml", "services/media/versions.yaml"}
 	if len(got.Sources) != len(wantSources) {
 		t.Fatalf("sources = %#v, want %#v", got.Sources, wantSources)
 	}
@@ -355,7 +355,7 @@ func TestSiteOutputsAreDeterministicAndExplainSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("human plan failed: %v\n%s", err, planOutput)
 	}
-	for _, want := range []string{"SITE_PLAN Site example, Stack Instance media, Host media, staging Environment", "source: sites/example/site.yaml", "source: stacks/media/media-stack.yaml", "---\nname: media-staging"} {
+	for _, want := range []string{"SITE_PLAN Site example, Stack Instance media, Host media, staging Environment", "source: sites/example/site.yaml", "source: services/media/media-stack.yaml", "---\nname: media-staging"} {
 		if !strings.Contains(string(planOutput), want) {
 			t.Fatalf("human plan omitted %q:\n%s", want, planOutput)
 		}
@@ -695,12 +695,12 @@ func (fixture siteFixture) write(t *testing.T) string {
 	for filename, contents := range fixture.extraInstances {
 		writeFile(t, filepath.Join(siteRoot, "instances", filename), []byte(contents), 0o600)
 	}
-	stackRoot := filepath.Join(root, "stacks", "media")
+	stackRoot := filepath.Join(root, "services", "media")
 	if err := os.MkdirAll(stackRoot, 0o700); err != nil {
 		t.Fatalf("create Stack fixture directory: %v", err)
 	}
-	copyFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml"), filepath.Join(stackRoot, "media-stack.yaml"), 0o600)
-	copyFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "versions.yaml"), filepath.Join(stackRoot, "versions.yaml"), 0o600)
+	copyFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml"), filepath.Join(stackRoot, "media-stack.yaml"), 0o600)
+	copyFile(t, filepath.Join(repositoryRoot(t), "services", "media", "versions.yaml"), filepath.Join(stackRoot, "versions.yaml"), 0o600)
 	if fixture.outsideHost != "" {
 		writeFile(t, filepath.Join(root, "outside.yaml"), []byte(fixture.outsideHost), 0o600)
 	}
@@ -723,6 +723,6 @@ func homelabCommand(t *testing.T, arguments ...string) *exec.Cmd {
 		t.Fatalf("build homelab CLI: %v\n%s", err, output)
 	}
 	command := exec.Command(binary, arguments...)
-	command.Dir = filepath.Join(repositoryRoot(t), "stacks", "media")
+	command.Dir = filepath.Join(repositoryRoot(t), "services", "media")
 	return command
 }

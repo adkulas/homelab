@@ -2,7 +2,7 @@ package sonarr
 
 import "github.com/adkulas/homelab/internal/contractmodel"
 
-const seriesPolicySource = "stacks/media/fixtures/profilarr-series-policy.yaml"
+const seriesPolicySource = "services/media/fixtures/profilarr-series-policy.yaml"
 
 func ConfigurationContract() []contractmodel.Setting {
 	settings := []contractmodel.Setting{

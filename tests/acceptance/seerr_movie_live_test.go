@@ -32,7 +32,7 @@ func verifyDisposableStagingSeerrRequest(t *testing.T, enabledEnvironment, confi
 	if !filepath.IsAbs(configPath) {
 		configPath = filepath.Join(repositoryRoot(t), configPath)
 	}
-	fixturePath := filepath.Join(repositoryRoot(t), "stacks", "media", "fixtures", fixtureName)
+	fixturePath := filepath.Join(repositoryRoot(t), "services", "media", "fixtures", fixtureName)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Minute)
 	defer cancel()
 	command := exec.CommandContext(ctx, "go", "run", "./cmd/media-stack", "verify",

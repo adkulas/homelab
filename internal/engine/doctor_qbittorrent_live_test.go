@@ -12,7 +12,7 @@ func TestPinnedQBittorrentBootstrapRestartAndPeerContract(t *testing.T) {
 	if os.Getenv("MEDIA_STACK_LIVE_QBITTORRENT") != "1" {
 		t.Skip("set MEDIA_STACK_LIVE_QBITTORRENT=1 on a Docker-enabled host")
 	}
-	versions, err := config.LoadVersions("../../stacks/media/versions.yaml")
+	versions, err := config.LoadVersions("../../services/media/versions.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}

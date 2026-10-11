@@ -23,7 +23,7 @@ func TestDisposableStagingRestoreDrillRestoresProductionBackupSafely(t *testing.
 		t.Skip("set MEDIA_STACK_LIVE_RESTORE_DRILL=1 to run the full disposable Restore Drill acceptance test")
 	}
 	repository := repositoryRoot(t)
-	versions, err := config.LoadVersions(filepath.Join(repository, "stacks", "media", "versions.yaml"))
+	versions, err := config.LoadVersions(filepath.Join(repository, "services", "media", "versions.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -24,7 +24,7 @@ func TestDisposableSeerrAuthenticatesHouseholdAndEmergencyLocalUsers(t *testing.
 	if os.Getenv("MEDIA_STACK_LIVE_SEERR") != "1" {
 		t.Skip("set MEDIA_STACK_LIVE_SEERR=1 to run the pinned disposable Seerr authentication acceptance test")
 	}
-	versions, err := config.LoadVersions(filepath.Join(repositoryRoot(t), "stacks", "media", "versions.yaml"))
+	versions, err := config.LoadVersions(filepath.Join(repositoryRoot(t), "services", "media", "versions.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

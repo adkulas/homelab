@@ -96,7 +96,7 @@ func TestPlanRendersSchemaValidPortableServiceDefaults(t *testing.T) {
 func TestPlanRejectsEmptyNordVPNServerSelection(t *testing.T) {
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	configuration := string(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")))
+	configuration := string(readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml")))
 	configuration = strings.Replace(configuration, "countries:\n                    - Canada", "countries: []", 1)
 	if strings.Contains(configuration, "countries:\n                    - Canada") {
 		t.Fatal("fixture did not remove the declared country")
@@ -117,7 +117,7 @@ func TestPlanRejectsEmptyNordVPNServerSelection(t *testing.T) {
 func TestPlanRejectsTooFrequentGluetunCatalogueUpdate(t *testing.T) {
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	configuration := string(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")))
+	configuration := string(readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml")))
 	configuration = strings.Replace(configuration, "catalogueUpdateInterval: 480h", "catalogueUpdateInterval: 24h", 1)
 	writeFile(t, configPath, []byte(configuration), 0o600)
 

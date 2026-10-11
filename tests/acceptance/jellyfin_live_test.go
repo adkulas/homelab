@@ -20,7 +20,7 @@ func TestDisposableJellyfinRestoreDrillRotatesCredentialsAndServesRecoveredMedia
 	if os.Getenv("MEDIA_STACK_LIVE_JELLYFIN") != "1" {
 		t.Skip("set MEDIA_STACK_LIVE_JELLYFIN=1 to run the pinned disposable Jellyfin Restore Drill acceptance test")
 	}
-	versions, err := config.LoadVersions(filepath.Join(repositoryRoot(t), "stacks", "media", "versions.yaml"))
+	versions, err := config.LoadVersions(filepath.Join(repositoryRoot(t), "services", "media", "versions.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

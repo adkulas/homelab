@@ -10,7 +10,7 @@ import (
 )
 
 func TestDetectedHardwareTranscodingOverlayIsComposeValid(t *testing.T) {
-	versions, err := config.LoadVersions(repositoryRoot(t) + "/stacks/media/versions.yaml")
+	versions, err := config.LoadVersions(repositoryRoot(t) + "/services/media/versions.yaml")
 	if err != nil {
 		t.Fatalf("load image fixtures: %v", err)
 	}

@@ -21,7 +21,7 @@ func TestConfigDescribeHumanOutputAnswersHowToChangeSonarrNaming(t *testing.T) {
 		"UNMANAGED",
 		"naming.standardEpisodeFormat — Standard episode format",
 		"control: externally-synchronized",
-		"source: stacks/media/fixtures/profilarr-series-policy.yaml#naming.standardEpisodeFormat",
+		"source: services/media/fixtures/profilarr-series-policy.yaml#naming.standardEpisodeFormat",
 		"owner: Profilarr pinned policy",
 		"lifecycle: synchronize, verify",
 		"operator change: Not configurable through media-stack.yaml",

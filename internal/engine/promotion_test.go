@@ -15,8 +15,8 @@ func TestPromoteAcceptsMatchingVerificationAndBackupArtifacts(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", ".."))
 	configPath := filepath.Join(temporary, "media-stack.yaml")
 	versionsPath := filepath.Join(temporary, "versions.yaml")
-	copyFile(t, filepath.Join(repoRoot, "stacks", "media", "media-stack.yaml"), configPath)
-	copyFile(t, filepath.Join(repoRoot, "stacks", "media", "versions.yaml"), versionsPath)
+	copyFile(t, filepath.Join(repoRoot, "services", "media", "media-stack.yaml"), configPath)
+	copyFile(t, filepath.Join(repoRoot, "services", "media", "versions.yaml"), versionsPath)
 	verificationPath := filepath.Join(temporary, "verification.json")
 	backupPath := filepath.Join(temporary, "backup.json")
 	verification := VerifyReport{SchemaVersion: verifySchemaVersion, Environment: "staging", Suite: "promotion", ConfigDigest: fileDigest(configPath), VersionsDigest: fileDigest(versionsPath)}
@@ -42,8 +42,8 @@ func TestPromoteRejectsMismatchedVerificationArtifact(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", ".."))
 	configPath := filepath.Join(temporary, "media-stack.yaml")
 	versionsPath := filepath.Join(temporary, "versions.yaml")
-	copyFile(t, filepath.Join(repoRoot, "stacks", "media", "media-stack.yaml"), configPath)
-	copyFile(t, filepath.Join(repoRoot, "stacks", "media", "versions.yaml"), versionsPath)
+	copyFile(t, filepath.Join(repoRoot, "services", "media", "media-stack.yaml"), configPath)
+	copyFile(t, filepath.Join(repoRoot, "services", "media", "versions.yaml"), versionsPath)
 	verificationPath := filepath.Join(temporary, "verification.json")
 	backupPath := filepath.Join(temporary, "backup.json")
 	verification := VerifyReport{SchemaVersion: verifySchemaVersion, Environment: "staging", Suite: "promotion", ConfigDigest: "bad", VersionsDigest: fileDigest(versionsPath)}

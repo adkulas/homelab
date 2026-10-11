@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	defaultConfigPath   = "stacks/media/media-stack.yaml"
-	checkedVersionsPath = "stacks/media/versions.yaml"
+	defaultConfigPath   = "services/media/media-stack.yaml"
+	checkedVersionsPath = "services/media/versions.yaml"
 )
 
 type PlanRequest struct {

@@ -40,7 +40,7 @@ A kind `Host` has a unique `metadata.name` and capabilities from the v1alpha1 ca
 
 A kind `StackInstance` has a unique `metadata.name`, selects `stack: media`, binds one listed Host, declares a Host-scoped
 `runtimeIdentity`, and supplies typed `media.defaults` and `media.environments` inputs. The adapter combines those inputs with
-the reusable acquisition policy in `stacks/media/media-stack.yaml` and the checked-in image versions. The legacy
+the reusable acquisition policy in `services/media/media-stack.yaml` and the checked-in image versions. The legacy
 `media-stack` command remains available during migration.
 
 Validation rejects a Media Stack Instance on a Host missing any of the three current capabilities. Published ports,

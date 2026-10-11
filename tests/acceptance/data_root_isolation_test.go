@@ -10,7 +10,7 @@ import (
 
 func TestPlanRejectsNestedEnvironmentDataRoots(t *testing.T) {
 	var document map[string]any
-	if err := yaml.Unmarshal(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")), &document); err != nil {
+	if err := yaml.Unmarshal(readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml")), &document); err != nil {
 		t.Fatal(err)
 	}
 	spec := document["spec"].(map[string]any)

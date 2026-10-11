@@ -5,7 +5,7 @@ and Prowlarr 2.5.2.5491 images. The Profilarr image corresponds to upstream comm
 [`395544b5dbd24c78f13a09226a87fe532ceb50d2`](https://github.com/Dictionarry-Hub/profilarr/commit/395544b5dbd24c78f13a09226a87fe532ceb50d2),
 and the Seerr image labels identify upstream commit
 [`69f73a6f1486fdb51b8ddae9a94a8dfb629f461c`](https://github.com/seerr-team/seerr/commit/69f73a6f1486fdb51b8ddae9a94a8dfb629f461c).
-[Repository pins](../../stacks/media/versions.yaml)
+[Repository pins](../../services/media/versions.yaml)
 
 ## Answer
 
@@ -38,7 +38,7 @@ This repository cannot yet perform that anime-specific setup as declared. Its cu
 series whose Sonarr type is anime; it does not create or select an anime quality profile. The current Seerr client reconciles
 authentication only and does not configure a Sonarr server, profile, root folder, or anime defaults. Consequently the
 current stack needs a new approved anime profile in the Profilarr policy plus a Seerr service-settings reconciliation or a
-documented manual step before anime routing is complete. [Current Profilarr Series Policy](../../stacks/media/fixtures/profilarr-series-policy.yaml)
+documented manual step before anime routing is complete. [Current Profilarr Series Policy](../../services/media/fixtures/profilarr-series-policy.yaml)
 [Current Seerr reconciliation](../../internal/seerr/client.go)
 
 ## How Seerr selects an anime destination

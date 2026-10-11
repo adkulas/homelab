@@ -446,7 +446,7 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	declared := strings.Replace(string(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml"))), "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
+	declared := strings.Replace(string(readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml"))), "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "radarr: 17878", "radarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "prowlarr: 19696", "prowlarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "profilarr: 16868", "profilarr: "+apiURL.Port(), 1)
@@ -893,7 +893,7 @@ func TestApplyRedactsCredentialsFromUnhealthyGluetunFailure(t *testing.T) {
 		t.Fatalf("build media-stack: %v\n%s", err, output)
 	}
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	writeFile(t, configPath, readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")), 0o600)
+	writeFile(t, configPath, readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml")), 0o600)
 	if err := os.Mkdir(filepath.Join(temporary, "secrets"), 0o700); err != nil {
 		t.Fatal(err)
 	}

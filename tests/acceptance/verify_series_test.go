@@ -174,7 +174,7 @@ func TestPromotionVerifyRequestsAndPlaysLegalSeriesEpisodeThroughSeerr(t *testin
 	}
 
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	declared := string(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")))
+	declared := string(readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml")))
 	declared = strings.Replace(declared, "dataRoot: /srv/media/staging", "dataRoot: "+dataRoot, 1)
 	declared = strings.Replace(declared, "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "sonarr: 18989", "sonarr: "+apiURL.Port(), 1)

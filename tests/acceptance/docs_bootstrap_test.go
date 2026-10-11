@@ -7,7 +7,7 @@ import (
 )
 
 func TestDocumentationExplainsLocalBootstrapAndDeclaredDataRoot(t *testing.T) {
-	readme := string(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "README.md")))
+	readme := string(readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "README.md")))
 	contributing := string(readFile(t, filepath.Join(repositoryRoot(t), "CONTRIBUTING.md")))
 
 	for _, want := range []string{

@@ -493,7 +493,7 @@ func applyCommand(t *testing.T, arguments ...string) *exec.Cmd {
 	t.Helper()
 	goArguments := append([]string{"run", "../../cmd/media-stack", "apply"}, arguments...)
 	command := exec.Command("go", goArguments...)
-	command.Dir = filepath.Join(repositoryRoot(t), "stacks", "media")
+	command.Dir = filepath.Join(repositoryRoot(t), "services", "media")
 	return command
 }
 
@@ -501,7 +501,7 @@ func restoreCommand(t *testing.T, arguments ...string) *exec.Cmd {
 	t.Helper()
 	goArguments := append([]string{"run", "../../cmd/media-stack", "restore"}, arguments...)
 	command := exec.Command("go", goArguments...)
-	command.Dir = filepath.Join(repositoryRoot(t), "stacks", "media")
+	command.Dir = filepath.Join(repositoryRoot(t), "services", "media")
 	return command
 }
 

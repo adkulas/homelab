@@ -45,7 +45,7 @@ func Plan(ctx context.Context, repositoryRoot string, siteName SiteName, instanc
 			return PlanReport{}, CodedError{Code: "SITE_CAPABILITY_MISSING", Explanation: fmt.Sprintf("Host %q lacks capability %q required by Stack Instance %q.", host.Metadata.Name, required, instance.Metadata.Name), Remedy: "Declare a capable Host or move the Stack Instance to one."}
 		}
 	}
-	declared, err := config.Load(filepath.Join(repositoryRoot, "stacks", "media", "media-stack.yaml"))
+	declared, err := config.Load(filepath.Join(repositoryRoot, "services", "media", "media-stack.yaml"))
 	if err != nil {
 		return PlanReport{}, CodedError{Code: "SITE_STACK_POLICY_INVALID", Explanation: "the checked-in Media Stack policy could not be loaded.", Remedy: "Fix the checked-in Media Stack Declared Configuration."}
 	}
@@ -63,8 +63,8 @@ func Plan(ctx context.Context, repositoryRoot string, siteName SiteName, instanc
 		filepath.ToSlash(filepath.Join("sites", string(siteName), "site.yaml")),
 		filepath.ToSlash(filepath.Join("sites", string(siteName), hostReference)),
 		filepath.ToSlash(filepath.Join("sites", string(siteName), instanceReference)),
-		"stacks/media/media-stack.yaml",
-		"stacks/media/versions.yaml",
+		"services/media/media-stack.yaml",
+		"services/media/versions.yaml",
 	}
 	if len(redactedReferences) > 0 && site.Spec.SensitiveValues != nil {
 		sources = append(sources, filepath.ToSlash(filepath.Join("sites", string(siteName), site.Spec.SensitiveValues.Document)))

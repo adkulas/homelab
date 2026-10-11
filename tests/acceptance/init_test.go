@@ -94,7 +94,7 @@ func TestInitCreatesSelectedEnvironmentDeclaredConfigurationAndEncryptedSecrets(
 func uninitializedConfiguration(t *testing.T) []byte {
 	t.Helper()
 	var document map[string]any
-	if err := yaml.Unmarshal(readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")), &document); err != nil {
+	if err := yaml.Unmarshal(readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml")), &document); err != nil {
 		t.Fatal(err)
 	}
 	spec, ok := document["spec"].(map[string]any)

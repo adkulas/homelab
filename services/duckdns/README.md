@@ -17,7 +17,7 @@ swap/backup files:
 ```bash
 duckdns_edit_dir=$(mktemp -d /dev/shm/duckdns-edit.XXXXXX)
 TMPDIR="$duckdns_edit_dir" SOPS_EDITOR='vim -n -i NONE -c "set nobackup nowritebackup noundofile"' \
-  sops stacks/duckdns/secrets.sops.yaml
+  sops services/duckdns/secrets.sops.yaml
 rmdir "$duckdns_edit_dir"
 ```
 
@@ -31,7 +31,7 @@ The Host must have SOPS installed at `/usr/local/bin/sops` and the shared age id
 `/etc/sops/age/keys.txt`, owned by `root:sops` with mode `0640`. Install or update the Stack from the repository root:
 
 ```bash
-sudo ./stacks/duckdns/install.sh
+sudo ./services/duckdns/install.sh
 ```
 
 The installer validates decryption as the unprivileged `duckdns` account before changing installed files. It enables and
@@ -70,7 +70,7 @@ Then, from the repository checkout on `homelab`:
 
 ```bash
 git pull
-sudo ./stacks/duckdns/install.sh
+sudo ./services/duckdns/install.sh
 systemctl list-timers duckdns.timer
 sudo duckdns-logs
 ```
@@ -97,8 +97,8 @@ configuration does not protect secrets from a compromised authorized Host.
 ## Test locally
 
 ```bash
-bash -n stacks/duckdns/*.sh
-bash stacks/duckdns/test.sh
+bash -n services/duckdns/*.sh
+bash services/duckdns/test.sh
 ```
 
 Tests use a fake curl command and temporary state. They never contact DuckDNS. `--test-core` is the updater's explicit test

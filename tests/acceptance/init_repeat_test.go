@@ -75,7 +75,7 @@ servicePassword: replacement-password
 func TestInitReportsMigrationForExistingSecretWithoutQBittorrentCredentials(t *testing.T) {
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	writeFile(t, configPath, readFile(t, filepath.Join(repositoryRoot(t), "stacks", "media", "media-stack.yaml")), 0o640)
+	writeFile(t, configPath, readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml")), 0o640)
 	secretPath := filepath.Join(temporary, "secrets", "staging.sops.yaml")
 	if err := os.MkdirAll(filepath.Dir(secretPath), 0o700); err != nil {
 		t.Fatal(err)

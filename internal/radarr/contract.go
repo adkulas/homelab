@@ -2,7 +2,7 @@ package radarr
 
 import "github.com/adkulas/homelab/internal/contractmodel"
 
-const moviePolicySource = "stacks/media/fixtures/profilarr-movie-policy.yaml"
+const moviePolicySource = "services/media/fixtures/profilarr-movie-policy.yaml"
 
 func ConfigurationContract() []contractmodel.Setting {
 	settings := []contractmodel.Setting{

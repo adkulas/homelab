@@ -39,7 +39,7 @@ func TestConfigDescribeExplainsSonarrNamingOwnership(t *testing.T) {
 		if setting.ID != "naming.standardEpisodeFormat" {
 			continue
 		}
-		if setting.Control != "externally-synchronized" || setting.Source != "stacks/media/fixtures/profilarr-series-policy.yaml#naming.standardEpisodeFormat" || setting.Owner != "Profilarr pinned policy" {
+		if setting.Control != "externally-synchronized" || setting.Source != "services/media/fixtures/profilarr-series-policy.yaml#naming.standardEpisodeFormat" || setting.Owner != "Profilarr pinned policy" {
 			t.Fatalf("Sonarr naming ownership = %#v", setting)
 		}
 		if !strings.Contains(strings.ToLower(setting.OperatorChange), "not configurable through media-stack.yaml") {

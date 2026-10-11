@@ -107,7 +107,7 @@ You also need:
 
 ### 2. Configure and initialize Staging first
 
-Edit `stacks/media/media-stack.yaml` before the first run. At minimum, choose absolute, non-overlapping `dataRoot` and
+Edit `services/media/media-stack.yaml` before the first run. At minimum, choose absolute, non-overlapping `dataRoot` and
 `backupRoot` values, Compose `projectName` values, secret-file paths, and non-conflicting LAN ports for Production and
 Staging. Each `backupRoot` must also be outside its Environment's `dataRoot`. `dataRoot` is not prompted by `init`; it is a declared path in the checked-in configuration, and `init` provisions it.
 The `backup` command creates `backupRoot` with private permissions. Set `runtimeUID` and `runtimeGID` to the numeric
@@ -254,8 +254,8 @@ media-stack verify --environment staging --suite full --output json
 media-stack verify \
   --environment staging \
   --suite promotion \
-  --legal-fixture stacks/media/fixtures/legal-movie.yaml \
-  --legal-series-fixture stacks/media/fixtures/legal-series.yaml
+  --legal-fixture services/media/fixtures/legal-movie.yaml \
+  --legal-series-fixture services/media/fixtures/legal-series.yaml
 ```
 
 The available full-suite phase verifies the Gluetun TUN device and health, resolves an external-IP service from
@@ -450,7 +450,7 @@ metrics/logging stack. Every long-running service uses `restart: unless-stopped`
 The stack separates intent, versions, and secrets because they change at different rates and need different handling:
 
 ```text
-stacks/media/
+services/media/
 ├── media-stack.yaml              # reviewed operator intent for both environments
 ├── versions.yaml                 # pinned image digests and policy revision
 ├── secrets/
@@ -553,7 +553,7 @@ jellyfin:
 ```
 
 New `init` runs collect and encrypt these values. For an Environment initialized before Profilarr or Jellyfin reconciliation was implemented,
-open its existing document with `sops stacks/media/secrets/<environment>.sops.yaml`, add the block above, save it, and rerun
+open its existing document with `sops services/media/secrets/<environment>.sops.yaml`, add the block above, save it, and rerun
 `apply`. The Profilarr key declaratively configures Profilarr and authenticates only its documented versioned API. The Jellyfin credentials bootstrap or authenticate one local administrator through Jellyfin's supported API. These values remain in memory, are never placed in Compose, and are never printed.
 
 The initial VPN path uses NordVPN OpenVPN manual-setup service username/password with UDP by default and TCP as an explicit
@@ -639,11 +639,11 @@ media-stack restore \
   --environment staging \
   --backup <production-backup-id> \
   --as-restore-drill \
-  --credentials stacks/media/secrets/staging-drill.sops.yaml
+  --credentials services/media/secrets/staging-drill.sops.yaml
 media-stack restore \
   --environment staging \
   --as-restore-drill \
-  --credentials stacks/media/secrets/staging-drill.sops.yaml \
+  --credentials services/media/secrets/staging-drill.sops.yaml \
   --confirm-integrations
 ```
 
@@ -717,7 +717,7 @@ then removes the gate and encrypted copy; a failed apply remains safely gated fo
 | `media-stack destroy` | Planned | Will remove only selected-Environment runtime resources behind explicit safety guards. It is not accepted by the current binary. |
 
 Every currently available command requires an explicit `production` or `staging`; Production is never inferred. A relative
-`--config` path is resolved from the working directory, while omitting it selects `stacks/media/media-stack.yaml` from the
+`--config` path is resolved from the working directory, while omitting it selects `services/media/media-stack.yaml` from the
 repository root.
 
 Unknown project containers, networks, and volumes are outside the Service Configuration Contract. `plan` reports them deterministically and `apply` retains them; they are observations rather than change actions. A plan containing only retained unknowns therefore prints `# plan: no changes` before the still-valid Compose document. Guarded pruning is implemented separately.

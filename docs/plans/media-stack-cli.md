@@ -59,7 +59,7 @@ Keep code placed so a second real stack can later reveal the interface worth ext
 
 ### Selection and output
 
-- `--config` defaults to `stacks/media/media-stack.yaml` relative to the repository root.
+- `--config` defaults to `services/media/media-stack.yaml` relative to the repository root.
 - Every environment-scoped invocation selects exactly one Production or Staging Environment.
 - Production is never the default. A Production mutation must explicitly name it, directly or in a validated artifact.
 - `--output human|json` defaults to `human`. JSON is one versioned document on stdout; progress goes to stderr.
