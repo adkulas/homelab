@@ -1,0 +1,16 @@
+entryPoints:
+    web:
+        address: ":80"
+        http:
+            aliasHeadersStrategy: delete
+    bedrock:
+        address: ":19134/udp"
+
+providers:
+    file:
+        directory: /etc/traefik/dynamic
+        watch: true
+
+global:
+    checkNewVersion: false
+    sendAnonymousUsage: false

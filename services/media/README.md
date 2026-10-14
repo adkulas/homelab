@@ -32,6 +32,14 @@ independent Production and Staging Environments so changes can be proven before 
 Every web interface is intended for the trusted LAN and requires authentication. Nothing is intentionally exposed to the
 public internet.
 
+## Local Traefik names
+
+The [home Site network guide](../../sites/home/README.md) describes the Site-owned Traefik instance and the DNS names for
+all seven web interfaces in both Environments. Production uses `service.home` and Staging uses `service-staging.home`, where
+`service` is one of `qbittorrent`, `prowlarr`, `sonarr`, `radarr`, `profilarr`, `jellyfin`, or `seerr`. The routes use the
+published Host ports; qBittorrent uses Gluetun's published Web UI ports. Traefik remains separate from generated Media Stack
+Compose and does not change `media-stack apply`.
+
 ## Discovering service configuration
 
 The CLI publishes its complete, versioned Service Configuration Contract without selecting an Environment or contacting Docker, the network, SOPS, the filesystem, or an application. Use the human view for operator guidance and deterministic JSON for tooling:

@@ -1,0 +1,19 @@
+services:
+    traefik:
+        image: traefik:v3.7.14@sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c
+        command: --configFile=/etc/traefik/traefik.yml
+        restart: unless-stopped
+        read_only: true
+        security_opt:
+            - no-new-privileges:true
+        tmpfs:
+            - /tmp
+        ports:
+            - target: 80
+              published: "80"
+              protocol: tcp
+            - target: 19134
+              published: "19134"
+              protocol: udp
+        volumes:
+            - ./traefik.yml:/etc/traefik/traefik.yml:ro

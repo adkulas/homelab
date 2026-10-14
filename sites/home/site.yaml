@@ -1,0 +1,9 @@
+apiVersion: homelab.site/v1alpha1
+kind: Site
+metadata:
+    name: home
+spec:
+    hosts:
+        - hosts/homelab.yaml
+        - hosts/pc.yaml
+    stackInstances: []
