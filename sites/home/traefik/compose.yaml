@@ -1,0 +1,9 @@
+name: home-traefik
+
+services:
+    traefik:
+        extends:
+            file: ../../../services/traefik/compose.yaml
+            service: traefik
+        volumes:
+            - ./dynamic:/etc/traefik/dynamic:ro

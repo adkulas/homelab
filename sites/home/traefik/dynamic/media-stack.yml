@@ -1,0 +1,131 @@
+# Traefik resolves homelab.home through local DNS.
+# This file is loaded by Traefik's file provider.
+http:
+  routers:
+    qbittorrent-production:
+      rule: Host(`qbittorrent.home`)
+      entryPoints:
+        - web
+      service: qbittorrent-production
+    prowlarr-production:
+      rule: Host(`prowlarr.home`)
+      entryPoints:
+        - web
+      service: prowlarr-production
+    sonarr-production:
+      rule: Host(`sonarr.home`)
+      entryPoints:
+        - web
+      service: sonarr-production
+    radarr-production:
+      rule: Host(`radarr.home`)
+      entryPoints:
+        - web
+      service: radarr-production
+    profilarr-production:
+      rule: Host(`profilarr.home`)
+      entryPoints:
+        - web
+      service: profilarr-production
+    jellyfin-production:
+      rule: Host(`jellyfin.home`)
+      entryPoints:
+        - web
+      service: jellyfin-production
+    seerr-production:
+      rule: Host(`seerr.home`)
+      entryPoints:
+        - web
+      service: seerr-production
+    qbittorrent-staging:
+      rule: Host(`qbittorrent-staging.home`)
+      entryPoints:
+        - web
+      service: qbittorrent-staging
+    prowlarr-staging:
+      rule: Host(`prowlarr-staging.home`)
+      entryPoints:
+        - web
+      service: prowlarr-staging
+    sonarr-staging:
+      rule: Host(`sonarr-staging.home`)
+      entryPoints:
+        - web
+      service: sonarr-staging
+    radarr-staging:
+      rule: Host(`radarr-staging.home`)
+      entryPoints:
+        - web
+      service: radarr-staging
+    profilarr-staging:
+      rule: Host(`profilarr-staging.home`)
+      entryPoints:
+        - web
+      service: profilarr-staging
+    jellyfin-staging:
+      rule: Host(`jellyfin-staging.home`)
+      entryPoints:
+        - web
+      service: jellyfin-staging
+    seerr-staging:
+      rule: Host(`seerr-staging.home`)
+      entryPoints:
+        - web
+      service: seerr-staging
+  services:
+    qbittorrent-production:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:8080
+    prowlarr-production:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:9696
+    sonarr-production:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:8989
+    radarr-production:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:7878
+    profilarr-production:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:6868
+    jellyfin-production:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:8096
+    seerr-production:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:5055
+    qbittorrent-staging:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:18080
+    prowlarr-staging:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:19696
+    sonarr-staging:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:18989
+    radarr-staging:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:17878
+    profilarr-staging:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:16868
+    jellyfin-staging:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:18096
+    seerr-staging:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:15055

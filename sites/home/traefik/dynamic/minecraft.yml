@@ -1,0 +1,11 @@
+udp:
+    routers:
+        minecraft-bedrock:
+            entryPoints:
+                - bedrock
+            service: minecraft-bedrock
+    services:
+        minecraft-bedrock:
+            loadBalancer:
+                servers:
+                    - address: pc.home:19134
