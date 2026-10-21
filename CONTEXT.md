@@ -25,6 +25,10 @@ _Avoid_: App, Site, Compose project
 A Site-owned use of one Stack, assigned to exactly one Host with its own placement-dependent inputs and runtime identity.
 _Avoid_: Deployment, Host stack
 
+**DNS Cluster**:
+A Site-level relationship between Host-assigned DNS Stack Instances that keeps the Site's local names and resolver policy available across Hosts.
+_Avoid_: Multi-Host Stack Instance
+
 **Environment**:
 An operational isolation boundary within a Stack Instance; Production and Staging are Media Stack Environments.
 _Avoid_: Site, Host

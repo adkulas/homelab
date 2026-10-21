@@ -16,7 +16,8 @@ Technitium DNS and DHCP are configured separately from this change. Create these
 | The same seven names with `-staging` before `.home` | CNAME | `homelab.home` |
 | `minecraft.home` | CNAME | `homelab.home` |
 
-The A records hold the machine addresses for this routing setup. No machine address is stored in this routing project or in Git.
+The A records hold the machine addresses for this routing setup. No machine address is stored in this routing project. The
+planned Site network inventory will version IP addresses and MAC addresses as SOPS-encrypted values rather than plaintext Git.
 Household clients and the Traefik container must resolve these names through Technitium. Configure DHCP to distribute
 Technitium as the resolver, and make sure Docker on `homelab` also uses a resolver that knows `homelab.home` and `pc.home`.
 If Docker cannot resolve the upstream Host names, Traefik cannot reach the services even when client DNS works.
