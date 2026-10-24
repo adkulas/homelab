@@ -26,6 +26,12 @@ type StackInstanceName string
 type EnvironmentName string
 type RuntimeIdentity string
 type SensitiveValueID string
+type DNSRole string
+
+const (
+	dnsPrimary   DNSRole = "primary"
+	dnsSecondary DNSRole = "secondary"
+)
 
 const (
 	siteAPIVersion APIVersion   = schemaVersion
@@ -63,6 +69,36 @@ type SiteSpec struct {
 	Hosts           []string             `yaml:"hosts"`
 	StackInstances  []string             `yaml:"stackInstances"`
 	SensitiveValues *SensitiveValuesSpec `yaml:"sensitiveValues,omitempty"`
+	DNSCluster      *NetworkCluster      `yaml:"dnsCluster,omitempty"`
+	Network         *NetworkSpec         `yaml:"network,omitempty"`
+}
+
+// NetworkSpec contains semantic references only. Addresses and MACs live in
+// the Site's encrypted values document.
+type NetworkSpec struct {
+	Subnet  SensitiveValueID `yaml:"subnet"`
+	Gateway SensitiveValueID `yaml:"gateway"`
+	DHCP    NetworkDHCP      `yaml:"dhcp"`
+}
+
+type NetworkCluster struct {
+	Primary   StackInstanceName `yaml:"primary"`
+	Secondary StackInstanceName `yaml:"secondary"`
+}
+
+type NetworkDHCP struct {
+	Owner            StackInstanceName    `yaml:"owner"`
+	DynamicStart     SensitiveValueID     `yaml:"dynamicStart"`
+	DynamicEnd       SensitiveValueID     `yaml:"dynamicEnd"`
+	ReservationStart SensitiveValueID     `yaml:"reservationStart"`
+	ReservationEnd   SensitiveValueID     `yaml:"reservationEnd"`
+	Reservations     []NetworkReservation `yaml:"reservations"`
+}
+
+type NetworkReservation struct {
+	Name    string           `yaml:"name"`
+	Address SensitiveValueID `yaml:"address"`
+	MAC     SensitiveValueID `yaml:"mac"`
 }
 
 type SensitiveValuesSpec struct {
@@ -79,7 +115,8 @@ type Host struct {
 }
 
 type HostSpec struct {
-	Capabilities []Capability `yaml:"capabilities"`
+	Capabilities   []Capability     `yaml:"capabilities"`
+	NetworkAddress SensitiveValueID `yaml:"networkAddress,omitempty"`
 }
 
 type StackInstance struct {
@@ -90,10 +127,15 @@ type StackInstance struct {
 }
 
 type StackInstanceSpec struct {
-	Stack           StackName           `yaml:"stack"`
-	Host            HostName            `yaml:"host"`
-	RuntimeIdentity RuntimeIdentity     `yaml:"runtimeIdentity"`
-	Media           *MediaStackInstance `yaml:"media,omitempty"`
+	Stack           StackName             `yaml:"stack"`
+	Host            HostName              `yaml:"host"`
+	RuntimeIdentity RuntimeIdentity       `yaml:"runtimeIdentity"`
+	Media           *MediaStackInstance   `yaml:"media,omitempty"`
+	Network         *NetworkStackInstance `yaml:"network,omitempty"`
+}
+
+type NetworkStackInstance struct {
+	Role DNSRole `yaml:"role"`
 }
 
 type MediaStackInstance struct {
@@ -122,13 +164,21 @@ type Diagnostic struct {
 }
 
 type Report struct {
-	APIVersion     string       `json:"apiVersion"`
-	Kind           string       `json:"kind"`
-	Site           string       `json:"site"`
-	Valid          bool         `json:"valid"`
-	Hosts          int          `json:"hosts"`
-	StackInstances int          `json:"stackInstances"`
-	Diagnostics    []Diagnostic `json:"diagnostics"`
+	APIVersion     string               `json:"apiVersion"`
+	Kind           string               `json:"kind"`
+	Site           string               `json:"site"`
+	Valid          bool                 `json:"valid"`
+	Hosts          int                  `json:"hosts"`
+	StackInstances int                  `json:"stackInstances"`
+	Diagnostics    []Diagnostic         `json:"diagnostics"`
+	NetworkPlan    *RedactedNetworkPlan `json:"networkPlan,omitempty"`
+}
+
+type RedactedNetworkPlan struct {
+	Primary    StackInstanceName   `json:"primary"`
+	Secondary  StackInstanceName   `json:"secondary"`
+	DHCPOwner  StackInstanceName   `json:"dhcpOwner"`
+	References []RedactedReference `json:"references"`
 }
 
 type PlanReport struct {
@@ -211,13 +261,17 @@ func Validate(ctx context.Context, repositoryRoot string, siteName SiteName) Rep
 	}
 	if site.Spec.SensitiveValues != nil {
 		sensitive := site.Spec.SensitiveValues
-		if sensitive.DailyRecipient == "" || sensitive.RecoveryRecipient == "" || sensitive.DailyRecipient == sensitive.RecoveryRecipient {
-			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_SENSITIVE_RECIPIENTS_INVALID", Explanation: "Site-sensitive values require distinct daily and recovery recipients.", Remedy: "Declare two distinct age recipients for the Site."})
+		if sensitive.DailyRecipient == "" || (sensitive.RecoveryRecipient != "" && sensitive.DailyRecipient == sensitive.RecoveryRecipient) {
+			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_SENSITIVE_RECIPIENTS_INVALID", Explanation: "Site-sensitive values require a daily recipient and, if declared, a distinct recovery recipient.", Remedy: "Declare a daily age recipient and use a different key for an optional recovery recipient."})
+		}
+		recipients := []string{sensitive.DailyRecipient}
+		if sensitive.RecoveryRecipient != "" {
+			recipients = append(recipients, sensitive.RecoveryRecipient)
 		}
 		if path, diagnostic := resolveReference(siteDirectory, sensitive.Document); diagnostic != nil {
 			report.Diagnostics = append(report.Diagnostics, *diagnostic)
-		} else if !encryptedDocumentHasRecipients(path, sensitive.DailyRecipient, sensitive.RecoveryRecipient) {
-			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_SENSITIVE_RECIPIENTS_MISMATCH", Explanation: "the Site-sensitive values document does not include both declared recipients.", Remedy: "Re-encrypt the document for the declared daily and recovery recipients."})
+		} else if !encryptedDocumentHasRecipients(path, recipients...) {
+			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_SENSITIVE_RECIPIENTS_MISMATCH", Explanation: "the Site-sensitive values document does not include its declared recipients.", Remedy: "Re-encrypt the document for the declared recipients."})
 		}
 	}
 	hostNames := map[HostName]string{}
@@ -278,6 +332,17 @@ func Validate(ctx context.Context, repositoryRoot string, siteName SiteName) Rep
 		}
 	}
 	validatePlacements(hosts, instances, &report)
+	if site.Spec.DNSCluster != nil {
+		validateDNSCluster(site.Spec.DNSCluster, hosts, instances, &report)
+	}
+	if site.Spec.Network != nil {
+		if site.Spec.DNSCluster == nil {
+			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_NETWORK_CLUSTER_MISSING", Explanation: "the network topology has no DNS Cluster.", Remedy: "Declare spec.dnsCluster with primary and secondary Stack Instances."})
+		} else {
+			report.NetworkPlan = redactedNetworkPlan(site.Spec.Network, site.Spec.DNSCluster, hosts)
+			validateNetwork(ctx, siteDirectory, site.Spec.Network, site.Spec.DNSCluster, site.Spec.SensitiveValues, hosts, instances, &report)
+		}
+	}
 	report.Hosts = len(site.Spec.Hosts)
 	report.StackInstances = len(site.Spec.StackInstances)
 	report.Valid = len(report.Diagnostics) == 0
@@ -300,7 +365,22 @@ func validatePlacements(hosts map[HostName]Host, instances []StackInstance, repo
 			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_HOST_REFERENCE_MISSING", Explanation: fmt.Sprintf("Stack Instance %q references missing Host %q.", instance.Metadata.Name, instance.Spec.Host), Remedy: "Reference a Host explicitly listed by the Site."})
 			continue
 		}
-		if instance.Spec.Stack != mediaStack || instance.Spec.Media == nil {
+		if instance.Spec.Stack == "network" && instance.Spec.Network != nil && instance.Spec.Media == nil {
+			if instance.Spec.Network.Role != dnsPrimary && instance.Spec.Network.Role != dnsSecondary {
+				report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_NETWORK_ROLE_INVALID", Explanation: fmt.Sprintf("Stack Instance %q has an invalid DNS role.", instance.Metadata.Name), Remedy: "Use primary or secondary."})
+			}
+			if instance.Spec.Network.Role == dnsPrimary {
+				compose := false
+				for _, capability := range host.Spec.Capabilities {
+					compose = compose || capability == capabilityCompose
+				}
+				if !compose {
+					report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_CAPABILITY_MISSING", Explanation: fmt.Sprintf("Host %q lacks containers.compose required by Stack Instance %q.", host.Metadata.Name, instance.Metadata.Name), Remedy: "Place the primary DNS Stack Instance on a Compose-capable Host."})
+				}
+			}
+			continue
+		}
+		if instance.Spec.Stack != mediaStack || instance.Spec.Media == nil || instance.Spec.Network != nil {
 			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_STACK_UNSUPPORTED", Explanation: fmt.Sprintf("Stack Instance %q selects unsupported Stack %q.", instance.Metadata.Name, instance.Spec.Stack), Remedy: "Select the media Stack and provide its typed inputs."})
 			continue
 		}
@@ -334,9 +414,6 @@ func validateHostConflicts(instances []StackInstance, report *Report) {
 	ports := map[HostName]map[int]string{}
 	storage := map[HostName][]claimedResource{}
 	for _, instance := range instances {
-		if instance.Spec.Media == nil {
-			continue
-		}
 		host := instance.Spec.Host
 		if runtimeIdentities[host] == nil {
 			runtimeIdentities[host] = map[RuntimeIdentity]string{}
@@ -347,6 +424,9 @@ func validateHostConflicts(instances []StackInstance, report *Report) {
 			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_RUNTIME_IDENTITY_INVALID", Explanation: fmt.Sprintf("Stack Instance %q has no runtime identity.", instance.Metadata.Name), Remedy: "Declare a stable runtimeIdentity."})
 		} else {
 			runtimeIdentities[host][instance.Spec.RuntimeIdentity] = string(instance.Metadata.Name)
+		}
+		if instance.Spec.Media == nil {
+			continue
 		}
 		if ports[host] == nil {
 			ports[host] = map[int]string{}

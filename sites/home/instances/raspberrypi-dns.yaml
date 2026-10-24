@@ -1,0 +1,10 @@
+apiVersion: homelab.site/v1alpha1
+kind: StackInstance
+metadata:
+    name: raspberrypi-dns
+spec:
+    stack: network
+    host: raspberrypi
+    runtimeIdentity: raspberrypi-dns
+    network:
+        role: secondary

@@ -1,8 +1,10 @@
 # Home Site network
 
-`homelab` runs the Media Stack and a Traefik instance for this Site. `pc` runs Minecraft Bedrock. The Host names are
-recorded in this Site Inventory; this initial Site document has no Stack Instances because the Media Stack still uses its
-existing Declared Configuration and Traefik is operated as a separate Compose project.
+`homelab` runs the Media Stack and a Traefik instance for this Site. `pc` runs Minecraft Bedrock. The Site Inventory now
+declares two future DNS Stack Instances and their DNS Cluster: `homelab-dns` on `homelab` and `raspberrypi-dns` on
+`raspberrypi`. These declarations do not deploy DNS. The Media Stack still uses its existing Declared Configuration and
+Traefik remains a separate Compose project. The [topology guide](docs/topology.md) records how to add confirmed encrypted
+addresses and reservations before deployment.
 
 ## Name resolution
 
@@ -17,12 +19,13 @@ Technitium DNS and DHCP are configured separately from this change. Create these
 | `minecraft.home` | CNAME | `homelab.home` |
 
 The A records hold the machine addresses for this routing setup. No machine address is stored in this routing project. The
-planned Site network inventory will version IP addresses and MAC addresses as SOPS-encrypted values rather than plaintext Git.
+Site network inventory versions proposed IP addresses and MAC addresses as SOPS-encrypted values rather than plaintext Git.
 The [Bell device observation](secrets/devices.sops.yaml) is a SOPS-encrypted snapshot from the router dashboard and DHCP
 lease table, updated with later aliases and address changes. It contains connected devices and historical entries that overlap
 proposed infrastructure addresses. It is not a complete client export, a reservation list, or proof that an address is
-available. It uses the existing repository age recipient. Add a separate recovery recipient before relying on it as the sole
-recoverable copy of the inventory. Edit it with `sops sites/home/secrets/devices.sops.yaml`; commit only the encrypted file.
+available. It uses the existing repository age recipient, also used by the proposed [encrypted topology](secrets/site.sops.yaml).
+The operator keeps copies of this one identity on three machines; those copies do not create a second recipient. Edit the
+snapshot with `sops sites/home/secrets/devices.sops.yaml`; commit only the encrypted file.
 Plain YAML files in `secrets/` are ignored.
 The same encrypted snapshot records the operator-confirmed current Bell DHCP pool and lease duration. The revised pool begins
 above the proposed infrastructure address band. Historical low-address entries still require a live conflict check before

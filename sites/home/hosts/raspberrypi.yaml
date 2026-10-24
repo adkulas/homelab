@@ -1,0 +1,7 @@
+apiVersion: homelab.site/v1alpha1
+kind: Host
+metadata:
+    name: raspberrypi
+spec:
+    capabilities: []
+    networkAddress: raspberrypi-address

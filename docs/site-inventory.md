@@ -13,7 +13,7 @@ CGO_ENABLED=0 go build -o bin/homelab ./cmd/homelab
 ./bin/homelab plan --site example --instance media --environment staging --output human
 ```
 
-Both commands are read-only. Validation uses files only: it does not contact Docker, applications, the network, or SOPS.
+Both commands are read-only. Validation does not contact Docker, applications, or the network. Sites that declare `spec.network` require SOPS decryption to validate their encrypted address and MAC references; other Sites validate without SOPS.
 Planning resolves one selected Stack Instance and Environment and delegates to that Stack's existing typed planner.
 
 ## Document contract
@@ -43,6 +43,13 @@ A kind `StackInstance` has a unique `metadata.name`, selects `stack: media`, bin
 the reusable acquisition policy in `services/media/media-stack.yaml` and the checked-in image versions. The legacy
 `media-stack` command remains available during migration.
 
+For the network Stack, a Stack Instance selects `stack: network`, binds a listed Host, and declares `network.role` as
+`primary` or `secondary`. The Site's `spec.dnsCluster` names one of each on distinct Hosts. A Site may then declare
+`spec.network` with semantic references to its subnet, gateway, DHCP bands, and MAC reservations; each DNS Host declares
+`spec.networkAddress`. The concrete values live in the Site's SOPS document. `site validate --output json` includes a
+`networkPlan` with only semantic IDs and `<redacted>` values, and diagnostics identify invalid entries without exposing
+decrypted addresses or MACs. See the [home topology guide](../sites/home/docs/topology.md) for the declaration shape.
+
 Validation rejects a Media Stack Instance on a Host missing any of the three current capabilities. Published ports,
 runtime identities, and overlapping data or backup roots must be unique among Stack Instances on one Host. Equivalent
 resources on different Hosts are valid. Production and Staging remain distinct Environments within each instance.
@@ -53,14 +60,14 @@ Human and JSON output is deterministic. JSON documents use the same API version 
 ## Sensitive Site topology
 
 Low-impact identities, assignments, capabilities, and illustrative paths stay in cleartext. A Site that needs to hide exact
-topology declares one confined SOPS document and separate daily and recovery age recipients:
+topology declares one confined SOPS document and a daily age recipient. A distinct recovery recipient is optional:
 
 ```yaml
 spec:
     sensitiveValues:
         document: secrets/site.sops.yaml
         dailyRecipient: age1daily...
-        recoveryRecipient: age1recovery...
+        recoveryRecipient: age1recovery... # optional, if a second identity is held
 ```
 
 The decrypted document uses generic structural keys. Semantic identifiers are values rather than YAML mapping keys, so SOPS
@@ -79,7 +86,7 @@ Encrypt only `value` fields so semantic IDs remain reviewable:
 
 ```bash
 sops encrypt --encrypted-regex '^value$' \
-  --age 'age1daily...,age1recovery...' \
+  --age 'age1daily...' \
   --input-type yaml --output-type yaml values.yaml > secrets/site.sops.yaml
 ```
 

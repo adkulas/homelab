@@ -56,6 +56,15 @@ func TestSitePlanDelegatesToExistingMediaStackPlanner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("legacy media-stack plan failed: %v\n%s", err, legacyOutput)
 	}
+	// The legacy command may prepend live drift actions. Compare its rendered
+	// Compose document with the Site planner's Compose-only output.
+	for bytes.HasPrefix(legacyOutput, []byte("# ")) {
+		_, remaining, found := bytes.Cut(legacyOutput, []byte("\n"))
+		if !found {
+			t.Fatalf("legacy plan has an unterminated action: %s", legacyOutput)
+		}
+		legacyOutput = remaining
+	}
 
 	command := homelabCommand(t, "plan", "--site", "example", "--instance", "media", "--environment", "staging", "--output", "json")
 	output, err := command.CombinedOutput()

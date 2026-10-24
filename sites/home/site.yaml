@@ -6,4 +6,29 @@ spec:
     hosts:
         - hosts/homelab.yaml
         - hosts/pc.yaml
-    stackInstances: []
+        - hosts/raspberrypi.yaml
+    stackInstances:
+        - instances/homelab-dns.yaml
+        - instances/raspberrypi-dns.yaml
+    dnsCluster:
+        primary: homelab-dns
+        secondary: raspberrypi-dns
+    sensitiveValues:
+        document: secrets/site.sops.yaml
+        dailyRecipient: age1uv36pz02dknswlx0szqymffsd7ffz77k35rqqnzs9kff8edemurqvjdwur
+    network:
+        subnet: lan-subnet
+        gateway: bell-gateway
+        dhcp:
+            owner: homelab-dns
+            reservationStart: reserved-start
+            reservationEnd: reserved-end
+            dynamicStart: dynamic-start
+            dynamicEnd: dynamic-end
+            reservations:
+                - name: pc
+                  address: pc-address
+                  mac: pc-mac
+                - name: media-laptop
+                  address: media-laptop-address
+                  mac: media-laptop-mac

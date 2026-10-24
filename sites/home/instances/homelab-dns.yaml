@@ -1,0 +1,10 @@
+apiVersion: homelab.site/v1alpha1
+kind: StackInstance
+metadata:
+    name: homelab-dns
+spec:
+    stack: network
+    host: homelab
+    runtimeIdentity: homelab-dns
+    network:
+        role: primary
