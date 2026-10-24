@@ -18,6 +18,15 @@ Technitium DNS and DHCP are configured separately from this change. Create these
 
 The A records hold the machine addresses for this routing setup. No machine address is stored in this routing project. The
 planned Site network inventory will version IP addresses and MAC addresses as SOPS-encrypted values rather than plaintext Git.
+The [Bell device observation](secrets/devices.sops.yaml) is a SOPS-encrypted snapshot from the router dashboard and DHCP
+lease table, updated with later aliases and address changes. It contains connected devices and historical entries that overlap
+proposed infrastructure addresses. It is not a complete client export, a reservation list, or proof that an address is
+available. It uses the existing repository age recipient. Add a separate recovery recipient before relying on it as the sole
+recoverable copy of the inventory. Edit it with `sops sites/home/secrets/devices.sops.yaml`; commit only the encrypted file.
+Plain YAML files in `secrets/` are ignored.
+The same encrypted snapshot records the operator-confirmed current Bell DHCP pool and lease duration. The revised pool begins
+above the proposed infrastructure address band. Historical low-address entries still require a live conflict check before
+assigning static Host addresses. The wired Hosts, NVR, and Hue bridge were reconfirmed in the revised wired dashboard.
 Household clients and the Traefik container must resolve these names through Technitium. Configure DHCP to distribute
 Technitium as the resolver, and make sure Docker on `homelab` also uses a resolver that knows `homelab.home` and `pc.home`.
 If Docker cannot resolve the upstream Host names, Traefik cannot reach the services even when client DNS works.
