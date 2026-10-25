@@ -1,0 +1,40 @@
+# Disposable DNS rehearsal for #99. This is not the Host deployment in #103.
+name: technitium-pilot
+services:
+  primary:
+    image: docker.io/technitium/dns-server:15.6.2@sha256:eb48ac5c135f4ab936b536f74f853d53e15ab39ef37fdbc9598a089b90d9f245
+    environment:
+      DNS_SERVER_DOMAIN: primary.cluster.pilot.test
+      DNS_SERVER_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+      DNS_SERVER_RECURSION: AllowOnlyForPrivateNetworks
+      DNS_SERVER_ENABLE_BLOCKING: "true"
+      DNS_SERVER_WEB_SERVICE_LOCAL_ADDRESSES: 0.0.0.0
+      DNS_SERVER_WEB_SERVICE_ENABLE_HTTPS: "true"
+      DNS_SERVER_WEB_SERVICE_USE_SELF_SIGNED_CERT: "true"
+    secrets: [admin_password]
+    volumes:
+      - primary_config:/etc/dns
+    networks: [pilot]
+  secondary:
+    image: docker.io/technitium/dns-server:15.6.2@sha256:eb48ac5c135f4ab936b536f74f853d53e15ab39ef37fdbc9598a089b90d9f245
+    environment:
+      DNS_SERVER_DOMAIN: secondary.cluster.pilot.test
+      DNS_SERVER_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+      DNS_SERVER_RECURSION: AllowOnlyForPrivateNetworks
+      DNS_SERVER_ENABLE_BLOCKING: "true"
+      DNS_SERVER_WEB_SERVICE_LOCAL_ADDRESSES: 0.0.0.0
+      DNS_SERVER_WEB_SERVICE_ENABLE_HTTPS: "true"
+      DNS_SERVER_WEB_SERVICE_USE_SELF_SIGNED_CERT: "true"
+    secrets: [admin_password]
+    volumes:
+      - secondary_config:/etc/dns
+    networks: [pilot]
+secrets:
+  admin_password:
+    file: ${PILOT_PASSWORD_FILE:?Set PILOT_PASSWORD_FILE to a private password file outside Git}
+volumes:
+  primary_config:
+  secondary_config:
+networks:
+  pilot:
+    driver: bridge
