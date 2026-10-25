@@ -6,9 +6,9 @@ The home Site Inventory declares `homelab-dns` on Host `homelab` as the primary 
 
 ## Proposed address roles
 
-The subnet and gateway come from the current preferred LAN route, checked against the Bell device snapshot. The proposed static DNS Host addresses end in `.10` and `.11`. The excluded reservation band is `.20–.99`; `pc` is proposed at `.30` and the media laptop at `.31`, using their observed MACs. The `pc` MAC comes from the snapshot's `desktop` row; confirm that this row is the Minecraft PC before applying the reservation. The proposed dynamic band matches Bell's observed `.100–.254` pool. These are declarations for later staging, not active DHCP settings.
+The subnet and gateway come from the current preferred LAN route, checked against the Bell device snapshot. The proposed static DNS Host addresses end in `.10` and `.11`. The excluded reservation band is `.20–.99`; `pc` is proposed at `.30` and the media laptop at `.31`, using their observed MACs. The operator confirmed on 2026-10-24 that the snapshot's `desktop` row is the Minecraft PC. The proposed dynamic band matches Bell's observed `.100–.254` pool. These are declarations for later staging, not active DHCP settings.
 
-The [Bell snapshot](../secrets/devices.sops.yaml) has disconnected historical entries at `.10`, `.11`, and within the low band. It also has duplicate observed IPs. A snapshot cannot prove that an address is currently free. Compare the proposed addresses with current leases and fixed device settings, and confirm the wired/local-console recovery path before assigning a Host address or enabling DHCP. Keep Bell DHCP authoritative until the supervised cutover.
+The [Bell snapshot](../secrets/devices.sops.yaml) has disconnected historical entries at `.10`, `.11`, and within the low band. It also has duplicate observed IPs. The operator confirmed on 2026-10-24 that current leases do not occupy proposed `.10` or `.11`. Recheck leases and fixed device settings immediately before assigning a Host address, and confirm the wired/local-console recovery path before enabling DHCP. Keep Bell DHCP authoritative until the supervised cutover.
 
 ## Validate without exposing values
 
