@@ -7,3 +7,6 @@ result-*
 
 # Ignore locally built executables
 /bin/
+
+# Python command and acceptance-test caches
+__pycache__/

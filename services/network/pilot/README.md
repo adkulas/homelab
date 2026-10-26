@@ -39,3 +39,14 @@ This measures one cold external A query, 50 sequential queries, 800 cached and 8
 ## Deployment checks after the pilot
 
 The [evidence matrix](evidence.md) records issue #99's acceptance checks and their limits. Before household deployment, join the actual Pi to the DNS Cluster with the approved management and firewall policy, complete a longer capacity soak and promotion/rejoin, and verify reservation hostname precedence, lease renewal, and collision refusal. Design a safe #107 staging path around the observed initial enabled-scope interval. Keep all DHCP tests on a disposable bridge and any restore target unable to answer household DHCP.
+
+## Trusted management HTTPS rehearsal (#100)
+
+Run `services/network/pilot/https_check.sh` from the repository root. It requires Python 3,
+OpenSSL 3 and Docker Compose. It creates throwaway CA/leaf material outside Git, configures
+both fresh containers with password-protected PKCS#12 certificates, verifies chain, DNS
+SAN and expiry checks, then replaces the secondary leaf and verifies the exact new
+certificate. All scopes must remain disabled. It refuses existing pilot state and removes
+its own containers, volumes and private workspace on exit. This connected rehearsal uses
+only disposable keys; the real Site root must be created and kept offline using the
+[CA custody guide](../docs/management-https.md).
