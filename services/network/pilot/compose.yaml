@@ -2,7 +2,7 @@
 name: technitium-pilot
 services:
   primary:
-    image: docker.io/technitium/dns-server:15.6.2@sha256:eb48ac5c135f4ab936b536f74f853d53e15ab39ef37fdbc9598a089b90d9f245
+    image: ${TECHNITIUM_IMAGE:?Use --env-file services/network/technitium.env}
     environment:
       DNS_SERVER_DOMAIN: primary.cluster.pilot.test
       DNS_SERVER_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
@@ -16,7 +16,7 @@ services:
       - primary_config:/etc/dns
     networks: [pilot]
   secondary:
-    image: docker.io/technitium/dns-server:15.6.2@sha256:eb48ac5c135f4ab936b536f74f853d53e15ab39ef37fdbc9598a089b90d9f245
+    image: ${TECHNITIUM_IMAGE:?Use --env-file services/network/technitium.env}
     environment:
       DNS_SERVER_DOMAIN: secondary.cluster.pilot.test
       DNS_SERVER_ADMIN_PASSWORD_FILE: /run/secrets/admin_password

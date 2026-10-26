@@ -26,3 +26,11 @@ These require Python 3, OpenSSL 3, age and age-keygen. Run
 `services/network/pilot/https_check.sh` for a disposable rehearsal against both pinned
 Technitium containers, including secondary leaf replacement. It requires Docker Compose,
 publishes no Host ports, and shares the pilot lock with the #99 runner.
+
+## Paired DNS backup and recovery
+
+The [backup and recovery guide](docs/backup-restore.md) covers #101's paired encrypted
+capture, PC/Passport copy verification, protected-change gate, isolated Restore Drill,
+and supervised stopped configuration export for either DNS Host. Run
+`python3 services/network/backup/backup.py --help` for the operator interface.
+No command starts a production service or enables household DHCP.

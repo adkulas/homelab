@@ -2,7 +2,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/../../.."
-compose=(docker compose -f services/network/pilot/compose.yaml)
+compose=(docker compose --env-file services/network/technitium.env -f services/network/pilot/compose.yaml)
 "${compose[@]}" config --quiet
 
 query_resolver() {
