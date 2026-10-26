@@ -12,7 +12,7 @@ fi
 pilot_password_file=$(mktemp /tmp/technitium-pilot-password.XXXXXX)
 openssl rand -hex 24 | tr -d '\n' > "$pilot_password_file"
 export PILOT_PASSWORD_FILE="$pilot_password_file"
-compose=(docker compose -f services/network/pilot/compose.yaml)
+compose=(docker compose --env-file services/network/technitium.env -f services/network/pilot/compose.yaml)
 cleanup() {
   result=$?
   trap - EXIT
@@ -20,7 +20,7 @@ cleanup() {
     rm -f "$pilot_password_file"
   else
     echo "Pilot teardown failed; private password file retained at $pilot_password_file" >&2
-    echo "Retry cleanup: PILOT_PASSWORD_FILE=$pilot_password_file docker compose -f services/network/pilot/compose.yaml down -v" >&2
+    echo "Retry cleanup: PILOT_PASSWORD_FILE=$pilot_password_file docker compose --env-file services/network/technitium.env -f services/network/pilot/compose.yaml down -v" >&2
     result=1
   fi
   exit "$result"

@@ -48,3 +48,9 @@ For the optional Docker rehearsal and offline CA workflow, see
 - Run `./bin/media-stack test` when you want the repo's full test suite from the CLI, or `go test ./...` from the repository root.
 - Every future pull request must keep this document aligned with the current developer workflow and test commands.
 - Keep generated binaries out of version control.
+
+Network backup command checks run with
+`go test ./tests/acceptance -run '^TestNetworkBackupCommands$'` and use Python 3,
+OpenSSL, age and age-keygen. The optional pinned Docker rehearsal is
+`services/network/pilot/backup_check.sh`; see the
+[backup and recovery guide](services/network/docs/backup-restore.md).

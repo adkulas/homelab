@@ -3,7 +3,7 @@
 import json
 import subprocess
 
-COMPOSE = ["docker", "compose", "-f", "services/network/pilot/compose.yaml"]
+COMPOSE = ["docker", "compose", "--env-file", "services/network/technitium.env", "-f", "services/network/pilot/compose.yaml"]
 NETWORK = "technitium-pilot_pilot"
 
 

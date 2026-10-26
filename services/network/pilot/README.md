@@ -20,7 +20,7 @@ The runner starts a fresh pilot for the API fallback exercise so the restore has
 
 The pinned [effectivelywild collection v1.1.2](https://github.com/effectivelywild/ansible-collection-technitium-dns/blob/v1.1.2/plugins/module_utils/technitium.py) inserts the API token into URL parameters for reads and JSON requests. That does not meet this plan's bearer-header credential handling. The narrow Python standard-library API path uses bearer headers and passed read/diff, dry run, unchanged second plan, update, backup ZIP integrity, and zone plus disabled-scope restore with its reservation and exclusion. It is pilot code; tickets #105 and #107 still need protected production planning and application.
 
-The runner removes disposable state automatically. If interrupted outside the runner, use `PILOT_PASSWORD_FILE=/tmp/unused docker compose -f services/network/pilot/compose.yaml down -v` to clean up the project.
+The runner removes disposable state automatically. If interrupted outside the runner, use `PILOT_PASSWORD_FILE=/tmp/unused docker compose --env-file services/network/technitium.env -f services/network/pilot/compose.yaml down -v` to clean up the project.
 
 ## Native Pi 3 pilot
 
