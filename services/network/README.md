@@ -1,4 +1,4 @@
-# Home Site network preflight
+# Home Site network
 
 Issue #97 adds a read-only preflight for the existing home Site. Run it on each available Host before changing Host addressing, DNS, or DHCP:
 
@@ -12,3 +12,17 @@ Run the matching command **on that machine** from a checkout of this repository.
 The check reads routes, interface address metadata, relevant listeners, resolver metadata, profile counts, and tracked configuration candidates. It does not configure interfaces, query the Bell admin API, send DHCP broadcasts, restart services, or install anything. The report shows route interfaces and metrics, and listener binding types, without addresses. A local listener is evidence to review, not proof of a port conflict. An observed IPv6 resolver is not proof of how Bell advertises it. The manual checks remain blockers until separately verified.
 
 See [the preflight and recovery packet guide](docs/preflight.md) for the operator checklist, private evidence format, and fallback sequence. The complete installation and cutover guide is a later work item.
+
+## Management certificates
+
+The [offline CA and management HTTPS guide](docs/management-https.md) covers the #100
+certificate commands, separate encrypted root backup, administrator trust, supervised
+renewal, and recovery. Prepare certificates before installing the DNS Stack Instances;
+actual Host deployment and access restrictions remain deployment gates.
+
+Run certificate acceptance checks with `go test ./tests/acceptance -run '^TestNetworkManagementCertificateCommands$'`
+or `python3 -B -m unittest discover -s services/network/ca -p 'test_*.py'`.
+These require Python 3, OpenSSL 3, age and age-keygen. Run
+`services/network/pilot/https_check.sh` for a disposable rehearsal against both pinned
+Technitium containers, including secondary leaf replacement. It requires Docker Compose,
+publishes no Host ports, and shares the pilot lock with the #99 runner.

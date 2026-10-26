@@ -33,6 +33,14 @@ For repository-wide read-only inventory work, validate and plan through the comp
 ./bin/homelab plan --site example --instance media --environment staging
 ```
 
+The network certificate acceptance checks included in `go test ./...` require Python 3,
+OpenSSL 3, `age`, and `age-keygen`. CI explicitly installs these tools and a
+checksum-verified SOPS v3.13.3 for encrypted-inventory acceptance checks.
+To run only the certificate checks, use
+`go test ./tests/acceptance -run '^TestNetworkManagementCertificateCommands$'`.
+For the optional Docker rehearsal and offline CA workflow, see
+[the network guide](services/network/docs/management-https.md).
+
 ## Notes
 
 - Use the local build for day-to-day development and debugging.
