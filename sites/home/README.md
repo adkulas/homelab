@@ -6,6 +6,8 @@ declares two future DNS Stack Instances and their DNS Cluster: `homelab-dns` on 
 Traefik remains a separate Compose project. The [topology guide](docs/topology.md) records how to add confirmed encrypted
 addresses and reservations before deployment.
 
+Follow the [ordered network setup and recovery walkthrough](../../services/network/docs/setup.md) before any live network change.
+
 ## Name resolution
 
 Technitium DNS and DHCP are configured separately from this change. Create these local DNS records before starting Traefik:
