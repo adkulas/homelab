@@ -1,0 +1,12 @@
+[Unit]
+Description=Home Site Pi DNS access restrictions
+Before=technitium-pi.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft --file /etc/technitium-pi/firewall.nft
+# Keep restrictions installed when DNS stops or restarts.
+
+[Install]
+WantedBy=multi-user.target

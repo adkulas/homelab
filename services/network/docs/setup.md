@@ -86,7 +86,7 @@ approved by #104, set a unique administrator account and SSH public key, select 
 identified spare SD card, write and verify it. Boot the Pi on Ethernet, log in at its
 local console, and privately record the OS release, architecture and active network
 profile. Keep DHCP automatic at this step; install no DHCP service. Preserve the original
-SD card for rollback. Use the #104 procedure for OS updates and reboot before proceeding.
+SD card for rollback. Use the [Pi procedure](secondary-dns.md) for OS updates and reboot before proceeding.
 
 **Expected/verify:** Local and SSH login work; OS/architecture match the reviewed native
 runtime and there are no power/storage errors. Run the Pi preflight in step 4.
@@ -134,8 +134,8 @@ as described in the CA guide. Do not replace an established root without its rot
 **Prerequisites:** Fresh step-4 results, private original profiles, confirmed free addresses
 outside Bell allocation, wired recovery access and reviewed Host-specific profiles.
 For homelab, follow the [primary DNS procedure](primary-dns.md), including its private
-Host profile review and timed reversion. Pi profile rendering and timed NetworkManager
-reversion remain gated on #104. Do not improvise a network profile from this guide.
+Host profile review and timed reversion. For the Pi, follow the [native DNS procedure](secondary-dns.md), including inactive
+profile staging, exact-plan approval and timed NetworkManager reversion.
 
 **Action:** On homelab, stage the reviewed private Netplan profile preserving Wi-Fi and
 route priorities, then run `sudo netplan try` locally. Confirm only after checking
@@ -155,9 +155,10 @@ connection from the console. Recheck access before trying again.
 
 **Prerequisites:** Steps 5–6; #103's reviewed host-networked Compose and #104's pinned
 native systemd installer/removal procedure. Homelab's Compose and supervised procedure
-are available in [primary DNS](primary-dns.md); Pi artifacts remain gated on #104.
+are available in [primary DNS](primary-dns.md); Pi artifacts and commands are in
+[native Pi DNS](secondary-dns.md). Live acceptance remains required for each Host.
 
-**Action (homelab procedure; Pi gate #104):** Follow each deployment ticket's install/start commands
+**Action:** Follow each deployment ticket's install/start commands
 on its assigned Host. Homelab uses the digest in `services/network/technitium.env`, private
 persistent configuration and no Compose published ports or Docker socket. Pi uses the
 reviewed native version/runtime under systemd. Do not run the pilot as a live service.

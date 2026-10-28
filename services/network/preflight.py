@@ -196,7 +196,7 @@ def collect(role: str, repo: Path, evidence: dict[str, bool], deployment: bool =
         for key, remedy in {
             "deployment_routes_reviewed": "Compare Host routes, Docker subnets, Wi-Fi priorities and retained Bell gateway with the saved private packet.",
             "deployment_firewall_ready": "Install and verify the selected IPv4/IPv6 DNS and management access rules before starting Technitium.",
-            "deployment_rollback_ready": "Test local console access and arm the timed Host and service rollback described in primary-dns.md.",
+            "deployment_rollback_ready": "Test local console access and arm the timed Host and service rollback described in the selected Host deployment guide.",
             "deployment_fresh_configuration": "Use a new empty private configuration directory; never start household-connected restored or pilot DHCP state.",
         }.items():
             if evidence.get(key) is not True:
@@ -239,7 +239,7 @@ def collect(role: str, repo: Path, evidence: dict[str, bool], deployment: bool =
         if not has_address:
             blockers.append({"code": "NO_NON_LOOPBACK_IPV4", "remedy": "Confirm the selected Host has a usable LAN address."})
 
-    if deployment:
+    if deployment and role == "homelab":
         blockers.extend(deployment_route_blockers(routes, addresses))
 
     ok, sockets = command("ss", "-H", "-lntu")
@@ -289,8 +289,8 @@ def main() -> int:
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[2], help=argparse.SUPPRESS)
     parser.add_argument("--deployment", action="store_true", help="Strict first-start gate: require free ports and deployment confirmations")
     args = parser.parse_args()
-    if args.deployment and args.role != "homelab":
-        parser.error("--deployment is only supported for homelab")
+    if args.deployment and args.role == "recovery-client":
+        parser.error("--deployment is only supported for DNS Hosts")
     try:
         evidence = load_evidence(args.evidence)
     except ValueError as error:

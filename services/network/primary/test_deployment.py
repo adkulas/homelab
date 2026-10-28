@@ -11,7 +11,7 @@ PREFLIGHT = ROOT / "services/network/preflight.py"
 
 
 class DeploymentPreflightTests(unittest.TestCase):
-    def run_preflight(self, sockets="", failed="", evidence=True, routes=True, docker_subnet="172.18.0.0/16"):
+    def run_preflight(self, sockets="", failed="", evidence=True, routes=True, docker_subnet="172.18.0.0/16", role="homelab"):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             probe = root / "probe"
@@ -43,7 +43,7 @@ elif name == "docker":
             environment = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"],
                                SOCKETS=sockets, FAILED_PROBE=failed, DOCKER_SUBNET=docker_subnet,
                                ROUTES=json.dumps([{"dev": "eth0", "gateway": "192.0.2.1"}] if routes else []))
-            args = ["python3", "-B", str(PREFLIGHT), "--role", "homelab", "--deployment"]
+            args = ["python3", "-B", str(PREFLIGHT), "--role", role, "--deployment"]
             initial = subprocess.run(args, env=environment, capture_output=True, text=True)
             if not evidence:
                 return initial
@@ -52,6 +52,18 @@ elif name == "docker":
             confirmations.write_text(json.dumps({item["code"].lower(): True for item in report["blockers"]}))
             return subprocess.run(args + ["--evidence", str(confirmations)], env=environment,
                                   capture_output=True, text=True)
+
+    def test_pi_deployment_does_not_require_docker_but_rejects_occupied_ports(self):
+        result = self.run_preflight(role="raspberrypi", failed="docker")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for port in (53, 67, 5380, 53443):
+            with self.subTest(port=port):
+                result = self.run_preflight(role="raspberrypi", sockets=f"udp UNCONN 0 0 *:{port} *:*")
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("DEPLOYMENT_PORT_CONFLICT", result.stdout)
+        self.assertEqual(self.run_preflight(role="raspberrypi", evidence=False).returncode, 2)
+        self.assertEqual(self.run_preflight(role="raspberrypi", routes=False).returncode, 2)
+        self.assertEqual(self.run_preflight(role="raspberrypi", failed="ip").returncode, 2)
 
     def test_deployment_blocks_conflicting_listeners_even_when_operator_confirms(self):
         for protocol, port in (("tcp", 53), ("udp", 53), ("udp", 67), ("tcp", 5380), ("tcp", 53443)):

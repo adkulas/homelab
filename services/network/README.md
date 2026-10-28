@@ -45,3 +45,13 @@ Live acceptance remains pending until the operator records the complete deployme
 rollback checklist. Run command/artifact checks with
 `go test ./tests/acceptance -run '^TestNetworkPrimaryDeployment$'` (Python 3 and Docker
 Compose required; no Docker daemon or production service is used by these tests).
+
+## Native Pi DNS deployment
+
+Use the [raspberrypi native DNS procedure](docs/secondary-dns.md) for #104's pinned
+ARM64 bundle, stopped systemd installation, private fresh state, persistent access rules,
+static-address approval/rollback, trusted HTTPS and service removal. Bell retains DHCP.
+SSH preparation uses the existing `adam@rasp-pi` alias; privileged actions require the
+operator's local sudo session. Live acceptance includes reboot, rollback and a 24-hour
+soak and remains pending until recorded. Run staging command checks with
+`go test ./tests/acceptance -run '^TestNetworkSecondaryDeployment$'`.

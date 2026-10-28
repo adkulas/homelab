@@ -1,0 +1,31 @@
+[Unit]
+Description=Home Site raspberrypi DNS Stack Instance (Technitium 15.6.2)
+Wants=network-online.target
+After=network-online.target technitium-pi-firewall.service
+Requires=technitium-pi-firewall.service
+
+[Service]
+Type=simple
+User=technitium-pi
+Group=technitium-pi
+WorkingDirectory=/opt/technitium-pi/app
+Environment=DOTNET_ROOT=/opt/technitium-pi/runtime
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+EnvironmentFile=/etc/technitium-pi/bootstrap.env
+ExecStartPre=/usr/bin/test -s /etc/technitium-pi/admin-password
+ExecStart=/opt/technitium-pi/runtime/dotnet /opt/technitium-pi/app/DnsServerApp.dll --portable-app --stop-if-bind-fails /var/lib/technitium-pi
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+UMask=0077
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/technitium-pi
+SocketBindDeny=udp:67
+
+[Install]
+WantedBy=multi-user.target
