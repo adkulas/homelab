@@ -34,3 +34,14 @@ capture, PC/Passport copy verification, protected-change gate, isolated Restore 
 and supervised stopped configuration export for either DNS Host. Run
 `python3 services/network/backup/backup.py --help` for the operator interface.
 No command starts a production service or enables household DHCP.
+
+## Primary DNS deployment
+
+Use the [homelab primary DNS procedure](docs/primary-dns.md) for #103's production
+Compose service, strict first-start preflight, private state, access restrictions,
+trusted HTTPS and timed local rollback. Bell continues DHCP throughout. The production
+Compose file is separate from the disposable pilot; do not import pilot configuration.
+Live acceptance remains pending until the operator records the complete deployment and
+rollback checklist. Run command/artifact checks with
+`go test ./tests/acceptance -run '^TestNetworkPrimaryDeployment$'` (Python 3 and Docker
+Compose required; no Docker daemon or production service is used by these tests).

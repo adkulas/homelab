@@ -60,7 +60,7 @@ class PreflightTests(unittest.TestCase):
         )
         self.assertEqual(
             preflight.active_ports(output),
-            {"dns": True, "dhcp": True, "technitium-management": False},
+            {"dns": True, "dhcp": True, "technitium-management": False, "technitium-https": False},
         )
         self.assertEqual(
             preflight.listener_bindings(output),

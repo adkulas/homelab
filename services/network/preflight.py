@@ -43,7 +43,7 @@ HOST_CHECKS = {
 IPV4_LITERAL = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 MAC_LITERAL = re.compile(r"(?i)(?<![0-9a-f])(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}(?![0-9a-f])")
 CONFIG_SUFFIXES = {".yaml", ".yml", ".toml", ".conf", ".env", ".service", ".timer", ".sh"}
-PORTS = {53: "dns", 67: "dhcp", 5380: "technitium-management"}
+PORTS = {53: "dns", 67: "dhcp", 5380: "technitium-management", 53443: "technitium-https"}
 
 
 def command(*args: str) -> tuple[bool, str]:
@@ -155,9 +155,52 @@ def load_evidence(path: Path | None) -> dict[str, bool]:
     return data
 
 
-def collect(role: str, repo: Path, evidence: dict[str, bool]) -> dict[str, object]:
+
+def deployment_route_blockers(routes: object, addresses: object) -> list[dict[str, str]]:
+    """Compare directly connected default-route IPv4 networks with Docker IPAM."""
+    unavailable = [{"code": "DEPLOYMENT_ROUTE_PROBE_UNAVAILABLE", "remedy": "Inspect Host IPv4 interface prefixes and Docker network IPAM before deployment."}]
+    try:
+        if not isinstance(routes, list) or not isinstance(addresses, list):
+            return unavailable
+        interfaces = {route["dev"] for route in routes}
+        lan = [
+            ipaddress.ip_network(f"{info['local']}/{info['prefixlen']}", strict=False)
+            for interface in addresses if interface["ifname"] in interfaces
+            for info in interface["addr_info"] if info.get("scope") == "global"
+        ]
+        if not lan:
+            return unavailable
+        ok, ids = command("docker", "network", "ls", "-q")
+        if not ok:
+            return unavailable
+        if not ids.strip():
+            return []
+        ok, networks = json_command("docker", "network", "inspect", *ids.split())
+        if not ok or not isinstance(networks, list) or len(networks) != len(ids.split()):
+            return unavailable
+        docker = [
+            ipaddress.ip_network(config["Subnet"], strict=False)
+            for network in networks for config in (network["IPAM"]["Config"] or [])
+            if config.get("Subnet")
+        ]
+        if any(source.overlaps(target) for source in lan for target in docker):
+            return [{"code": "DEPLOYMENT_ROUTE_CONFLICT", "remedy": "Resolve overlapping Docker and default-route LAN subnets before changing the Host or starting DNS."}]
+    except (KeyError, TypeError, ValueError):
+        return unavailable
+    return []
+
+def collect(role: str, repo: Path, evidence: dict[str, bool], deployment: bool = False) -> dict[str, object]:
     blockers: list[dict[str, str]] = []
     inventory: dict[str, object] = {}
+    if deployment:
+        for key, remedy in {
+            "deployment_routes_reviewed": "Compare Host routes, Docker subnets, Wi-Fi priorities and retained Bell gateway with the saved private packet.",
+            "deployment_firewall_ready": "Install and verify the selected IPv4/IPv6 DNS and management access rules before starting Technitium.",
+            "deployment_rollback_ready": "Test local console access and arm the timed Host and service rollback described in primary-dns.md.",
+            "deployment_fresh_configuration": "Use a new empty private configuration directory; never start household-connected restored or pilot DHCP state.",
+        }.items():
+            if evidence.get(key) is not True:
+                blockers.append({"code": key.upper(), "remedy": remedy})
     for key, remedy in {**SITE_CHECKS, **HOST_CHECKS[role]}.items():
         if evidence.get(key) is not True:
             blockers.append({"code": key.upper(), "remedy": remedy})
@@ -196,11 +239,17 @@ def collect(role: str, repo: Path, evidence: dict[str, bool]) -> dict[str, objec
         if not has_address:
             blockers.append({"code": "NO_NON_LOOPBACK_IPV4", "remedy": "Confirm the selected Host has a usable LAN address."})
 
+    if deployment:
+        blockers.extend(deployment_route_blockers(routes, addresses))
+
     ok, sockets = command("ss", "-H", "-lntu")
     inventory["relevantListeners"] = active_ports(sockets) if ok else "unknown"
     inventory["listenerBindings"] = listener_bindings(sockets) if ok else "unknown"
     if not ok:
         blockers.append({"code": "LISTENER_PROBE_UNAVAILABLE", "remedy": "Install or run ss before reviewing port conflicts."})
+
+    if deployment and ok and any(active_ports(sockets).values()):
+        blockers.append({"code": "DEPLOYMENT_PORT_CONFLICT", "remedy": "Resolve every DNS, DHCP, HTTP and HTTPS listener before deployment; operator confirmations cannot override a conflict."})
 
     ok, resolvers = command("resolvectl", "dns")
     inventory["ipv6ResolverObserved"] = ipv6_resolver_present(resolvers) if ok else "unknown"
@@ -238,13 +287,16 @@ def main() -> int:
     parser.add_argument("--role", choices=HOST_CHECKS, required=True, help="Run on this actual Host role")
     parser.add_argument("--evidence", type=Path, help="Optional private JSON of confirmed operator checks")
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[2], help=argparse.SUPPRESS)
+    parser.add_argument("--deployment", action="store_true", help="Strict first-start gate: require free ports and deployment confirmations")
     args = parser.parse_args()
+    if args.deployment and args.role != "homelab":
+        parser.error("--deployment is only supported for homelab")
     try:
         evidence = load_evidence(args.evidence)
     except ValueError as error:
         print(f"preflight: {error}", file=sys.stderr)
         return 64
-    report = collect(args.role, args.repo, evidence)
+    report = collect(args.role, args.repo, evidence, args.deployment)
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["readyForNetworkChange"] else 2
 
