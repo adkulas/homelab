@@ -133,8 +133,9 @@ as described in the CA guide. Do not replace an established root without its rot
 **Interruption:** Address changes can disconnect SSH and services.
 **Prerequisites:** Fresh step-4 results, private original profiles, confirmed free addresses
 outside Bell allocation, wired recovery access and reviewed Host-specific profiles.
-Gate #103 for homelab and #104 for Pi: both must supply the exact rendered profile and
-local timed reversion procedure. Do not improvise a network profile from this guide.
+For homelab, follow the [primary DNS procedure](primary-dns.md), including its private
+Host profile review and timed reversion. Pi profile rendering and timed NetworkManager
+reversion remain gated on #104. Do not improvise a network profile from this guide.
 
 **Action:** On homelab, stage the reviewed private Netplan profile preserving Wi-Fi and
 route priorities, then run `sudo netplan try` locally. Confirm only after checking
@@ -153,9 +154,10 @@ connection from the console. Recheck access before trying again.
 ## 7. Start DNS only and install HTTPS — homelab, then raspberrypi
 
 **Prerequisites:** Steps 5–6; #103's reviewed host-networked Compose and #104's pinned
-native systemd installer/removal procedure. These production artifacts are pending.
+native systemd installer/removal procedure. Homelab's Compose and supervised procedure
+are available in [primary DNS](primary-dns.md); Pi artifacts remain gated on #104.
 
-**Action (gates #103/#104):** Follow each deployment ticket's exact install/start commands
+**Action (homelab procedure; Pi gate #104):** Follow each deployment ticket's install/start commands
 on its assigned Host. Homelab uses the digest in `services/network/technitium.env`, private
 persistent configuration and no Compose published ports or Docker socket. Pi uses the
 reviewed native version/runtime under systemd. Do not run the pilot as a live service.

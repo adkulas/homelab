@@ -60,3 +60,15 @@ Before any later Host address change, test the local console. For Ubuntu, use `s
 If a later DHCP cutover fails, use the wired recovery client and local Host console. **Disable Technitium DHCP first** and verify it no longer answers. Then open the Bell DHCP settings, restore the recorded prior pool, DNS, lease and reservation values, enable Bell DHCP, and save. Renew a test client's lease and confirm that its server identifier is Bell, its gateway works, and external DNS resolves. Do not enable Bell DHCP while Technitium is still answering. Bell's LAN gateway and subnet do not change in this project.
 
 Stop before any live change if the private packet is incomplete, a proposed address conflicts with a lease or static device, an IPv6 DNS path is unexplained, a required service port has an unexplained listener, or the wired/local-console recovery route fails.
+
+## Strict primary first-start gate
+
+For #103, run `python3 services/network/preflight.py --role homelab --deployment`
+to inspect blockers before any Host change, then require exit 0 immediately before
+starting the production container. This additionally blocks
+on any observed DNS/DHCP/HTTP/HTTPS listener, including loopback, and on overlap between
+Docker IPAM and IPv4 networks on default-route interfaces. Failed Docker probes block.
+It also requires dated
+route, firewall, rollback and fresh-state confirmations. Boolean evidence cannot waive
+an observed conflict or failed probe. See [the primary procedure](primary-dns.md).
+This first-start gate is not a health check for an already running DNS Stack Instance.

@@ -54,3 +54,9 @@ Network backup command checks run with
 OpenSSL, age and age-keygen. The optional pinned Docker rehearsal is
 `services/network/pilot/backup_check.sh`; see the
 [backup and recovery guide](services/network/docs/backup-restore.md).
+
+Primary DNS deployment checks run with
+`go test ./tests/acceptance -run '^TestNetworkPrimaryDeployment$'`. They require Python 3
+and Docker Compose v2 to render the production artifact, but do not contact a Docker
+daemon or change Host networking. The [primary DNS procedure](services/network/docs/primary-dns.md)
+separately records the supervised live checks required before #103 can be closed.
