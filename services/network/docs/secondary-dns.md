@@ -240,7 +240,9 @@ Never run the strict free-port gate against an already running DNS service.
 
 From the recovery PC: `ssh -L 15380:127.0.0.1:5380 adam@rasp-pi` (use the verified address
 if the old alias no longer resolves). Browse `http://127.0.0.1:15380`, sign in as `admin`
-with the private password, and verify **no DHCP scopes**. Follow the management HTTPS
+with the private password, and verify **no enabled DHCP scopes**. Technitium creates
+a disabled `Default` sample scope on fresh state; its **Enable** button confirms it is
+disabled. Leave it disabled. Follow the management HTTPS
 guide to transfer only the Pi's issued PFX, never the CA root key. Install it privately
 as `/var/lib/technitium-pi/tls/management.pfx`, owned by `technitium-pi`, mode 0600; the
 tls directory must be mode 0700. Set that path and its password in Settings / Web Service,
@@ -272,7 +274,7 @@ Check a signed domain validates and a deliberately invalid signed domain gives S
 
 From separate authorized and unauthorized clients verify DNS and HTTPS access/denial,
 including IPv4/IPv6 and non-loopback HTTP denial. Record firewall counters. Verify no
-UDP 67 listener with `sudo ss -H -lunp`, zero DHCP scopes and no Technitium offers during
+UDP 67 listener with `sudo ss -H -lunp`, no enabled DHCP scopes and no Technitium offers during
 a wired client's Bell renewal using the preflight capture procedure. Bell alone supplies
 the same gateway/DNS options. Repeat all baseline homelab DNS/household service checks.
 Delete only the temporary test zone after these probes.
@@ -285,7 +287,7 @@ sudo systemctl enable technitium-pi.service
 sudo reboot
 ```
 
-Recheck firewall-before-DNS, trusted HTTPS, DNS, no scopes/UDP 67 and original services.
+Recheck firewall-before-DNS, trusted HTTPS, DNS, no enabled scopes or UDP 67 listener, and original services.
 The service's `Requires`/`After` loads the firewall on each boot; a firewall load failure
 must keep DNS stopped. Test service stop/restart and the removal path before acceptance.
 
@@ -361,5 +363,5 @@ then repeat reboot and soak before accepting. Do not delete the only good backup
 
 Retain privately: operator/date and commit/pins, exact approved plans, profile/rollback
 and reboot results, permitted/denied access probes, independent recursion/DNSSEC, trusted
-HTTPS, absence of scopes/listeners/offers, capacity/24-hour soak, and removal/reinstall
+HTTPS, absence of enabled DHCP scopes/listeners/offers, capacity/24-hour soak, and removal/reinstall
 results. Publish only a redacted pass/fail summary after every acceptance row passes.

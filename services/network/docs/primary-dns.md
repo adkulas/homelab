@@ -200,7 +200,9 @@ stop and inspect locally; do not weaken the gate or paste private logs into GitH
 
 From the recovery PC open an SSH tunnel to the privately verified Host address:
 `ssh -L 15380:127.0.0.1:5380 "$HOMELAB_SSH"`. Browse `http://127.0.0.1:15380`, log in with
-the file-backed administrator password, and confirm DHCP has **no scopes**.
+the file-backed administrator password, and confirm DHCP has **no enabled scopes**.
+A fresh instance includes a disabled `Default` sample scope; its **Enable** button
+confirms it is disabled. Leave it disabled.
 
 ## 5. Install trusted HTTPS and verify service — console and recovery client
 
@@ -239,7 +241,7 @@ a current signed domain (validated result) and a known deliberately invalid sign
 
 From approved LAN/VPN clients verify DNS and HTTPS; from an unapproved source verify both
 are denied. Check IPv4 and IPv6, including HTTP denial. Inspect `ss -H -lntu` and the DHCP
-page: no UDP 67 listener and no scopes. Renew an isolated wired test client's Bell lease;
+page: no UDP 67 listener and no enabled scopes. Renew an isolated wired test client's Bell lease;
 confirm Bell remains the only offer source using the existing packet-capture procedure,
 with unchanged gateway and DHCP options. Re-run every baseline household service check.
 Delete only `deployment-test.home` after the probes; #105 will declare permanent records.
@@ -263,7 +265,7 @@ then verify gateway, DNS, SSH, Docker and household services. Keep Bell's subnet
 
 In the private packet record operator/date, commit/image digest, preflight report,
 Netplan rollback and reboot, permitted/denied dual-stack probes, local/uncached/DNSSEC
-answers, trusted HTTPS, zero Technitium scopes/offers, unchanged household services and
+answers, trusted HTTPS, zero enabled Technitium scopes and no offers, unchanged household services and
 successful service/address removal rehearsal. Publish only a redacted pass/fail summary.
 Until these live results exist, the implementation is ready for supervised deployment;
 #103's live acceptance remains pending.
