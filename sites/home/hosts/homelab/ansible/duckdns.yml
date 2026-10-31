@@ -1,0 +1,145 @@
+---
+- name: Install DuckDNS HTTPS prerequisites
+  ansible.builtin.apt:
+    name: [ca-certificates, curl]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the system SOPS and DuckDNS groups
+  ansible.builtin.group:
+    name: '{{ item }}'
+    system: true
+    state: present
+  loop: [sops, duckdns]
+
+- name: Create the unprivileged DuckDNS service account
+  ansible.builtin.user:
+    name: duckdns
+    group: duckdns
+    groups: sops
+    append: true
+    system: true
+    home: /var/lib/duckdns
+    create_home: false
+    shell: /usr/sbin/nologin
+
+- name: Create the restricted system SOPS identity directory
+  ansible.builtin.file:
+    path: /etc/sops/age
+    state: directory
+    owner: root
+    group: sops
+    mode: '0750'
+
+- name: Provision the shared service identity from the administrator's existing key
+  ansible.builtin.copy:
+    src: /home/{{ host_admin_user }}/.config/sops/age/keys.txt
+    dest: /etc/sops/age/keys.txt
+    remote_src: true
+    owner: root
+    group: sops
+    mode: '0640'
+    force: false
+  no_log: true
+  diff: false
+
+- name: Enforce service identity permissions
+  ansible.builtin.file:
+    path: /etc/sops/age/keys.txt
+    owner: root
+    group: sops
+    mode: '0640'
+
+- name: Create DuckDNS runtime directories
+  ansible.builtin.file:
+    path: '{{ item.path }}'
+    state: directory
+    owner: '{{ item.owner }}'
+    group: '{{ item.group }}'
+    mode: '{{ item.mode }}'
+  loop:
+    - {path: /etc/duckdns, owner: root, group: duckdns, mode: '0750'}
+    - {path: /usr/local/lib/duckdns, owner: root, group: root, mode: '0755'}
+    - {path: /var/lib/duckdns, owner: duckdns, group: duckdns, mode: '0700'}
+
+- name: Stage the encrypted configuration for service-account validation
+  ansible.builtin.copy:
+    src: '{{ playbook_dir }}/../../../../../services/duckdns/secrets.sops.yaml'
+    dest: /etc/duckdns/candidate.sops.yaml
+    owner: root
+    group: duckdns
+    mode: '0640'
+  diff: false
+
+- name: Require decryptable and populated configuration as the DuckDNS account
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -u
+      - duckdns
+      - --
+      - env
+      - SOPS_AGE_KEY_FILE=/etc/sops/age/keys.txt
+      - /usr/local/bin/sops
+      - exec-env
+      - --pristine
+      - /etc/duckdns/candidate.sops.yaml
+      - '/usr/bin/test -n "$DUCKDNS_DOMAIN" && /usr/bin/test -n "$DUCKDNS_TOKEN"'
+  changed_when: false
+  no_log: true
+
+- name: Install the validated encrypted DuckDNS configuration
+  ansible.builtin.copy:
+    src: /etc/duckdns/candidate.sops.yaml
+    dest: /etc/duckdns/secrets.sops.yaml
+    remote_src: true
+    owner: root
+    group: duckdns
+    mode: '0640'
+  diff: false
+
+- name: Install the maintained DuckDNS updater and log helper
+  ansible.builtin.copy:
+    src: '{{ playbook_dir }}/../../../../../services/duckdns/{{ item.source }}'
+    dest: '{{ item.destination }}'
+    owner: root
+    group: root
+    mode: '0755'
+    validate: /bin/bash -n %s
+  loop:
+    - {source: update.sh, destination: /usr/local/lib/duckdns/update.sh}
+    - {source: logs.sh, destination: /usr/local/bin/duckdns-logs}
+
+- name: Install the maintained hardened DuckDNS service
+  ansible.builtin.copy:
+    src: '{{ playbook_dir }}/../../../../../services/duckdns/duckdns.service'
+    dest: /etc/systemd/system/duckdns.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd
+
+- name: Install the maintained five-minute DuckDNS timer
+  ansible.builtin.copy:
+    src: '{{ playbook_dir }}/../../../../../services/duckdns/duckdns.timer'
+    dest: /etc/systemd/system/duckdns.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload systemd
+    - Restart DuckDNS timer
+
+- name: Validate the installed DuckDNS units
+  ansible.builtin.command: systemd-analyze verify duckdns.service duckdns.timer
+  changed_when: false
+
+- name: Load DuckDNS units before enabling the timer
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable the DuckDNS timer at boot
+  ansible.builtin.systemd_service:
+    name: duckdns.timer
+    enabled: true
+    state: started

@@ -1,0 +1,436 @@
+---
+- name: Configure the homelab Host
+  hosts: homelab
+  become: true
+  gather_facts: true
+  vars_files:
+    - vars.yml
+
+  pre_tasks:
+    - name: Require the audited operating system and architecture
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Ubuntu'
+          - ansible_facts.distribution_version == '26.04'
+          - ansible_facts.architecture == 'x86_64'
+        fail_msg: Review package sources and host assumptions before using another OS.
+      tags: [always]
+
+    - name: Inspect installed packages
+      ansible.builtin.package_facts:
+        manager: apt
+      tags: [always]
+
+  tasks:
+    - name: Provision the dedicated storage disk
+      ansible.builtin.import_tasks: storage.yml
+      tags: [storage]
+
+    - name: Configure base packages and maintenance
+      tags: [base]
+      block:
+        - name: Install administration and storage inspection tools
+          ansible.builtin.apt:
+            name:
+              - age
+              - ca-certificates
+              - chrony
+              - curl
+              - git
+              - htop
+              - jq
+              - lvm2
+              - python3-apt
+              - ripgrep
+              - smartmontools
+              - unattended-upgrades
+            state: present
+            update_cache: true
+            cache_valid_time: 3600
+
+        - name: Install the repository's pinned SOPS binary with checksum verification
+          ansible.builtin.get_url:
+            url: 'https://github.com/getsops/sops/releases/download/v{{ host_sops_version }}/sops-v{{ host_sops_version }}.linux.amd64'
+            dest: /usr/local/bin/sops
+            checksum: 'sha256:{{ host_sops_sha256 }}'
+            owner: root
+            group: root
+            mode: '0755'
+
+        - name: Upgrade installed packages during explicitly selected maintenance
+          ansible.builtin.apt:
+            upgrade: safe
+          when: host_upgrade_packages | bool
+
+        - name: Set the host timezone
+          ansible.builtin.file:
+            src: /usr/share/zoneinfo/{{ host_timezone }}
+            dest: /etc/localtime
+            state: link
+            force: true
+
+        - name: Keep time synchronization enabled
+          ansible.builtin.systemd_service:
+            name: chrony.service
+            enabled: true
+            state: started
+
+        - name: Verify configured boot network readiness
+          ansible.builtin.systemd_service:
+            name: systemd-networkd-wait-online.service
+            state: started
+
+        - name: Enable periodic SSD trim
+          ansible.builtin.systemd_service:
+            name: fstrim.timer
+            enabled: true
+            state: started
+
+        - name: Enable local disk health monitoring
+          ansible.builtin.systemd_service:
+            name: smartmontools.service
+            enabled: true
+            state: started
+
+        - name: Enable automatic package index refresh and security upgrades
+          ansible.builtin.copy:
+            dest: /etc/apt/apt.conf.d/20auto-upgrades
+            owner: root
+            group: root
+            mode: '0644'
+            content: |
+              APT::Periodic::Update-Package-Lists "1";
+              APT::Periodic::Unattended-Upgrade "1";
+
+        - name: Keep automatic reboots disabled
+          ansible.builtin.copy:
+            dest: /etc/apt/apt.conf.d/99homelab-reboots
+            owner: root
+            group: root
+            mode: '0644'
+            content: |
+              Unattended-Upgrade::Automatic-Reboot "false";
+
+        - name: Create the journal configuration directory
+          ansible.builtin.file:
+            path: /etc/systemd/journald.conf.d
+            state: directory
+            owner: root
+            group: root
+            mode: '0755'
+
+        - name: Limit system journal storage
+          ansible.builtin.copy:
+            dest: /etc/systemd/journald.conf.d/homelab.conf
+            owner: root
+            group: root
+            mode: '0644'
+            content: |
+              [Journal]
+              SystemMaxUse={{ host_journal_max_use }}
+              RuntimeMaxUse=100M
+              MaxRetentionSec={{ host_journal_max_retention }}
+          notify: Restart journald
+
+    - name: Prepare the Host's repository checkout
+      tags: [repo]
+      block:
+        - name: Ensure Git and HTTPS certificates are installed
+          ansible.builtin.apt:
+            name: [git, ca-certificates]
+            state: present
+            update_cache: true
+            cache_valid_time: 3600
+
+        - name: Clone the repository as the administrator and preserve existing work
+          become: true
+          become_user: '{{ host_admin_user }}'
+          ansible.builtin.git:
+            repo: '{{ host_repository_url }}'
+            dest: '{{ host_repository_path }}'
+            version: '{{ host_repository_version }}'
+            clone: true
+            update: false
+            force: false
+          environment:
+            GIT_TERMINAL_PROMPT: '0'
+
+    - name: Keep the laptop awake as a server
+      tags: [base, power]
+      block:
+        - name: Ignore lid closure on battery, external power, and while docked
+          ansible.builtin.lineinfile:
+            path: /etc/systemd/logind.conf
+            regexp: '^#?{{ item }}='
+            line: '{{ item }}=ignore'
+            insertafter: '^\[Login\]$'
+          loop:
+            - HandleLidSwitch
+            - HandleLidSwitchExternalPower
+            - HandleLidSwitchDocked
+          notify: Restart logind
+
+        - name: Mask sleep and hibernation targets
+          ansible.builtin.systemd_service:
+            name: '{{ item }}'
+            masked: true
+          loop:
+            - sleep.target
+            - suspend.target
+            - hibernate.target
+            - hybrid-sleep.target
+
+    - name: Configure Docker Engine
+      tags: [docker]
+      # A fresh installation needs packages and a working daemon for validation.
+      # Check mode cannot supply those dependencies; report the deferral below.
+      when: not ansible_check_mode or 'docker-ce' in ansible_facts.packages
+      block:
+        - name: Refuse to replace a conflicting container runtime automatically
+          ansible.builtin.assert:
+            that:
+              - >-
+                ['docker.io', 'docker-compose', 'docker-compose-v2',
+                 'docker-doc', 'docker-buildx', 'podman-docker', 'containerd', 'runc']
+                | intersect(ansible_facts.packages.keys() | list) | length == 0
+            fail_msg: Review existing containers and packages before replacing their runtime.
+
+        - name: Install Docker repository prerequisites
+          ansible.builtin.apt:
+            name: [ca-certificates, python3-debian]
+            state: present
+            update_cache: true
+            cache_valid_time: 3600
+
+        - name: Configure the official Docker stable repository
+          ansible.builtin.deb822_repository:
+            name: docker
+            types: [deb]
+            uris: https://download.docker.com/linux/ubuntu
+            suites: ['{{ ansible_facts.distribution_release }}']
+            components: [stable]
+            architectures: [amd64]
+            signed_by: https://download.docker.com/linux/ubuntu/gpg
+            state: present
+          register: host_docker_repository
+
+        - name: Install Docker Engine and Compose
+          ansible.builtin.apt:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: present
+            update_cache: '{{ host_docker_repository.changed }}'
+
+        - name: Create the Docker configuration directory
+          ansible.builtin.file:
+            path: /etc/docker
+            state: directory
+            owner: root
+            group: root
+            mode: '0755'
+
+        - name: Read existing Docker daemon configuration
+          ansible.builtin.stat:
+            path: /etc/docker/daemon.json
+          register: host_docker_config_file
+
+        - name: Load existing Docker daemon settings
+          ansible.builtin.slurp:
+            src: /etc/docker/daemon.json
+          register: host_docker_config
+          when: host_docker_config_file.stat.exists
+
+        - name: Bound Docker logs while preserving other daemon settings
+          ansible.builtin.copy:
+            dest: /etc/docker/daemon.json
+            owner: root
+            group: root
+            mode: '0644'
+            content: >-
+              {{ ((host_docker_config.content | default('e30=') | b64decode | from_json)
+                   | combine({'log-driver': 'json-file', 'log-opts': {
+                     'max-size': host_docker_log_max_size,
+                     'max-file': host_docker_log_max_files | string}})) | to_nice_json }}
+            validate: /usr/bin/dockerd --validate --config-file=%s
+          notify: Restart Docker
+
+        - name: Create the Docker service override directory
+          ansible.builtin.file:
+            path: /etc/systemd/system/docker.service.d
+            state: directory
+            owner: root
+            group: root
+            mode: '0755'
+
+        - name: Require the media filesystem before Docker starts
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/docker.service.d/storage.conf
+            owner: root
+            group: root
+            mode: '0644'
+            content: |
+              [Unit]
+              RequiresMountsFor={{ host_storage_mount }}
+          notify:
+            - Reload systemd
+            - Restart Docker
+
+        - name: Enable Docker at boot
+          ansible.builtin.systemd_service:
+            name: docker.service
+            enabled: true
+            state: started
+
+    - name: Report deferred Docker bootstrap in check mode
+      ansible.builtin.debug:
+        msg: Docker is not installed. Check mode defers Docker bootstrap; run normally to install, then check again.
+      when: ansible_check_mode and 'docker-ce' not in ansible_facts.packages
+      tags: [docker]
+
+    - name: Configure SSH key authentication
+      tags: [ssh]
+      block:
+        - name: Require an existing authorized key before disabling password login
+          ansible.builtin.stat:
+            path: /home/{{ host_admin_user }}/.ssh/authorized_keys
+          register: host_authorized_keys
+
+        - name: Check that the administrator has an authorized key file
+          ansible.builtin.assert:
+            that:
+              - host_authorized_keys.stat.isreg | default(false)
+              - host_authorized_keys.stat.size | default(0) > 0
+            fail_msg: Install and test an SSH key before applying SSH hardening.
+
+        - name: Require SSH keys and disable direct root login
+          ansible.builtin.copy:
+            dest: /etc/ssh/sshd_config.d/00-homelab.conf
+            owner: root
+            group: root
+            mode: '0644'
+            content: |
+              # Managed by the homelab Host playbook.
+              PubkeyAuthentication yes
+              PasswordAuthentication no
+              KbdInteractiveAuthentication no
+              PermitRootLogin no
+            validate: /usr/sbin/sshd -t -f %s
+          notify: Reload SSH
+
+    - name: Provision the operator's age identity when explicitly requested
+      tags: [secrets]
+      when: host_provision_age_identity | bool
+      block:
+        - name: Create the administrator's private SOPS identity directory
+          ansible.builtin.file:
+            path: /home/{{ host_admin_user }}/.config/sops/age
+            state: directory
+            owner: '{{ host_admin_user }}'
+            group: '{{ host_admin_user }}'
+            mode: '0700'
+
+        - name: Copy the existing controller identity without replacing a server identity
+          ansible.builtin.copy:
+            src: '{{ host_age_identity_source }}'
+            dest: /home/{{ host_admin_user }}/.config/sops/age/keys.txt
+            owner: '{{ host_admin_user }}'
+            group: '{{ host_admin_user }}'
+            mode: '0600'
+            force: false
+          no_log: true
+          diff: false
+
+        - name: Read only the server identity's public recipients
+          ansible.builtin.command:
+            argv: [age-keygen, -y, '/home/{{ host_admin_user }}/.config/sops/age/keys.txt']
+          register: host_age_public_recipients
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Require an identity matching the Site recipient
+          ansible.builtin.assert:
+            that:
+              - host_backup_age_recipient in host_age_public_recipients.stdout_lines
+            fail_msg: The existing server identity does not match the Site; review it before replacing any keys.
+          when: not ansible_check_mode
+
+    - name: Configure the DuckDNS updater
+      ansible.builtin.import_tasks: duckdns.yml
+      tags: [duckdns]
+
+    - name: Configure SSD and Passport backups
+      ansible.builtin.import_tasks: backups.yml
+      tags: [backups]
+
+    - name: Apply service configuration before reporting completion
+      ansible.builtin.meta: flush_handlers
+      tags: [always]
+
+    - name: Check whether a maintenance reboot is needed
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: host_reboot_required
+      tags: [always]
+
+    - name: Reboot only during explicitly selected maintenance
+      ansible.builtin.reboot:
+        reboot_timeout: 180
+        post_reboot_delay: 10
+      when: host_reboot_if_required | bool and host_reboot_required.stat.exists
+      tags: [always]
+
+    - name: Refresh reboot status after maintenance
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: host_reboot_required
+      tags: [always]
+
+    - name: Report reboot status
+      ansible.builtin.debug:
+        msg: 'Maintenance reboot needed: {{ host_reboot_required.stat.exists }}. Reboots require host_reboot_if_required=true.'
+      tags: [always]
+
+    # Keep privilege revocation last so the initial bootstrap can finish.
+    - name: Require password-based administration
+      ansible.builtin.import_tasks: security.yml
+      tags: [security]
+
+  handlers:
+    - name: Restart logind
+      ansible.builtin.systemd_service:
+        name: systemd-logind.service
+        state: restarted
+
+    - name: Reload systemd
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Restart journald
+      ansible.builtin.systemd_service:
+        name: systemd-journald.service
+        state: restarted
+
+    - name: Restart Docker
+      ansible.builtin.systemd_service:
+        name: docker.service
+        state: restarted
+
+    - name: Validate complete SSH configuration
+      ansible.builtin.command: /usr/sbin/sshd -t
+      changed_when: false
+      listen: Reload SSH
+
+    - name: Reload SSH configuration
+      ansible.builtin.systemd_service:
+        name: ssh.service
+        state: reloaded
+      listen: Reload SSH
+
+    - name: Restart DuckDNS timer
+      ansible.builtin.systemd_service:
+        name: duckdns.timer
+        state: restarted

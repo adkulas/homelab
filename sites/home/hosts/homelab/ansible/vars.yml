@@ -1,0 +1,41 @@
+---
+host_timezone: America/Toronto
+host_admin_user: adam
+host_admin_restricted_groups: [docker, lxd]
+host_docker_log_max_size: 10m
+host_docker_log_max_files: 3
+host_journal_max_use: 500M
+host_journal_max_retention: 14day
+host_sops_version: 3.13.2
+host_sops_sha256: 154dfe4cd70554bdd82b98e4cd4acf191d43d01ead6f00a73477aa44c4ac42ef
+# Explicit maintenance operation; normal reconciliation does not upgrade packages.
+host_upgrade_packages: false
+host_reboot_if_required: false
+# Explicit bootstrap only: the private identity stays outside the repository.
+host_provision_age_identity: false
+host_age_identity_source: "{{ lookup('ansible.builtin.env', 'HOME') }}/.config/sops/age/keys.txt"
+host_repository_url: https://github.com/adkulas/homelab.git
+host_repository_version: main
+host_repository_path: /home/{{ host_admin_user }}/homelab
+host_storage_device: /dev/disk/by-id/ata-ST1000LM035-1RK172_WDEC0WEB
+host_storage_serial: WDEC0WEB
+host_storage_label: homelab-data
+host_storage_mount: /srv/media
+# Destructive initialization is enabled only by an explicit command-line override.
+host_initialize_storage: false
+host_storage_initial_partition_count: 3
+host_storage_remove_old_lvm: true
+host_storage_initial_filesystem_uuid: ''
+host_storage_mount_options: defaults
+host_storage_environment_directories: true
+host_passport_device: /dev/disk/by-id/usb-WD_My_Passport_0741_575833314139333230353538-0:0
+host_passport_serial: WD-WX31A9320558
+host_passport_mount: /mnt/passport
+host_initialize_passport: false
+host_backup_root: /mnt/backups
+host_backup_local_repository: /mnt/backups/restic/homelab
+host_backup_usb_repository: /mnt/passport/homelab/restic
+host_backup_password_file: /etc/homelab/backup-password
+host_backup_age_recipient: >-
+  {{ (lookup('ansible.builtin.file', playbook_dir ~ '/../../../site.yaml')
+      | from_yaml).spec.sensitiveValues.dailyRecipient }}

@@ -1,0 +1,37 @@
+---
+- name: Validate the sudo configuration before changing access
+  ansible.builtin.command: /usr/sbin/visudo -c
+  changed_when: false
+
+- name: Inspect the administrator's current group memberships
+  ansible.builtin.command:
+    argv: [id, -nG, '{{ host_admin_user }}']
+  register: host_admin_current_groups
+  changed_when: false
+  check_mode: false
+
+- name: Require the standard password-based sudo group to remain available
+  ansible.builtin.assert:
+    that:
+      - "'sudo' in host_admin_current_groups.stdout.split()"
+    fail_msg: Establish password-based administration before revoking bootstrap privileges.
+
+- name: Remove direct container-daemon administration while preserving other groups
+  ansible.builtin.command:
+    argv: [gpasswd, --delete, '{{ host_admin_user }}', '{{ item }}']
+  loop: '{{ host_admin_restricted_groups }}'
+  when: item in host_admin_current_groups.stdout.split()
+  changed_when: true
+
+- name: Remove the temporary passwordless sudo rule
+  ansible.builtin.file:
+    path: /etc/sudoers.d/90-adam-ansible
+    state: absent
+
+- name: Clear the connecting administrator's cached sudo authentication
+  become: false
+  ansible.builtin.command: /usr/bin/sudo -K
+  changed_when: false
+
+- name: Close the provisioning connection so future sessions use the new groups
+  ansible.builtin.meta: reset_connection

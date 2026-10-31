@@ -1,0 +1,185 @@
+---
+- name: Provision the authorized Passport with the shared disk safety checks
+  ansible.builtin.include_tasks:
+    file: storage.yml
+    apply:
+      tags: [backups]
+  vars:
+    host_storage_device: '{{ host_passport_device }}'
+    host_storage_serial: '{{ host_passport_serial }}'
+    host_storage_label: homelab-backup
+    host_storage_mount: '{{ host_passport_mount }}'
+    host_initialize_storage: '{{ host_initialize_passport }}'
+    host_storage_initial_partition_count: 1
+    host_storage_remove_old_lvm: false
+    host_storage_initial_filesystem_uuid: 32EABAEBEABAAA8D
+    host_storage_mount_options: defaults,nofail,x-systemd.device-timeout=10s
+    host_storage_environment_directories: false
+
+- name: Install encrypted backup tooling
+  ansible.builtin.apt:
+    name: [age, restic]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create protected backup directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  loop:
+    - /etc/homelab
+    - /etc/homelab/backup.d
+    - /var/lib/homelab/backup-metadata
+    - '{{ host_backup_local_repository }}'
+    - '{{ host_backup_usb_repository }}'
+
+- name: Allow the administrator to reach application-state backup archives
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: '{{ host_admin_user }}'
+    mode: '0750'
+  loop: ['{{ host_backup_root }}', '{{ host_backup_root }}/media']
+
+- name: Create application-state archive directories on the SSD
+  ansible.builtin.file:
+    path: '{{ host_backup_root }}/media/{{ item }}'
+    state: directory
+    owner: '{{ host_admin_user }}'
+    group: '{{ host_admin_user }}'
+    mode: '0700'
+  loop: [production, staging]
+
+- name: Inspect the existing backup key
+  ansible.builtin.stat:
+    path: '{{ host_backup_password_file }}'
+  register: host_backup_key
+
+- name: Inspect existing encrypted repositories
+  ansible.builtin.stat:
+    path: '{{ item }}/config'
+  loop: ['{{ host_backup_local_repository }}', '{{ host_backup_usb_repository }}']
+  register: host_backup_repository_configs
+
+- name: Refuse to create a replacement password for an existing repository
+  ansible.builtin.assert:
+    that:
+      - >-
+        host_backup_key.stat.exists or
+        host_backup_repository_configs.results | selectattr('stat.exists') | list | length == 0
+    fail_msg: Recover the existing password before using these repositories; never generate a replacement.
+
+- name: Generate a protected backup encryption password once
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import os, secrets, sys
+        fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w') as stream:
+            stream.write(secrets.token_urlsafe(48) + '\n')
+      - '{{ host_backup_password_file }}'
+    creates: '{{ host_backup_password_file }}'
+  no_log: true
+
+- name: Enforce root-only ownership and permissions on the backup password
+  ansible.builtin.file:
+    path: '{{ host_backup_password_file }}'
+    owner: root
+    group: root
+    mode: '0600'
+  when: not ansible_check_mode or host_backup_key.stat.exists
+
+- name: Encrypt a recovery copy to the Site's existing age recipient
+  ansible.builtin.command:
+    argv:
+      - age
+      - --recipient
+      - '{{ host_backup_age_recipient }}'
+      - --output
+      - '{{ host_backup_password_file }}.age'
+      - '{{ host_backup_password_file }}'
+    creates: '{{ host_backup_password_file }}.age'
+
+- name: Save only the encrypted recovery password alongside the Host
+  ansible.builtin.fetch:
+    src: '{{ host_backup_password_file }}.age'
+    dest: '{{ playbook_dir }}/../secrets/backup-password.age'
+    flat: true
+  when: not ansible_check_mode
+
+- name: Initialize the two independent encrypted repositories once
+  ansible.builtin.command:
+    argv: [restic, --repo, '{{ item }}', --password-file, '{{ host_backup_password_file }}', init]
+    creates: '{{ item }}/config'
+  loop: ['{{ host_backup_local_repository }}', '{{ host_backup_usb_repository }}']
+
+- name: Install the backup and integrity-check runner
+  ansible.builtin.template:
+    src: backup.sh.j2
+    dest: /usr/local/sbin/homelab-backup
+    owner: root
+    group: root
+    mode: '0700'
+    validate: /bin/bash -n %s
+
+- name: Install scheduled backup services
+  ansible.builtin.template:
+    src: backup.service.j2
+    dest: /etc/systemd/system/homelab-backup-{{ item }}.service
+    owner: root
+    group: root
+    mode: '0644'
+  loop: [local, usb, check]
+  notify: Reload systemd
+
+- name: Install scheduled backup timers
+  ansible.builtin.template:
+    src: backup.timer.j2
+    dest: /etc/systemd/system/homelab-backup-{{ item.name }}.timer
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - {name: local, calendar: '*-*-* 02:00:00'}
+    - {name: usb, calendar: '*-*-* 03:00:00'}
+    - {name: check, calendar: 'Sun *-*-* 04:00:00'}
+  notify: Reload systemd
+
+- name: Load backup units before enabling their timers
+  ansible.builtin.meta: flush_handlers
+
+- name: Validate installed backup service and timer definitions
+  ansible.builtin.command:
+    argv:
+      - systemd-analyze
+      - verify
+      - homelab-backup-local.service
+      - homelab-backup-usb.service
+      - homelab-backup-check.service
+      - homelab-backup-local.timer
+      - homelab-backup-usb.timer
+      - homelab-backup-check.timer
+  changed_when: false
+
+- name: Inspect installed timer files for check-mode bootstrap dependencies
+  ansible.builtin.stat:
+    path: /etc/systemd/system/homelab-backup-{{ item }}.timer
+  loop: [local, usb, check]
+  register: host_backup_timer_files
+
+- name: Enable the backup and integrity-check timers
+  ansible.builtin.systemd_service:
+    name: homelab-backup-{{ item.item }}.timer
+    enabled: true
+    state: started
+  loop: '{{ host_backup_timer_files.results }}'
+  loop_control:
+    label: '{{ item.item }}'
+  when: not ansible_check_mode or item.stat.exists

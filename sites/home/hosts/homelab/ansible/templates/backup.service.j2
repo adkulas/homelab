@@ -1,0 +1,12 @@
+[Unit]
+Description=Homelab {{ item }} backup operation
+RequiresMountsFor={{ host_backup_root }}{% if item != 'local' %} {{ host_passport_mount }}{% endif %}
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/homelab-backup {{ item }}
+TimeoutStartSec=6h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077

@@ -1,0 +1,54 @@
+#!/bin/bash
+# Managed by Ansible. No passwords belong in this file or its output.
+set -euo pipefail
+umask 077
+exec 9>/run/lock/homelab-backup.lock
+flock --wait 3600 9
+
+password={{ host_backup_password_file | quote }}
+local_repository={{ host_backup_local_repository | quote }}
+usb_repository={{ host_backup_usb_repository | quote }}
+export RESTIC_CACHE_DIR=/var/cache/homelab-restic
+
+local_restic() {
+    restic --repo "$local_repository" --password-file "$password" "$@"
+}
+
+usb_restic() {
+    # Refuse to write to the SSD directory underneath a missing Passport mount.
+    mountpoint --quiet {{ host_passport_mount | quote }}
+    test "$(findmnt --noheadings --mountpoint {{ host_passport_mount | quote }} --output LABEL)" = homelab-backup
+    restic --repo "$usb_repository" --password-file "$password" "$@"
+}
+
+retain() {
+    "$@" forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
+    "$@" check
+}
+
+case "${1:-}" in
+    local)
+        # Hooks must produce consistent application-state archives, using the
+        # Stack's own backup command. Never archive live Docker volumes here.
+        run-parts --exit-on-error /etc/homelab/backup.d
+        dpkg-query --show > /var/lib/homelab/backup-metadata/packages.txt
+        lsblk --json --fs > /var/lib/homelab/backup-metadata/storage.json
+        local_restic backup --host homelab --tag host-config \
+            --exclude /root/.cache --exclude /home/{{ host_admin_user }}/.cache \
+            /etc /root /home/{{ host_admin_user }} \
+            {{ (host_backup_root ~ '/media') | quote }} /var/lib/homelab/backup-metadata
+        retain local_restic
+        ;;
+    usb)
+        usb_restic copy --from-repo "$local_repository" --from-password-file "$password"
+        retain usb_restic
+        ;;
+    check)
+        local_restic check --read-data
+        usb_restic check --read-data
+        ;;
+    *)
+        echo 'Usage: homelab-backup {local|usb|check}' >&2
+        exit 2
+        ;;
+esac

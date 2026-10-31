@@ -1,0 +1,10 @@
+[Unit]
+Description=Schedule homelab {{ item.name }} backup operation
+
+[Timer]
+OnCalendar={{ item.calendar }}
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

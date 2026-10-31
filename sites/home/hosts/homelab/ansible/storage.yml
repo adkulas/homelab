@@ -1,0 +1,203 @@
+---
+- name: Inspect storage disk and every descendant without modifying them
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import json, subprocess, sys
+        tree = json.loads(subprocess.check_output([
+            'lsblk', '--json', '--tree', '--bytes', '--output',
+            'PATH,TYPE,SIZE,SERIAL,FSTYPE,LABEL,UUID,MOUNTPOINTS', sys.argv[1]
+        ]))['blockdevices']
+        def walk(nodes):
+            for node in nodes:
+                yield node
+                yield from walk(node.get('children', []))
+        print(json.dumps({'disk': tree[0], 'nodes': list(walk(tree))}))
+      - '{{ host_storage_device }}'
+  register: host_storage_probe
+  changed_when: false
+  check_mode: false
+
+- name: Decode storage inspection
+  ansible.builtin.set_fact:
+    host_storage: '{{ host_storage_probe.stdout | from_json }}'
+
+- name: Require the exact audited disk and its expected capacity
+  ansible.builtin.assert:
+    that:
+      - host_storage.disk.type == 'disk'
+      - host_storage.disk.serial == host_storage_serial
+      - host_storage.disk.size | int > 990000000000
+      - host_storage.disk.size | int < 1010000000000
+    fail_msg: Storage disk identity differs from the authorized old 1 TB disk.
+
+- name: Find the existing managed storage partition
+  ansible.builtin.set_fact:
+    host_storage_partitions: >-
+      {{ host_storage.disk.children | default([])
+         | selectattr('type', 'equalto', 'part') | list }}
+    host_storage_managed: >-
+      {{ host_storage.nodes | selectattr('label', 'equalto', host_storage_label)
+         | selectattr('fstype', 'equalto', 'ext4') | list }}
+
+- name: Require explicit initialization for an unprovisioned disk
+  ansible.builtin.assert:
+    that:
+      - host_storage_managed | length == 1 or host_initialize_storage | bool
+    fail_msg: >-
+      Storage is not initialized. Review the disk identity and run once with
+      --extra-vars '{"host_initialize_storage": true}' to erase the authorized old disk.
+
+- name: Initialize the explicitly authorized old disk
+  when: host_storage_managed | length == 0 and host_initialize_storage | bool
+  block:
+    - name: Refuse to erase a disk with any mounted descendant or swap
+      ansible.builtin.assert:
+        that:
+          - >-
+            host_storage.nodes | map(attribute='mountpoints') | flatten
+            | reject('equalto', none) | list | length == 0
+          - host_storage_partitions | length == host_storage_initial_partition_count | int
+        fail_msg: The old disk is in use or no longer has its audited partition layout.
+
+    - name: Require the audited filesystem identity for a removable disk
+      ansible.builtin.assert:
+        that:
+          - host_storage_partitions[0].uuid == host_storage_initial_filesystem_uuid
+          - host_storage_partitions[0].fstype == 'ntfs'
+      when: host_storage_initial_filesystem_uuid | length > 0
+
+    - name: Inspect all physical volumes before removing the old volume group
+      ansible.builtin.command: pvs --reportformat json -o pv_name,vg_name,pv_uuid
+      register: host_storage_pvs
+      changed_when: false
+      check_mode: false
+      when: host_storage_remove_old_lvm | bool
+
+    - name: Require the old volume group to use only the audited disk partition
+      ansible.builtin.assert:
+        that:
+          - >-
+            (host_storage_pvs.stdout | from_json).report[0].pv
+            | selectattr('vg_name', 'equalto', 'ubuntu-vg') | map(attribute='pv_name') | list
+            == [host_storage.disk.path ~ '3']
+          - >-
+            (host_storage_pvs.stdout | from_json).report[0].pv
+            | selectattr('vg_name', 'equalto', 'ubuntu-vg') | map(attribute='pv_uuid') | list
+            == ['NeUEaz-PhsN-7u9u-vdvi-372e-eLxl-OvrHH2']
+        fail_msg: The old volume group differs from the inspected disk. Refusing to erase it.
+      when: host_storage_remove_old_lvm | bool
+
+    - name: Report the destructive initialization plan
+      ansible.builtin.debug:
+        msg: >-
+          Remove existing volume metadata and all partition signatures on
+          {{ host_storage_device }}, then create one GPT partition covering the
+          disk and format it as ext4 with label {{ host_storage_label }}.
+
+    - name: Erase and format the old storage disk
+      when: not ansible_check_mode
+      block:
+        - name: Remove the old disk volume group and its logical volumes
+          ansible.builtin.command:
+            argv: [vgremove, --yes, --force, ubuntu-vg]
+          changed_when: true
+          when: host_storage_remove_old_lvm | bool
+
+        - name: Remove signatures from the old partitions
+          ansible.builtin.command:
+            argv: [wipefs, --all, '{{ item.path }}']
+          loop: '{{ host_storage_partitions }}'
+          loop_control:
+            label: '{{ item.path }}'
+          changed_when: true
+
+        - name: Replace the partition table with one full-disk data partition
+          ansible.builtin.command:
+            argv: [sfdisk, --lock, --wipe, always, --wipe-partitions, always, '{{ host_storage_device }}']
+            stdin: "label: gpt\n\ntype=L\n"
+          changed_when: true
+
+        - name: Wait for storage partition discovery
+          ansible.builtin.command: udevadm settle
+          changed_when: false
+
+        - name: Create the storage filesystem
+          ansible.builtin.command:
+            argv:
+              - mkfs.ext4
+              - -m
+              - '0'
+              - -L
+              - '{{ host_storage_label }}'
+              - '{{ host_storage_device }}-part1'
+          changed_when: true
+
+- name: Configure the initialized storage filesystem
+  when: not ansible_check_mode or host_storage_managed | length == 1
+  block:
+    - name: Read the persistent storage filesystem identity
+      ansible.builtin.command:
+        argv: [blkid, -o, export, '{{ host_storage_device }}-part1']
+      register: host_storage_blkid
+      changed_when: false
+      check_mode: false
+
+    - name: Require the expected filesystem before mounting
+      ansible.builtin.assert:
+        that:
+          - "'TYPE=ext4' in host_storage_blkid.stdout_lines"
+          - "('LABEL=' ~ host_storage_label) in host_storage_blkid.stdout_lines"
+          - >-
+            host_storage_blkid.stdout_lines | select('match', '^UUID=') | list | length == 1
+
+    - name: Inspect the mount destination
+      ansible.builtin.command:
+        argv: [findmnt, --mountpoint, '{{ host_storage_mount }}', --noheadings, --output, UUID]
+      register: host_storage_existing_mount
+      changed_when: false
+      failed_when: host_storage_existing_mount.rc not in [0, 1]
+      check_mode: false
+
+    - name: Refuse to replace an unrelated existing mount
+      ansible.builtin.assert:
+        that:
+          - >-
+            host_storage_existing_mount.rc == 1 or
+            ('UUID=' ~ host_storage_existing_mount.stdout | trim) in host_storage_blkid.stdout_lines
+
+    - name: Inspect files that would be hidden by a new storage mount
+      ansible.builtin.command:
+        argv: [find, '{{ host_storage_mount }}', -mindepth, '1', -maxdepth, '1', -print, -quit]
+      register: host_storage_underlying_files
+      changed_when: false
+      failed_when: host_storage_underlying_files.rc not in [0, 1]
+      check_mode: false
+      when: host_storage_existing_mount.rc == 1
+
+    - name: Refuse to hide existing application data under a new mount
+      ansible.builtin.assert:
+        that:
+          - host_storage_underlying_files.stdout | default('') | length == 0
+      when: host_storage_existing_mount.rc == 1
+
+    - name: Mount the data disk persistently by filesystem UUID
+      ansible.posix.mount:
+        path: '{{ host_storage_mount }}'
+        src: "{{ host_storage_blkid.stdout_lines | select('match', '^UUID=') | first }}"
+        fstype: ext4
+        opts: '{{ host_storage_mount_options }}'
+        passno: '2'
+        state: mounted
+
+    - name: Create isolated Environment directories on the mounted data disk
+      ansible.builtin.file:
+        path: '{{ host_storage_mount }}/{{ item }}'
+        state: directory
+        owner: '{{ host_admin_user }}'
+        group: '{{ host_admin_user }}'
+        mode: '0750'
+      loop: [production, staging]
+      when: host_storage_environment_directories | bool

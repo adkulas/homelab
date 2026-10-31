@@ -8,6 +8,9 @@ addresses and reservations before deployment.
 
 Follow the [ordered network setup and recovery walkthrough](../../services/network/docs/setup.md) before any live network change.
 
+The `homelab` Host's [provisioning guide and Ansible playbook](hosts/homelab/README.md)
+manage its operating system and container runtime separately from Stack deployment.
+
 ## Name resolution
 
 Technitium DNS and DHCP are configured separately from this change. Create these local DNS records before starting Traefik:
@@ -50,9 +53,9 @@ DNS record without adding an IP to routing configuration.
 On `homelab`, from the repository root:
 
 ```bash
-docker compose -f sites/home/traefik/compose.yaml config
-docker compose -f sites/home/traefik/compose.yaml up -d
-docker compose -f sites/home/traefik/compose.yaml logs traefik
+sudo docker compose -f sites/home/traefik/compose.yaml config
+sudo docker compose -f sites/home/traefik/compose.yaml up -d
+sudo docker compose -f sites/home/traefik/compose.yaml logs traefik
 ```
 
 The router for `jellyfin.home`, for example, targets `homelab.home:8096`; `jellyfin-staging.home` targets

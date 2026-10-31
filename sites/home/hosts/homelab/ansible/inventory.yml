@@ -1,0 +1,7 @@
+---
+all:
+  hosts:
+    homelab:
+      ansible_host: homelab
+      ansible_user: adam
+      ansible_python_interpreter: /usr/bin/python3
