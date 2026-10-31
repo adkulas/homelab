@@ -26,7 +26,7 @@ media-stack config describe [--service <name>] [--output human|json]
 
 The command describes the CLI's configuration interface; it does not inspect a running Environment or print current values.
 Without `--service`, it returns every required service in stable service-name and setting-name order. The supported service
-names are `gluetun`, `qbittorrent`, `prowlarr`, `sonarr`, `radarr`, `profilarr`, `jellyfin`, and `seerr`.
+names are `gluetun`, `qbittorrent`, `prowlarr`, `sonarr`, `radarr`, `profilarr`, `jellyfin`, `seerr`, `houndarr`, and `cleanuparr`.
 
 The contract is exhaustive for settings the CLI declares, derives, fixes, sources from secrets, synchronizes through an
 external policy owner, observes, or reconciles. It does not attempt to enumerate every upstream application option. Each
@@ -81,6 +81,8 @@ reconcilers and add any setting they read, write, or verify that is missing here
 | Radarr | image, LAN port, runtime identity, Movie Library root, qBittorrent client and category, internal URLs and credentials, quality profile, quality definitions, custom-format scores, naming formats, media management, and unmanaged settings |
 | Profilarr | image, LAN port, API key, pinned PCD repository revision, guided Radarr and Sonarr connections, owned policy domains, and unmanaged settings |
 | Jellyfin | image, LAN port, runtime identity, hardware-transcoding preference and derived device mapping, administrator credentials, startup locale and remote-access policy, Movie and Series Library definitions, deletion policy, and unmanaged settings |
+| Houndarr | pinned image, loopback management port, Environment state, guided Sonarr connection, episode search context, chronological order, bounded search policy, and unmanaged settings |
+| Cleanuparr | pinned image, loopback management port, Environment state, Sonarr/qBittorrent credentials, queue recovery thresholds, reactive replacement ownership, disabled proactive Seeker, and unmanaged settings |
 | Seerr | image, LAN port, runtime identity, Jellyfin and emergency-local authentication, default request permission, initialization state, internal Jellyfin connection, and unmanaged settings |
 
 Cross-service defaults such as timezone, data and backup roots, project identity, restart policy, logging limits, volumes,
@@ -153,7 +155,7 @@ human and JSON rendering omit entries.
 
 CLI acceptance tests prove:
 
-- all eight required services appear without a filter;
+- all ten registered services appear without a filter;
 - every service can be filtered independently;
 - Sonarr and Radarr naming are reported as externally synchronized rather than declared;
 - every supported YAML and versions field is represented by at least one affected service;

@@ -1,6 +1,13 @@
 package engine
 
 type environmentSecretDocument struct {
+	Houndarr struct {
+		Username string `yaml:"username"`
+		Password string `yaml:"password"`
+	} `yaml:"houndarr,omitempty"`
+	Cleanuparr struct {
+		APIKey string `yaml:"apiKey"`
+	} `yaml:"cleanuparr,omitempty"`
 	NordVPN struct {
 		OpenVPN struct {
 			ServiceUsername string `yaml:"serviceUsername"`

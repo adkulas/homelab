@@ -14,7 +14,7 @@ func ConfigurationContract(service string) []contractmodel.Setting {
 		contractmodel.Declared("backup.retention.weekly", "Weekly backup retention", "media-stack.yaml#spec.defaults.backupRetention.weekly", "non-negative integer", nil, "Change spec.defaults.backupRetention.weekly in media-stack.yaml.", "preserve"),
 		contractmodel.Declared("backup.retention.monthly", "Monthly backup retention", "media-stack.yaml#spec.defaults.backupRetention.monthly", "non-negative integer", nil, "Change spec.defaults.backupRetention.monthly in media-stack.yaml.", "preserve"),
 	}
-	if service == "gluetun" || service == "qbittorrent" || service == "profilarr" || service == "jellyfin" || service == "seerr" {
+	if service == "gluetun" || service == "qbittorrent" || service == "profilarr" || service == "jellyfin" || service == "seerr" || IsSeriesCompanion(service) {
 		settings = append(settings, contractmodel.Declared("secrets.document", "Environment secret document", "media-stack.yaml#spec.environments.<environment>.secretsFile", "path", nil, "Change the selected Environment secretsFile path in media-stack.yaml.", "initialize", "reconcile", "verify"))
 	}
 	return settings

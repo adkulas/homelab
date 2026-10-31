@@ -266,3 +266,17 @@ func (client *Client) completedInCategory(ctx context.Context, category, release
 	}
 	return Torrent{}, nil, false, nil
 }
+
+// ContainsTorrent observes a selected torrent without changing queue state.
+func (client *Client) ContainsTorrent(ctx context.Context, hash string) (bool, error) {
+	var torrents []Torrent
+	if err := client.getJSON(ctx, "/api/v2/torrents/info?hashes="+url.QueryEscape(hash), &torrents); err != nil {
+		return false, err
+	}
+	for _, torrent := range torrents {
+		if strings.EqualFold(torrent.Hash, hash) {
+			return true, nil
+		}
+	}
+	return false, nil
+}

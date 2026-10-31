@@ -60,3 +60,15 @@ Primary DNS deployment checks run with
 and Docker Compose v2 to render the production artifact, but do not contact a Docker
 daemon or change Host networking. The [primary DNS procedure](services/network/docs/primary-dns.md)
 separately records the supervised live checks required before #103 can be closed.
+
+The optional pinned series-companion acceptance test runs Houndarr and Cleanuparr
+against isolated Sonarr/qBittorrent HTTP fixtures, without public indexers or a
+household Environment:
+
+```bash
+MEDIA_STACK_LIVE_COMPANIONS=1 go test ./tests/acceptance \
+  -run '^TestDisposablePinnedSeriesCompanions$' -count=1 -timeout=25m -v
+```
+
+See the [series automation runbook](services/media/README.md#episode-searching-and-queue-recovery)
+for bootstrap, tuning, upstream safety limits and Staging recovery evidence.

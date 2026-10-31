@@ -411,6 +411,13 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 				"tags":        []any{},
 				"urlBase":     "",
 			})
+		case "PUT /api/v1/settings/sonarr/0":
+			seerrWrites++
+			var body map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			body["id"] = float64(0)
+			seerrSonarr[0] = body
+			_ = json.NewEncoder(writer).Encode(body)
 		case "POST /api/v1/settings/sonarr":
 			seerrWrites++
 			var body map[string]any
@@ -457,6 +464,9 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 		t.Fatal(err)
 	}
 	declared = strings.Replace(declared, "sonarr: 18989", "sonarr: "+sonarrURL.Port(), 1)
+	companions := newCompanionAPIFixture(t, fixturePort(t, api.URL))
+	declared = strings.Replace(declared, "houndarr: 18877", "houndarr: "+strconv.Itoa(fixturePort(t, companions.hound.URL)), 1)
+	declared = strings.Replace(declared, "cleanuparr: 21011", "cleanuparr: "+strconv.Itoa(fixturePort(t, companions.cleanup.URL)), 1)
 	writeFile(t, configPath, []byte(declared), 0o600)
 	if err := os.Mkdir(filepath.Join(temporary, "secrets"), 0o700); err != nil {
 		t.Fatal(err)
@@ -473,6 +483,11 @@ nordvpn:
   openvpn:
     serviceUsername: apply-service-user
     servicePassword: apply-service-password
+houndarr:
+  username: companion-admin
+  password: fixture-houndarr-password
+cleanuparr:
+  apiKey: fixture-cleanuparr-key
 profilarr:
   apiKey: fixture-profilarr-api-key-32-characters
 jellyfin:
@@ -493,7 +508,9 @@ EOF
 	  "compose -f - config --hash *")
 	    cat >/dev/null
 	    printf '%s\n' \
-	      'gluetun hash-gluetun' \
+	      'houndarr hash-houndarr' \
+          'cleanuparr hash-cleanuparr' \
+          'gluetun hash-gluetun' \
 	      'jellyfin hash-jellyfin' \
 	      'profilarr hash-profilarr' \
 	      'prowlarr hash-prowlarr' \
@@ -506,7 +523,9 @@ EOF
 	    printf '%s\n' '{"Labels":"com.docker.compose.project=media-staging,com.docker.compose.service=debug-shell","Names":"media-staging-debug-shell-1","State":"running"}'
 	    [ -f "$APPLY_TOPOLOGY_READY" ] || exit 0
 	    printf '%s\n' \
-	      '{"Labels":"com.docker.compose.service=gluetun,com.docker.compose.config-hash=hash-gluetun","State":"running"}' \
+	      '{"Labels":"com.docker.compose.service=houndarr,com.docker.compose.config-hash=hash-houndarr","State":"running"}' \
+          '{"Labels":"com.docker.compose.service=cleanuparr,com.docker.compose.config-hash=hash-cleanuparr","State":"running"}' \
+          '{"Labels":"com.docker.compose.service=gluetun,com.docker.compose.config-hash=hash-gluetun","State":"running"}' \
 	      '{"Labels":"com.docker.compose.service=jellyfin,com.docker.compose.config-hash=hash-jellyfin","State":"running"}' \
 	      '{"Labels":"com.docker.compose.service=profilarr,com.docker.compose.config-hash=hash-profilarr","State":"running"}' \
 	      '{"Labels":"com.docker.compose.service=prowlarr,com.docker.compose.config-hash=hash-prowlarr","State":"running"}' \
@@ -522,7 +541,9 @@ EOF
 	  "volume ls --filter label=com.docker.compose.project=media-staging --format {{json .}}")
 	    printf '%s\n' '{"Labels":"com.docker.compose.project=media-staging,com.docker.compose.volume=scratch","Name":"media-staging_scratch"}'
 	    [ -f "$APPLY_TOPOLOGY_READY" ] && printf '%s\n' \
-	      '{"Labels":"com.docker.compose.volume=gluetun-config","Name":"media-staging_gluetun-config"}' \
+	      '{"Labels":"com.docker.compose.volume=houndarr-config","Name":"media-staging_houndarr-config"}' \
+          '{"Labels":"com.docker.compose.volume=cleanuparr-config","Name":"media-staging_cleanuparr-config"}' \
+          '{"Labels":"com.docker.compose.volume=gluetun-config","Name":"media-staging_gluetun-config"}' \
 	      '{"Labels":"com.docker.compose.volume=jellyfin-config","Name":"media-staging_jellyfin-config"}' \
 	      '{"Labels":"com.docker.compose.volume=profilarr-config","Name":"media-staging_profilarr-config"}' \
 	      '{"Labels":"com.docker.compose.volume=prowlarr-config","Name":"media-staging_prowlarr-config"}' \
@@ -542,7 +563,8 @@ EOF
 	  "compose -f - logs --no-color qbittorrent") printf 'A temporary password is provided for this session: stale-historical-password\n'; exit 0 ;;
 	  "compose -f - up -d radarr") exit 0 ;;
 	  "compose -f - exec -T radarr cat /config/config.xml") printf '<Config><ApiKey>fixture-radarr-api-key</ApiKey></Config>\n'; exit 0 ;;
-	  "compose -f - up -d sonarr") exit 0 ;;
+	  "compose -f - up -d houndarr cleanuparr") exit 0 ;;
+      "compose -f - up -d sonarr") exit 0 ;;
 	  "compose -f - exec -T sonarr cat /config/config.xml") printf '<Config><ApiKey>fixture-sonarr-api-key</ApiKey></Config>\n'; exit 0 ;;
 	  "compose -f - up -d prowlarr") exit 0 ;;
 	  "compose -f - exec -T prowlarr cat /config/config.xml") printf '<Config><ApiKey>fixture-prowlarr-api-key</ApiKey></Config>\n'; exit 0 ;;
@@ -602,6 +624,7 @@ EOF
 
 	dockerLines := strings.Split(strings.TrimSpace(string(readFile(t, dockerLog))), "\n")
 	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - ps -q qbittorrent\ninspect --format {{.State.StartedAt}} fixture-qbittorrent-id\ncompose -f - logs --no-color --since 2026-08-28T12:34:56.123456789Z qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr\ncompose -f - up -d jellyfin\ncompose -f - up -d seerr"
+	wantDocker += "\ncompose -f - up -d houndarr cleanuparr"
 	if got := strings.Join(dockerLines, "\n"); got != wantDocker {
 		t.Errorf("Docker invocation = %q", got)
 	}
@@ -712,7 +735,7 @@ EOF
 	}
 	if destination := seerrSonarr[0]; destination["hostname"] != "sonarr" || destination["port"] != float64(8989) || destination["activeProfileId"] != float64(11) ||
 		destination["activeProfileName"] != "WEB-1080p" || destination["activeDirectory"] != "/data/media/series" || destination["seriesType"] != "standard" ||
-		destination["isDefault"] != true || destination["is4k"] != false || destination["enableSeasonFolders"] != true || destination["preventSearch"] != false {
+		destination["isDefault"] != true || destination["is4k"] != false || destination["enableSeasonFolders"] != true || destination["preventSearch"] != true {
 		t.Errorf("Seerr Sonarr destination = %v", destination)
 	}
 	if profilarrObservations != 2 {
@@ -728,6 +751,10 @@ EOF
 			t.Errorf("apply observed Sonarr %s %d times, want once", observation, count)
 		}
 	}
+	if companions.documents["seeker"]["proactiveSearchEnabled"] != false || companions.documents["queue_cleaner"]["enabled"] != true {
+		t.Fatal("companion ownership and recovery policy not reconciled")
+	}
+	companionWrites := companions.writes
 	seerrWritesAfterFirstRun := seerrWrites
 	preferences["save_path"] = "/data/torrents/drifted"
 	driftPlan := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)
@@ -754,6 +781,9 @@ EOF
 	if len(rootFolders) != 1 || len(downloadClients) != 1 || len(seriesRootFolders) != 1 || len(seriesDownloadClients) != 1 || len(indexers) != 1 || len(applications) != 2 || len(jellyfinLibraries) != 2 || jellyfinPolicyWrites != 1 {
 		t.Errorf("repeated apply did not converge: movieRoots=%v movieDownloadClients=%v seriesRoots=%v seriesDownloadClients=%v indexers=%v applications=%v", rootFolders, downloadClients, seriesRootFolders, seriesDownloadClients, indexers, applications)
 	}
+	if companions.writes != companionWrites {
+		t.Errorf("repeated apply mutated companion policy %d times", companions.writes-companionWrites)
+	}
 	if seerrWrites != seerrWritesAfterFirstRun {
 		t.Errorf("repeated apply made %d Seerr policy writes, want none", seerrWrites-seerrWritesAfterFirstRun)
 	}
@@ -774,6 +804,30 @@ EOF
 		}
 	}
 
+	// Ownership drift must converge symmetrically across both scheduling controls
+	// and Seerr, while Houndarr's unsupported settings writes remain guided.
+	companions.documents["seeker"]["proactiveSearchEnabled"] = true
+	companions.documents["seeker"]["instances"].([]any)[0].(map[string]any)["enabled"] = true
+	seerrSonarr[0]["preventSearch"] = false
+	ownershipCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
+	ownershipCommand.Dir = command.Dir
+	ownershipCommand.Env = command.Env
+	ownershipOutput, ownershipErr := ownershipCommand.CombinedOutput()
+	if ownershipErr != nil {
+		t.Fatalf("ownership drift repair: %v\n%s", ownershipErr, ownershipOutput)
+	}
+	if companions.documents["seeker"]["proactiveSearchEnabled"] != false || companions.documents["seeker"]["instances"].([]any)[0].(map[string]any)["enabled"] != false || seerrSonarr[0]["preventSearch"] != true {
+		t.Fatal("apply did not repair all competing proactive owners")
+	}
+	companions.mode = "season_context"
+	contextCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
+	contextCommand.Dir = command.Dir
+	contextCommand.Env = command.Env
+	contextOutput, contextErr := contextCommand.CombinedOutput()
+	companions.mode = "episode"
+	if contextErr == nil || !strings.Contains(string(contextOutput), "VERIFY_EPISODE_SEARCH_CONTEXT_INVALID") {
+		t.Fatalf("Houndarr drift did not require guided correction: %v\n%s", contextErr, contextOutput)
+	}
 	originalMovieMinimum := movieQualityDefinitions[1]["minSize"]
 	movieQualityDefinitions[1]["minSize"] = 11.5
 	decimalDriftCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)

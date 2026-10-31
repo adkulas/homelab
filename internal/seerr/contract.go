@@ -30,7 +30,7 @@ func ConfigurationContract() []contractmodel.Setting {
 		contractmodel.Fixed("sonarrConnection.4k", "4K series requests", false, "This milestone routes ordinary non-4K series requests only.", "reconcile", "verify"),
 		contractmodel.Fixed("sonarrConnection.seriesType", "Ordinary series type", "standard", "Seerr submits ordinary series with Sonarr's standard series type.", "reconcile", "verify"),
 		contractmodel.Fixed("sonarrConnection.seasonFolders", "Season folders", true, "Sonarr organizes requested series episodes beneath season folders.", "reconcile", "verify"),
-		contractmodel.Fixed("sonarrConnection.search", "Automatic series search", true, "Approved Seerr series requests ask Sonarr to search automatically.", "reconcile", "verify"),
+		contractmodel.Derived("sonarrConnection.search", "Automatic series search", "spec.environments.<environment>.seriesAutomation.enabled", "Seerr automatic series search is disabled when Houndarr owns proactive searching; approval and requested-season monitoring remain enabled.", "reconcile", "verify"),
 		contractmodel.Fixed("sonarrConnection.scan", "Sonarr availability scan", true, "Seerr scans Sonarr so request state follows acquisition progress.", "reconcile", "verify"),
 		contractmodel.Fixed("sonarrConnection.requestTags", "Per-request Sonarr tags", false, "Series requests do not create requester-specific Sonarr tags.", "reconcile", "verify"),
 		contractmodel.Fixed("sonarrConnection.monitorNewItems", "New-season monitoring", "all", "Sonarr monitors new seasons for requested series.", "reconcile", "verify"),

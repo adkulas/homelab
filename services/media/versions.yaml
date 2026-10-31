@@ -1,6 +1,10 @@
 apiVersion: homelab.media-stack/v1alpha1
 kind: MediaStackVersions
 images:
+  # Houndarr v1.13.3; verified multi-platform registry manifest checksum.
+  houndarr: ghcr.io/av1155/houndarr@sha256:b2e4ff8b550d385a56ea3380bddf88253eac00d750a811a8f97090ff77dcc79e
+  # Cleanuparr v2.10.12; verified multi-platform registry manifest checksum.
+  cleanuparr: ghcr.io/cleanuparr/cleanuparr@sha256:d0212e4c66bd0522e23c5e5da5d3006bd5ff0e0de1e3ecfcf892e039d55721e2
   gluetun: ghcr.io/qdm12/gluetun@sha256:e3272b29a4bc177b389fbdcb54cf9716ccbfc30f04d8b7a35b0a5be9cdb58461
   qbittorrent: lscr.io/linuxserver/qbittorrent@sha256:6816d2b144b1eb97665f886e41e18a14d026ba78c9d0953fc68a1211ea819433
   prowlarr: lscr.io/linuxserver/prowlarr@sha256:1295cff29d10b486c0d8324d1559a552140a5932bf8b3d87e398654414f63f92

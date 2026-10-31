@@ -12,7 +12,7 @@ import (
 func TestVerifyProvesVPNEgressFailClosedAndRecovery(t *testing.T) {
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	writeFile(t, configPath, readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml")), 0o600)
+	writeFile(t, configPath, withoutSeriesAutomation(readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml"))), 0o600)
 
 	binDirectory := filepath.Join(temporary, "bin")
 	if err := os.Mkdir(binDirectory, 0o700); err != nil {

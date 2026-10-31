@@ -20,7 +20,10 @@ func TestPromoteAcceptsMatchingVerificationAndBackupArtifacts(t *testing.T) {
 	verificationPath := filepath.Join(temporary, "verification.json")
 	backupPath := filepath.Join(temporary, "backup.json")
 	verification := VerifyReport{SchemaVersion: verifySchemaVersion, Environment: "staging", Suite: "promotion", ConfigDigest: fileDigest(configPath), VersionsDigest: fileDigest(versionsPath)}
-	backup := BackupReport{SchemaVersion: backupSchemaVersion, Environment: "staging"}
+	backup := BackupReport{SchemaVersion: backupSchemaVersion, Environment: "staging", Services: []BackupService{{Name: "houndarr", Volume: "houndarr-config", DockerVolume: "media-staging_houndarr-config"}, {Name: "cleanuparr", Volume: "cleanuparr-config", DockerVolume: "media-staging_cleanuparr-config"}}}
+	for _, code := range []string{"VERIFY_COMPANION_POLICY_CONVERGED", "VERIFY_EPISODE_SEARCH_DISPATCHED", "VERIFY_SERIES_RECOVERY_PROVEN", "VERIFY_SERIES_REQUESTED", "VERIFY_SERIES_EPISODE_ACQUIRED", "VERIFY_SERIES_EPISODE_HARDLINKED", "VERIFY_SERIES_EPISODE_PLAYBACK_READY"} {
+		verification.Diagnostics = append(verification.Diagnostics, Diagnostic{Code: code, Status: "pass"})
+	}
 	writeJSON(t, verificationPath, verification)
 	writeJSON(t, backupPath, backup)
 	request, err := NewPromoteRequest(repoRoot, "production", configPath, verificationPath, backupPath)

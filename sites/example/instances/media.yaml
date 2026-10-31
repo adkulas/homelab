@@ -23,6 +23,21 @@ spec:
                 backupRoot: /mnt/backups/media/production
                 secretsFile: secrets/production.sops.yaml
                 hardwareTranscoding: auto
+                seriesAutomation:
+                    enabled: true
+                    search:
+                        batchSize: 12
+                        intervalMinutes: 30
+                        hourlyCap: 12
+                        cooldownDays: 1
+                        releaseGraceHours: 6
+                        allowedWindow: "06:00-00:00"
+                        queueLimit: 2
+                    recovery:
+                        intervalMinutes: 5
+                        strikes: 12
+                        minimumSpeedKiB: 100
+                        maximumRemainingHours: 24
                 ports:
                     qbittorrent: 8080
                     prowlarr: 9696
@@ -30,6 +45,8 @@ spec:
                     radarr: 7878
                     profilarr: 6868
                     jellyfin: 8096
+                    houndarr: 8877
+                    cleanuparr: 11011
                     seerr: 5055
             staging:
                 projectName: media-staging
@@ -37,6 +54,21 @@ spec:
                 backupRoot: /mnt/backups/media/staging
                 secretsFile: secrets/staging.sops.yaml
                 hardwareTranscoding: auto
+                seriesAutomation:
+                    enabled: true
+                    search:
+                        batchSize: 12
+                        intervalMinutes: 30
+                        hourlyCap: 12
+                        cooldownDays: 1
+                        releaseGraceHours: 6
+                        allowedWindow: "06:00-00:00"
+                        queueLimit: 2
+                    recovery:
+                        intervalMinutes: 5
+                        strikes: 12
+                        minimumSpeedKiB: 100
+                        maximumRemainingHours: 24
                 ports:
                     qbittorrent: 18080
                     prowlarr: 19696
@@ -44,4 +76,6 @@ spec:
                     radarr: 17878
                     profilarr: 16868
                     jellyfin: 18096
+                    houndarr: 18877
+                    cleanuparr: 21011
                     seerr: 15055

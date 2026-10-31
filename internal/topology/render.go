@@ -37,6 +37,8 @@ var mandatoryServices = []serviceDefinition{
 	{name: "radarr", identity: puidIdentity, configTarget: "/config", port: func(ports config.Ports) int { return ports.Radarr }, targetPort: 7878, dataMount: func(root string) string { return root + ":/data" }},
 	{name: "profilarr", identity: puidIdentity, configTarget: "/config", port: func(ports config.Ports) int { return ports.Profilarr }, targetPort: 6868},
 	{name: "jellyfin", identity: composeUserIdentity, configTarget: "/config", port: func(ports config.Ports) int { return ports.Jellyfin }, targetPort: 8096, dataMount: func(root string) string { return path.Join(root, "media") + ":/data/media:ro" }},
+	{name: "houndarr", identity: puidIdentity, configTarget: "/data", port: func(ports config.Ports) int { return ports.Houndarr }, targetPort: 8877},
+	{name: "cleanuparr", identity: puidIdentity, configTarget: "/config", port: func(ports config.Ports) int { return ports.Cleanuparr }, targetPort: 11011},
 	{name: "seerr", identity: composeUserIdentity, configTarget: "/app/config", port: func(ports config.Ports) int { return ports.Seerr }, targetPort: 5055},
 }
 
@@ -109,6 +111,9 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 		Volumes: make(map[string]composeVolume, len(mandatoryServices)),
 	}
 	for _, definition := range mandatoryServices {
+		if config.IsSeriesCompanion(definition.name) && environment.SeriesAutomation == nil {
+			continue
+		}
 		reference, exists := images[definition.name]
 		if !exists {
 			return nil, fmt.Errorf("checked-in versions do not declare image %q", definition.name)
@@ -137,7 +142,11 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 			if definition.name == "gluetun" {
 				targetPort = environment.Ports.QBittorrent
 			}
-			ports = []string{fmt.Sprintf("%s:%d:%d", defaults.LANBindAddress, definition.port(environment.Ports), targetPort)}
+			bindAddress := defaults.LANBindAddress
+			if config.IsSeriesCompanion(definition.name) {
+				bindAddress = "127.0.0.1"
+			}
+			ports = []string{fmt.Sprintf("%s:%d:%d", bindAddress, definition.port(environment.Ports), targetPort)}
 		}
 		var secrets []string
 		var envFiles []composeEnvFile

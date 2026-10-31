@@ -3,6 +3,7 @@ package topology
 import (
 	"fmt"
 
+	"github.com/adkulas/homelab/internal/config"
 	"github.com/adkulas/homelab/internal/contractmodel"
 )
 
@@ -12,7 +13,7 @@ func topologySettings(definition serviceDefinition) []contractmodel.Setting {
 		contractmodel.Declared("image", "Pinned container image", "versions.yaml#images."+service, "immutable image digest", nil, "Update the service image digest in versions.yaml.", "render"),
 		contractmodel.Declared("timezone", "Container timezone", "media-stack.yaml#spec.defaults.timezone", "IANA timezone", nil, "Change spec.defaults.timezone in media-stack.yaml.", "initialize", "render"),
 		contractmodel.Declared("project", "Compose project identity", "media-stack.yaml#spec.environments.<environment>.projectName", "string", nil, "Change the selected Environment projectName in media-stack.yaml.", "render"),
-		contractmodel.Derived("configVolume", "Environment-scoped configuration volume", "spec.environments.<environment>.projectName + service identity", "Compose derives a distinct mutable configuration volume for this service.", "render"),
+		contractmodel.Derived("configVolume", "Environment-scoped configuration volume", "spec.environments.<environment>.projectName + service identity", "Compose derives a distinct mutable configuration volume for this service; backup and restore preserve it.", "render", "preserve"),
 		contractmodel.Fixed("restartPolicy", "Restart policy", "unless-stopped", "Every long-running service restarts unless explicitly stopped.", "render"),
 		contractmodel.Fixed("logging", "Bounded logging policy", "json-file; max-size=10m; max-file=3", "The json-file driver keeps three 10 MiB files.", "render"),
 		contractmodel.Derived("applicationNetwork", "Environment application network", "spec.environments.<environment>.projectName + application", "Compose scopes the application network to the selected Environment.", "render"),
@@ -26,7 +27,7 @@ func topologySettings(definition serviceDefinition) []contractmodel.Setting {
 	if definition.port != nil || service == "qbittorrent" {
 		settings = append(settings, contractmodel.Declared("port", "Environment LAN port", servicePortSource(service), "TCP port", nil, "Change the selected Environment service port in media-stack.yaml.", "render", "reconcile"))
 	}
-	if definition.port != nil {
+	if definition.port != nil && !config.IsSeriesCompanion(service) {
 		settings = append(settings, contractmodel.Declared("lanBindAddress", "LAN bind address", "media-stack.yaml#spec.defaults.lanBindAddress", "IP address", nil, "Change spec.defaults.lanBindAddress in media-stack.yaml.", "render", "reconcile", "verify"))
 	}
 	if definition.dataMount != nil {
@@ -66,6 +67,9 @@ func topologySettings(definition serviceDefinition) []contractmodel.Setting {
 			contractmodel.Declared("hardwareTranscoding.preference", "Hardware-transcoding preference", "media-stack.yaml#spec.environments.<environment>.hardwareTranscoding", "string", []string{"auto", "disabled"}, "Change hardwareTranscoding for the selected Environment in media-stack.yaml.", "render", "initialize", "verify"),
 			contractmodel.Derived("hardwareTranscoding.device", "Hardware render-device mapping", "detected host render device", "A supported device and group are rendered only when auto detection succeeds.", "render", "verify"),
 		)
+	}
+	if config.IsSeriesCompanion(service) {
+		settings = append(settings, contractmodel.Fixed("management.bindAddress", "Management bind address", "127.0.0.1", "Operator endpoints bind only to host loopback; use an SSH tunnel for remote management.", "render"))
 	}
 	settings = append(settings, topologySupplement(definition)...)
 	settings = append(settings, contractmodel.Unmanaged())

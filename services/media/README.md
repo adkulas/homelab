@@ -7,7 +7,7 @@ independent Production and Staging Environments so changes can be proven before 
 > [!IMPORTANT]
 > This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, the
 > VPN-confined qBittorrent, Radarr Movie Library, Sonarr Series Library, Prowlarr Movie and Series Library discovery, guided Profilarr connections, authenticated Jellyfin Movie and Series Library reconciliation, and Seerr household authentication and Movie and Series Library request routing phases of `apply`; VPN-focused
-> `verify --suite full`; legal movie and series request-to-playback proofs through `verify --suite promotion`; and verified application-state archives through `backup` are available now.
+> `verify --suite full` and read-only companion configuration/activity diagnostics through `verify --suite companions`; legal movie and series request-to-playback proofs through `verify --suite promotion`; and verified application-state archives through `backup` are available now.
 > Ordinary matching-Environment state replacement and isolated Production-to-Staging Restore Drill execution through `restore` are also available. The other verification suites,
 > Verification Artifacts, and `destroy` remain planned. Ubuntu is the authoritative implementation and
 > completion platform. Docker
@@ -25,6 +25,7 @@ independent Production and Staging Environments so changes can be proven before 
 - Prowlarr discovery through an explicit approved list of Public Torrent Sources.
 - qBittorrent acquisition through a fail-closed Gluetun and NordVPN boundary.
 - Profilarr-managed, pinned TRaSH-derived quality and naming policy.
+- Houndarr episode searches and Cleanuparr queue recovery with separate, declared ownership.
 - One shared `/data` filesystem seam so completed downloads can be imported as hardlinks instead of copied.
 - A Go CLI for initialization, preflight checks, reconciliation, verification, backups, restoration, and safe Promotion.
 - Completely isolated Production and Staging Environments.
@@ -50,7 +51,7 @@ media-stack config describe --service sonarr
 media-stack config describe --service sonarr --output json
 ```
 
-The command covers Gluetun, qBittorrent, Prowlarr, Sonarr, Radarr, Profilarr, Jellyfin, and Seerr. Omitting `--service` returns all eight in stable order; `--service` accepts exactly those lowercase names. Human output groups settings by control class, while `--output json` emits `homelab.media-stack/configuration-contract/v1alpha1`. Each setting includes its semantic source, type or allowed values when applicable, sensitivity, lifecycle, implementation status, and operator-change guidance. Secret entries describe only their SOPS path or generated source and never include resolved values.
+The command covers Gluetun, qBittorrent, Prowlarr, Sonarr, Radarr, Profilarr, Jellyfin, Seerr, Houndarr, and Cleanuparr. Omitting `--service` returns all ten in stable order; `--service` accepts exactly those lowercase names. Human output groups settings by control class, while `--output json` emits `homelab.media-stack/configuration-contract/v1alpha1`. Each setting includes its semantic source, type or allowed values when applicable, sensitivity, lifecycle, implementation status, and operator-change guidance. Secret entries describe only their SOPS path or generated source and never include resolved values.
 
 Sonarr and Radarr naming are Externally Synchronized Policies owned by the pinned Profilarr fixtures, not Declared Configuration. Every service also states that absent upstream settings are Unmanaged Configuration that `media-stack` does not promise to observe, apply, or repair. A service-setting change must update its source-adjacent contract metadata and this runbook in the same change.
 
@@ -275,7 +276,7 @@ includes stable `VERIFY_*` diagnostics and remedies.
 
 The available Promotion phase reads either or both explicit legal fixtures. It authenticates the household user to Seerr,
 submits an approved movie or selected-season series request, and waits for Seerr to register the item in Radarr or Sonarr.
-The Arr application searches the linked Internet Archive source and grabs only the exact declared release. It waits for the corresponding
+For movies and legacy series configurations, verification selects the exact declared Internet Archive release. With series automation enabled, verification observes Houndarr episode commands instead of issuing searches or grabs itself. It waits for the corresponding
 `movies` or `series` qBittorrent torrent to complete and for the Arr application to expose the imported file, then compares
 the source and library filesystem identities beneath the selected Environment `dataRoot`. The `VERIFY_MOVIE_*` and
 `VERIFY_SERIES_EPISODE_*` diagnostics pass only when each requested path succeeds and both paths resolve to the same inode.
@@ -330,13 +331,13 @@ flowchart LR
     Profilarr -->|quality and naming policy| Sonarr
 ```
 
-Seerr turns approved household requests into Radarr or Sonarr searches. Prowlarr supplies releases from explicitly approved
+Seerr turns approved movie requests into Radarr searches and marks requested series seasons as monitored. Houndarr owns proactive episode searches when series automation is enabled. Prowlarr supplies releases from explicitly approved
 sources. Radarr and Sonarr submit categorized downloads to qBittorrent and hardlink completed files into the appropriate
 library. Jellyfin scans the library through a read-only mount and serves it to household users.
 
 `apply` resolves the pinned Movie Library and Series Library profiles by name from the selected Environment's Radarr and Sonarr APIs, then reconciles one
 default non-4K Seerr destination for each: `http://radarr:7878` with the shared Movie Library root and `http://sonarr:8989`
-with the shared Series Library root, standard series type, season folders, and automatic search. Numeric profile identities
+with the shared Series Library root, standard series type, and season folders. Series automatic search is disabled when Houndarr owns proactive searching. Numeric profile identities
 never cross Environment boundaries. Promotion verification authenticates as the household user, submits an approved legal
 movie or selected-season series request to Seerr, then observes the resulting Arr acquisition, hardlink import, and Jellyfin playback.
 
@@ -636,6 +637,184 @@ applied, disposable Staging Environment and run:
 These run the checked-in legal fixtures through Seerr, the matching Arr application, qBittorrent, hardlink import, and Jellyfin playback; each is
 deliberately opt-in because it interrupts the VPN and retains the fixture for seeding. Production permits only non-disruptive smoke observations. The detailed testing
 strategy is being resolved in the [testing Wayfinder map](https://github.com/adkulas/homelab/issues/37).
+
+## Episode searching and queue recovery
+
+Houndarr owns proactive missing Series Library searches. Seerr still approves
+requests, creates or updates series, applies the pinned profile/root, and monitors
+the requested seasons, but its Sonarr connection has automatic searching disabled.
+Sonarr RSS monitoring continues around the clock: it polls new indexer releases
+and can grab a newly aired episode without waiting for Houndarr's grace or quiet
+hours. Houndarr is the fallback when content remains missing.
+
+Cleanuparr owns queue health, removal, blocklisting and replacement searches. Its
+global Search stays enabled, while global proactive Seeker and the Sonarr
+instance's Seeker toggle are disabled. Single-episode removal produces
+`EpisodeSearch`; a grouped season produces upstream `SeasonSearch`. Houndarr
+revisits still-missing episodes under its ordinary budget and cooldown. Replacement
+dispatch uses Cleanuparr's two-minute Seeker interval, rather than happening in
+the queue DELETE request itself. Neither companion queries Prowlarr or an indexer
+directly. Movie requests and Radarr recovery ownership are unchanged.
+
+### Installation and guided first run
+
+The checked-in versions pin Houndarr **v1.13.3** and Cleanuparr **v2.10.12** by
+registry manifest SHA-256 digest. Both use their own Environment configuration
+volume, bounded logs, PUID/PGID identity and application network. They receive no
+media mount, additional Linux capability, or public proxy route. Their management
+ports bind to **127.0.0.1**: Production Houndarr 8877 / Cleanuparr 11011; Staging
+Houndarr 18877 / Cleanuparr 21011. For remote management, use an SSH tunnel, e.g.
+`ssh -L 18877:127.0.0.1:18877 -L 21011:127.0.0.1:21011 homelab`.
+
+1. Review `seriesAutomation` under each Environment in `media-stack.yaml`.
+   Run `media-stack apply --environment staging`. Apply disables Seerr's grouped
+   series search before starting companions. Initial requests may remain pending
+   while bootstrap is incomplete; an incomplete bootstrap fails explicitly.
+2. Open Staging Houndarr at `http://127.0.0.1:18877` and create a distinct admin
+   account. Add **one** Sonarr instance at `http://sonarr:8989`, using the existing
+   Staging Sonarr API key from its authenticated Settings → General page.
+   Do not enter a Production address or credential. Houndarr encrypts the key in
+   its own state. Configure the table below; disable cutoff, library upgrades and
+   hot retries; leave tag include/exclude filters empty. Enable missing search
+   and the instance only when these settings are correct.
+3. Open Staging Cleanuparr at `http://127.0.0.1:21011`, create its admin account,
+   finish setup and copy the account API key. Manage its login/2FA through its UI.
+   Apply creates its Sonarr/qBittorrent connections using the existing Environment
+   credentials; do not add other Arr applications or download clients here.
+4. Edit the selected Environment's existing SOPS document with `sops`, adding:
+
+   ```yaml
+   houndarr:
+     username: <this Environment's Houndarr admin username>
+     password: <this Environment's Houndarr admin password>
+   cleanuparr:
+     apiKey: <this Environment's Cleanuparr account API key>
+   ```
+
+   Keep only the encrypted document in version control. These credentials do not
+   belong in Compose, shell arguments, tickets or screenshots. Existing `init`
+   preserves these optional keys; it does not overwrite an existing account.
+5. Rerun `apply`. Houndarr has no supported configuration API: apply authenticates
+   to its UI, reads the instance form, tests the stored Sonarr connection, and
+   stops with the specific guided correction when settings differ. It never edits
+   an upstream database. Cleanuparr's supported API is reconciled automatically;
+   queue cleaning pauses while policy changes, and readback must converge before
+   success. Repeat apply makes no additional configuration writes.
+6. Run `media-stack verify --environment staging --suite companions --output json`.
+   Then prove legal multi-episode request and recovery behavior in disposable
+   Staging before Promotion. Promotion requires successful companion policy, episode request/acquisition/playback and recovery diagnostics, plus both Environment-scoped companion stores in the Staging backup. Bootstrap Production separately; do not copy live
+   connection settings or service credentials between Environments.
+
+### Tuning
+
+| Declared Environment field | Initial value | Houndarr UI / behavior |
+| --- | --- | --- |
+| `search.batchSize` | 12 | Batch Size: up to 12 episode searches per cycle |
+| `search.intervalMinutes` | 30 | Sleep (minutes) |
+| `search.hourlyCap` | 12 | Hourly Cap; cannot be unbounded |
+| `search.cooldownDays` | 1 | Cooldown (days) before retrying an episode |
+| `search.releaseGraceHours` | 6 | Post-Release Grace (hours) |
+| `search.allowedWindow` | `06:00-00:00` | Allowed Search Window, using container `TZ` |
+| `search.queueLimit` | 2 | Queue Limit: Sonarr queue rows, checked once at cycle start |
+| Stack Policy | Episode / Chronological | Sonarr Missing Search Mode / Search Order |
+| `recovery.intervalMinutes` | 5 | Cleanuparr Queue Cleaner interval |
+| `recovery.strikes` | 12 | Repeated qualifying observations for all four recovery reasons |
+| `recovery.minimumSpeedKiB` | 100 | Low-speed trigger, translated to upstream binary `100KB` |
+| `recovery.maximumRemainingHours` | 24 | Excessive remaining-time trigger |
+
+A 12-episode season can consume a full search batch in the next allowed cycle,
+but all monitored missing episodes share that budget. Requests do not jump ahead
+of older backlog. Chronological uses original air dates even for old seasons;
+page rotation, cooldowns and equal air dates mean it is not a strict episode
+1→12 guarantee. Downloads may complete in another order. Source requests can
+multiply across indexers, so an episode-command cap is not an indexer request cap.
+
+Slow speed **OR** excessive remaining time can independently accumulate strikes.
+Stall and slow strikes reset on meaningful progress. Metadata and failed-import
+strikes are cumulative upstream, not necessarily consecutive. Failed-import
+cleanup includes only release-specific “No video files were found” / “Not a valid
+video file” reasons; disk, permission and other import warnings need operator
+repair. Apply owns the complete stall/slow rule lists and removes other rules;
+upstream interval validation also considers disabled rules.
+
+Short outages below the strike threshold retain downloads; unavailable qBittorrent
+APIs do not imply that a torrent is absent. Houndarr queue inspection fails open.
+Cleanuparr is not a shared-outage circuit breaker: existing strikes can reach the
+threshold during a new peer/VPN outage. The agreed upstream exception is a torrent
+with **every file deselected**: Cleanuparr removes it immediately without strikes.
+Neither companion is allowed to remove imported Series Library media.
+
+### Disabling and recovery
+
+Set `seriesAutomation.enabled: false` for the selected Environment, disable its
+Houndarr instance in the UI, then rerun apply. Cleanuparr inspection/replacement
+connections and Queue Cleaner are disabled and Seerr regains automatic grouped
+series searches. Do not simply remove `seriesAutomation`: old configurations
+without it retain the pre-companion behavior, but omission is not a migration that
+stops previously running containers. Preserve both state volumes while disabled.
+
+Backup inventories both `houndarr-config` and `cleanuparr-config`, including
+Houndarr's encrypted keys/cooldowns and Cleanuparr's config, strikes and events.
+Normal restore requires matching image/volume coverage. A Restore Drill restores
+these stores into Staging but leaves companions, acquisition and integrations
+stopped; only Jellyfin starts. Use the existing explicit integration confirmation,
+check local targets/rotated credentials, complete any guided Houndarr correction,
+and rerun apply. Never start restored companions independently before validation.
+
+### Verification and troubleshooting
+
+`verify --suite companions` is available in either Environment and observes configuration and the last 24 hours of queue
+events without changing policy or interrupting the VPN. Search logs are a bounded
+recent view. An idle service is not proof of successful recovery. Diagnostics
+separately report invalid credentials, unavailable targets, duplicate proactive
+owners, wrong episode context, cap exhaustion, queue backpressure, each strike
+reason/count, cleanup thresholds and replacement failures. Raw titles, free-text
+upstream messages and credentials are not printed.
+
+For a controlled recovery, pass `--recovery-fixture /private/recovery.yaml` to
+`verify --suite companions` or `verify --suite promotion`. Use only disposable
+Staging and legal fixture downloads. This command observes; it does not manufacture
+stalls, delete torrents, add blocklists or start replacement searches. Example:
+
+```yaml
+apiVersion: homelab.media-stack/series-recovery/v1alpha1
+kind: SeriesRecoveryFixture
+spec:
+  legalFixture: true
+  downloadId: <legal disposable torrent hash>
+  seriesId: <Staging Sonarr series ID>
+  seasonNumber: 1
+  episodeIds: [<Staging Sonarr episode ID>]
+  replacementContext: episode # season requires SeasonSearch plus episode fallback
+  reason: stalled # metadata, slow-speed, slow-time, failed-import, connectivity
+  observedAfter: <RFC3339 timestamp within the last 24 hours>
+  timeout: 75m
+  expect: recovered # retained proves queue/torrent/blocklist unchanged throughout timeout
+```
+
+Recovery proof requires the declared strike threshold, actual removal from Sonarr
+and qBittorrent, a persisted Sonarr blocklist entry, and the matching replacement
+command after the matching cleanup event. Season-pack episode fallback must follow
+the matching `SeasonSearch`; earlier proactive searches cannot certify recovery. A missing blocklist after removal or an expired threshold-level cleanup attempt produces `VERIFY_BLOCKLIST_FAILED`; a missing
+replacement produces `VERIFY_REPLACEMENT_FAILED`; unfinished recovery produces
+`VERIFY_RECOVERY_TIMEOUT`. For a season pack, expect honest `SeasonSearch` followed
+by episode fallback, potentially after the ordinary Houndarr cooldown/cap clears.
+API unavailability fails observation rather than being treated as successful
+cleanup. Review Sonarr command history and Cleanuparr's authenticated events/logs
+for detailed failures; a blocklist API failure must stop replacement dispatch.
+
+The isolated real-image acceptance test is:
+
+```bash
+MEDIA_STACK_LIVE_COMPANIONS=1 go test ./tests/acceptance \
+  -run '^TestDisposablePinnedSeriesCompanions$' -count=1 -timeout=25m -v
+```
+
+It creates disposable networks and volumes, uses pinned companion images with
+legal Sonarr/qBittorrent HTTP fixtures, and exercises supported UI/API bootstrap
+and job controls. It contacts no public indexer or household Environment. The
+separate legal Seerr request-to-playback acceptance still requires an applied,
+disposable Staging Environment and legal media fixtures.
 
 ## Backups, restore, and Restore Drills
 

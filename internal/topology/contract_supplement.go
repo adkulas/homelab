@@ -3,6 +3,7 @@ package topology
 import (
 	"fmt"
 
+	"github.com/adkulas/homelab/internal/config"
 	"github.com/adkulas/homelab/internal/contractmodel"
 )
 
@@ -24,9 +25,13 @@ func topologySupplement(definition serviceDefinition) []contractmodel.Setting {
 		settings = append(settings, contractmodel.Derived("dataMount", "Service data mount", "spec.environments.<environment>.dataRoot + service mount policy", "The selected Environment data root is mounted "+readOnly+" at the service's path-identical data seam.", "render"))
 	}
 	if definition.port != nil && definition.name != "gluetun" {
+		source := "spec.defaults.lanBindAddress"
+		if config.IsSeriesCompanion(definition.name) {
+			source = "Stack Policy#management.bindAddress"
+		}
 		settings = append(settings,
 			contractmodel.Fixed("port.target", "Container target port", fmt.Sprintf("%d", definition.targetPort), "The upstream service listens on its stable internal port.", "render"),
-			contractmodel.Derived("port.publication", "LAN port publication", "spec.defaults.lanBindAddress + "+servicePortSource(definition.name), "Compose publishes the Environment port on the declared LAN bind address.", "render"),
+			contractmodel.Derived("port.publication", "LAN port publication", source+" + "+servicePortSource(definition.name), "Compose publishes the Environment port on the declared LAN bind address.", "render"),
 		)
 	}
 	return settings

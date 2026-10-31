@@ -2,6 +2,7 @@ package acceptance_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +30,9 @@ func TestPromotionVerifyRequestsAndPlaysLegalSeriesEpisodeThroughSeerr(t *testin
 
 	var mutex sync.Mutex
 	seriesAdded, seriesRequested, releaseGrabbed, imported := false, false, false, false
+	companions := newCompanionAPIFixture(t, 18080)
+	companions.converge()
+
 	api := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		mutex.Lock()
 		defer mutex.Unlock()
@@ -44,14 +49,24 @@ func TestPromotionVerifyRequestsAndPlaysLegalSeriesEpisodeThroughSeerr(t *testin
 					_, _ = io.WriteString(writer, `[]`)
 				}
 			case "GET /api/v3/episode":
-				_, _ = io.WriteString(writer, `[{"id":84,"seriesId":42,"seasonNumber":1,"episodeNumber":1}]`)
+				_, _ = io.WriteString(writer, `[{"id":84,"seriesId":42,"seasonNumber":1,"episodeNumber":1,"monitored":true,"hasFile":false,"airDateUtc":"1962-10-01T00:00:00Z"},{"id":85,"seriesId":42,"seasonNumber":1,"episodeNumber":2,"monitored":true,"hasFile":false,"airDateUtc":"1962-10-08T00:00:00Z"},{"id":86,"seriesId":42,"seasonNumber":0,"episodeNumber":1,"monitored":false,"airDateUtc":"1962-10-01T00:00:00Z"}]`)
+			case "GET /api/v3/command":
+				if seriesRequested && !releaseGrabbed {
+					if err := os.WriteFile(sourcePath, []byte("public-domain fixture episode\n"), 0640); err != nil {
+						t.Error(err)
+					}
+					releaseGrabbed = true
+				}
+				_ = json.NewEncoder(writer).Encode([]map[string]any{{"name": "EpisodeSearch", "queued": time.Now().UTC(), "body": map[string]any{"name": "EpisodeSearch", "episodeIds": []int{84}}}, {"name": "EpisodeSearch", "queued": time.Now().UTC(), "body": map[string]any{"name": "EpisodeSearch", "episodeIds": []int{85}}}})
 			case "GET /api/v3/release":
+				t.Error("companion verification searched for releases itself")
 				if request.URL.Query().Get("episodeId") != "84" {
 					http.Error(writer, "unexpected episode", http.StatusBadRequest)
 					return
 				}
 				_, _ = io.WriteString(writer, `[{"guid":"fixture-release","title":"The Lucy Show S01E01","indexer":"Internet Archive","episodeId":84}]`)
 			case "POST /api/v3/release":
+				t.Error("companion verification grabbed a release itself")
 				if err := os.WriteFile(sourcePath, []byte("public-domain fixture episode\n"), 0o640); err != nil {
 					http.Error(writer, err.Error(), http.StatusInternalServerError)
 					return
@@ -111,6 +126,8 @@ func TestPromotionVerifyRequestsAndPlaysLegalSeriesEpisodeThroughSeerr(t *testin
 			}
 			http.SetCookie(writer, &http.Cookie{Name: "connect.sid", Value: "request-session", Path: "/"})
 			_ = json.NewEncoder(writer).Encode(map[string]any{"id": 1, "email": "household", "permissions": 2})
+		case "GET /api/v1/settings/sonarr":
+			fmt.Fprint(writer, `[{"hostname":"sonarr","port":8989,"isDefault":true,"preventSearch":true}]`)
 		case "POST /api/v1/request":
 			if cookie, err := request.Cookie("connect.sid"); err != nil || cookie.Value != "request-session" {
 				http.Error(writer, "missing household session", http.StatusUnauthorized)
@@ -180,6 +197,9 @@ func TestPromotionVerifyRequestsAndPlaysLegalSeriesEpisodeThroughSeerr(t *testin
 	declared = strings.Replace(declared, "sonarr: 18989", "sonarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "jellyfin: 18096", "jellyfin: "+jellyfinURL.Port(), 1)
 	declared = strings.Replace(declared, "seerr: 15055", "seerr: "+seerrURL.Port(), 1)
+	declared = strings.Replace(declared, "houndarr: 18877", "houndarr: "+strconv.Itoa(fixturePort(t, companions.hound.URL)), 1)
+	declared = strings.Replace(declared, "cleanuparr: 21011", "cleanuparr: "+strconv.Itoa(fixturePort(t, companions.cleanup.URL)), 1)
+	companions.documents["download_client"]["clients"].([]any)[0].(map[string]any)["host"] = "http://qbittorrent:" + apiURL.Port()
 	writeFile(t, configPath, []byte(declared), 0o600)
 	if err := os.Mkdir(filepath.Join(temporary, "secrets"), 0o700); err != nil {
 		t.Fatal(err)
@@ -194,6 +214,7 @@ spec:
   tvdbId: 103354
   seasonNumber: 1
   episodeNumber: 1
+  episodeNumbers: [1, 2]
   releaseTitle: The Lucy Show S01E01
   indexer: Internet Archive
   timeout: 5s
@@ -203,7 +224,7 @@ spec:
 	if err := os.Mkdir(binDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(binDirectory, "sops"), []byte("#!/bin/sh\nprintf 'nordvpn:\n  openvpn:\n    serviceUsername: fixture-user\n    servicePassword: fixture-password\nprofilarr:\n  apiKey: fixture-profilarr-api-key-32-characters\njellyfin:\n  username: household\n  password: fixture-jellyfin-password\nqbittorrent:\n  username: household\n  password: fixture-qbittorrent-password\n'\n"), 0o700)
+	writeFile(t, filepath.Join(binDirectory, "sops"), []byte("#!/bin/sh\nprintf 'houndarr:\n  username: companion-admin\n  password: fixture-houndarr-password\ncleanuparr:\n  apiKey: fixture-cleanuparr-key\nnordvpn:\n  openvpn:\n    serviceUsername: fixture-user\n    servicePassword: fixture-password\nprofilarr:\n  apiKey: fixture-profilarr-api-key-32-characters\njellyfin:\n  username: household\n  password: fixture-jellyfin-password\nqbittorrent:\n  username: household\n  password: fixture-qbittorrent-password\n'\n"), 0o700)
 	writeFile(t, filepath.Join(binDirectory, "curl"), []byte("#!/bin/sh\nprintf '198.51.100.10\\n'\n"), 0o700)
 	writeFile(t, filepath.Join(binDirectory, "docker"), []byte(`#!/bin/sh
 cat >/dev/null
@@ -252,7 +273,7 @@ esac
 	for _, diagnostic := range report.Diagnostics {
 		passed[diagnostic.Code] = diagnostic.Status == "pass"
 	}
-	for _, code := range []string{"VERIFY_SERIES_REQUESTED", "VERIFY_SERIES_EPISODE_ACQUIRED", "VERIFY_SERIES_EPISODE_HARDLINKED", "VERIFY_SERIES_EPISODE_PLAYBACK_READY"} {
+	for _, code := range []string{"VERIFY_EPISODE_SEARCH_DISPATCHED", "VERIFY_SERIES_REQUESTED", "VERIFY_SERIES_EPISODE_ACQUIRED", "VERIFY_SERIES_EPISODE_HARDLINKED", "VERIFY_SERIES_EPISODE_PLAYBACK_READY"} {
 		if !passed[code] {
 			t.Errorf("promotion verification did not report %s: %s", code, output)
 		}
