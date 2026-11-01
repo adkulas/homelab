@@ -29,7 +29,7 @@ Cleanuparr immediately removes those without waiting for strikes.
 | plan | Pinned, isolated companions; loopback management; no media mounts or rendered credentials | versions.yaml and Environment policy | Rendered Compose acceptance |
 | config describe | Search/cleanup ownership, semantic tuning, sensitivity, bootstrap and upstream exceptions | Service Configuration Contract | JSON and human contract acceptance |
 | apply | Seerr monitors requests without grouped search; one proactive owner | Issue #88 and agreed policy | External Seerr, Houndarr and Cleanuparr settings |
-| apply / plan | Guided Houndarr bootstrap and drift correction without database edits | Houndarr v1.13.3 authenticated UI | Authenticated form observation and connection test |
+| apply / plan | Automatic first run (see [follow-up](companion-bootstrap.md)) and guided Houndarr drift correction without database edits | Houndarr v1.13.3 authenticated UI | Authenticated form observation and connection test |
 | apply | Reconcile Cleanuparr API settings, replacement enabled, proactive Seeker disabled, repeated strikes | Cleanuparr v2.10.12 API | External API traffic, idempotence and drift acceptance |
 | verify | Distinct configuration, credential, dispatch, budget, cleanup and recovery diagnostics | Observed service APIs and Sonarr command/blocklist/queue state | Machine-readable diagnostics and disposable Staging evidence |
 | backup / restore | Inventory both mutable states; keep recovered integrations gated until local targets are revalidated | Rendered named volumes and Restore Drill gate | Backup/restore acceptance |

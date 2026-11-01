@@ -152,7 +152,7 @@ media-stack init \
 
 Initialization also asks for a unique, high-entropy Profilarr API key of at least 32 characters and distinct Jellyfin administrator credentials for the selected Environment. The Profilarr key lets the CLI use
 Profilarr's documented API to verify the one-time guided Radarr and Sonarr connections; use a different value for each
-Environment. The Jellyfin credentials bootstrap or authenticate the selected Environment through its supported API and are used for Movie and Series Library playback verification. Initialization writes the reviewable Declared Configuration and `secrets/staging.sops.yaml`; it never starts containers. It
+Environment. Companion usernames/passwords are operator-selected, encrypted by init, and used for automatic first-run setup during apply; see the [companion setup flow](#installation-and-automatic-first-run). The Jellyfin credentials bootstrap or authenticate the selected Environment through its supported API and are used for Movie and Series Library playback verification. Initialization writes the reviewable Declared Configuration and `secrets/staging.sops.yaml`; it never starts containers. It
 also creates only the selected Staging Environment layout:
 
 ```text
@@ -563,7 +563,7 @@ jellyfin:
 
 New `init` runs collect and encrypt these values. For an Environment initialized before Profilarr or Jellyfin reconciliation was implemented,
 open its existing document with `sops services/media/secrets/<environment>.sops.yaml`, add the block above, save it, and rerun
-`apply`. The Profilarr key declaratively configures Profilarr and authenticates only its documented versioned API. The Jellyfin credentials bootstrap or authenticate one local administrator through Jellyfin's supported API. These values remain in memory, are never placed in Compose, and are never printed.
+`apply`. The Profilarr key declaratively configures Profilarr and authenticates only its documented versioned API. Companion usernames/passwords are operator-selected, encrypted by init, and used for automatic first-run setup during apply; see the [companion setup flow](#installation-and-automatic-first-run). The Jellyfin credentials bootstrap or authenticate one local administrator through Jellyfin's supported API. These values remain in memory, are never placed in Compose, and are never printed.
 
 The initial VPN path uses NordVPN OpenVPN manual-setup service username/password with UDP by default and TCP as an explicit
 fallback. Gluetun selects endpoints from semantic country and optional category filters, persists its server catalogue, and
@@ -656,7 +656,7 @@ dispatch uses Cleanuparr's two-minute Seeker interval, rather than happening in
 the queue DELETE request itself. Neither companion queries Prowlarr or an indexer
 directly. Movie requests and Radarr recovery ownership are unchanged.
 
-### Installation and guided first run
+### Installation and automatic first run
 
 The checked-in versions pin Houndarr **v1.13.3** and Cleanuparr **v2.10.12** by
 registry manifest SHA-256 digest. Both use their own Environment configuration
@@ -667,43 +667,57 @@ Houndarr 18877 / Cleanuparr 21011. For remote management, use an SSH tunnel, e.g
 `ssh -L 18877:127.0.0.1:18877 -L 21011:127.0.0.1:21011 homelab`.
 
 1. Review `seriesAutomation` under each Environment in `media-stack.yaml`.
-   Run `media-stack apply --environment staging`. Apply disables Seerr's grouped
-   series search before starting companions. Initial requests may remain pending
-   while bootstrap is incomplete; an incomplete bootstrap fails explicitly.
-2. Open Staging Houndarr at `http://127.0.0.1:18877` and create a distinct admin
-   account. Add **one** Sonarr instance at `http://sonarr:8989`, using the existing
-   Staging Sonarr API key from its authenticated Settings → General page.
-   Do not enter a Production address or credential. Houndarr encrypts the key in
-   its own state. Configure the table below; disable cutoff, library upgrades and
-   hot retries; leave tag include/exclude filters empty. Enable missing search
-   and the instance only when these settings are correct.
-3. Open Staging Cleanuparr at `http://127.0.0.1:21011`, create its admin account,
-   finish setup and copy the account API key. Manage its login/2FA through its UI.
-   Apply creates its Sonarr/qBittorrent connections using the existing Environment
-   credentials; do not add other Arr applications or download clients here.
-4. Edit the selected Environment's existing SOPS document with `sops`, adding:
+   Fresh interactive `media-stack init --environment staging` asks you to choose
+   Houndarr and Cleanuparr administrator usernames and passwords. Password input
+   is hidden on a terminal and confirmed before saving. Init encrypts these
+   choices in the selected Environment SOPS document before creating accounts.
+2. For an already initialized Environment, run
+   `media-stack init --environment staging --companions`. This asks only for
+   missing companion credentials and preserves existing credentials, SOPS
+   recipients, other secrets and Declared Configuration. If accounts already
+   exist, enter their current credentials. Never send passwords in chat or tickets.
+   For non-interactive provisioning, use a protected `chmod 600` answers file:
 
    ```yaml
-   houndarr:
-     username: <this Environment's Houndarr admin username>
-     password: <this Environment's Houndarr admin password>
-   cleanuparr:
-     apiKey: <this Environment's Cleanuparr account API key>
+   houndarrUsername: <chosen username>
+   houndarrPassword: <chosen password>
+   cleanuparrUsername: <chosen username>
+   cleanuparrPassword: <chosen password>
    ```
 
-   Keep only the encrypted document in version control. These credentials do not
-   belong in Compose, shell arguments, tickets or screenshots. Existing `init`
-   preserves these optional keys; it does not overwrite an existing account.
-5. Rerun `apply`. Houndarr has no supported configuration API: apply authenticates
-   to its UI, reads the instance form, tests the stored Sonarr connection, and
-   stops with the specific guided correction when settings differ. It never edits
-   an upstream database. Cleanuparr's supported API is reconciled automatically;
-   queue cleaning pauses while policy changes, and readback must converge before
-   success. Repeat apply makes no additional configuration writes.
+   Both account pairs are required in a fresh answers file when companions are declared.
+   Pass `--non-interactive --answers /protected/path/answers.yaml` to init (with
+   `--companions` for migration). Remove the plaintext answers file after use.
+   Houndarr usernames allow 3–32 letters, digits, dots, underscores or dashes;
+   passwords require at least 8 characters and at most 72 UTF-8 bytes.
+   Cleanuparr usernames require 3–50 characters and passwords 8–128 characters.
+3. Run `media-stack apply --environment staging`. Apply disables Seerr's grouped
+   series search, starts the companions, and creates first-run accounts using your
+   chosen credentials through upstream setup interfaces. It retrieves Cleanuparr's
+   account API key and saves it to `cleanuparr.apiKey` with SOPS before configuring
+   queue recovery. The selected Sonarr/qBittorrent credentials are reused without
+   displaying values or rendering them into Compose.
+4. Apply creates **one** Houndarr Sonarr connection at `http://sonarr:8989` through
+   authenticated, CSRF-protected web forms. All search passes start paused; saved
+   settings and the Sonarr connection are checked before enabling missing episode
+   searches. Cleanuparr's supported configuration API configures its local
+   connections and recovery policy, pausing queue cleaning during policy changes.
+   No upstream database is edited. Rerunning apply resumes interrupted first runs
+   and preserves existing accounts and passwords. Authentication failures stop
+   setup; they never reset an account. A failed SOPS update preserves the original
+   document and stops before enabling automation.
+5. Existing configured Houndarr connections remain observed: apply reports guided
+   corrections for policy drift or ambiguous connections. Manage login changes
+   and Cleanuparr 2FA through the upstream UI and update SOPS to match. Existing
+   `cleanuparr.apiKey` installations remain supported without storing admin login
+   credentials; accounts with 2FA need their API key stored in SOPS. Regular init
+   preserves an existing document; use `--companions` to add missing credentials.
 6. Run `media-stack verify --environment staging --suite companions --output json`.
-   Then prove legal multi-episode request and recovery behavior in disposable
-   Staging before Promotion. Promotion requires successful companion policy, episode request/acquisition/playback and recovery diagnostics, plus both Environment-scoped companion stores in the Staging backup. Bootstrap Production separately; do not copy live
-   connection settings or service credentials between Environments.
+   Plan and verify do not create accounts or update SOPS. A confirmed Restore Drill continues to use its supplied credentials and requires existing companion setup; it does not bootstrap accounts or overwrite the Environment SOPS document. Then prove legal
+   multi-episode request and recovery behavior in disposable Staging before
+   Promotion. Promotion requires successful companion policy, episode
+   request/acquisition/playback and recovery diagnostics, plus both Environment
+   companion stores in the Staging backup. Bootstrap Production separately.
 
 ### Tuning
 
@@ -891,6 +905,7 @@ then removes the gate and encrypted copy; a failed apply remains safely gated fo
 | Command | Availability | What it does and why to use it |
 | --- | --- | --- |
 | `media-stack init --environment production|staging [--config path]` | Available | Interactively completes runtime/VPN choices, collects a unique Profilarr API key and distinct Jellyfin administrator credentials, encrypts that Environment's credentials, and provisions its isolated data layout. Use it once per Environment and rerun it to restore missing directories without replacing complete choices. |
+| `media-stack init --environment ... --companions` | Available | Adds missing operator-selected companion credentials to the selected existing SOPS document, preserving other choices. |
 | `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
 | `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, configuration observation | Reports ordered create, update, restart, guide, and retained-unknown observations as YAML comments, followed by rendered Compose YAML. It compares complete Compose service hashes; inventories project containers, networks, and volumes; and reuses the application reconciliation contracts behind a mutation-blocking HTTP boundary. If an observation dependency is unavailable, that subject is explicitly deferred. Use it before `apply` to inspect Declared Configuration drift or pipe the complete output to `docker compose config`. Saved Plan Artifacts remain a later planner phase. |

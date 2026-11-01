@@ -70,5 +70,10 @@ MEDIA_STACK_LIVE_COMPANIONS=1 go test ./tests/acceptance \
   -run '^TestDisposablePinnedSeriesCompanions$' -count=1 -timeout=25m -v
 ```
 
+For a shorter real-image first-run check, add
+`MEDIA_STACK_LIVE_COMPANIONS_BOOTSTRAP_ONLY=1`; it exercises automatic account and
+connection setup, policy readback and repeated setup without the timed recovery
+scenarios.
+
 See the [series automation runbook](services/media/README.md#episode-searching-and-queue-recovery)
 for bootstrap, tuning, upstream safety limits and Staging recovery evidence.

@@ -439,6 +439,7 @@ func runInit(ctx context.Context, arguments []string) error {
 	configPath := flags.String("config", "", "Declared Configuration path")
 	nonInteractive := flags.Bool("non-interactive", false, "Read all answers from a file")
 	answersPath := flags.String("answers", "", "Initialization answers path")
+	companionsOnly := flags.Bool("companions", false, "Add missing companion credentials to existing encrypted secrets")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -450,7 +451,11 @@ func runInit(ctx context.Context, arguments []string) error {
 		return fmt.Errorf("locate working directory: %w", err)
 	}
 	var request engine.InitRequest
-	if *nonInteractive {
+	if *companionsOnly && *nonInteractive {
+		request, err = engine.NewCompanionInitRequest(workingDirectory, *environmentName, *configPath, *answersPath)
+	} else if *companionsOnly {
+		request, err = engine.NewInteractiveCompanionInitRequest(ctx, workingDirectory, *environmentName, *configPath, os.Stdin, os.Stdout)
+	} else if *nonInteractive {
 		request, err = engine.NewInitRequest(workingDirectory, *environmentName, *configPath, *answersPath)
 	} else {
 		request, err = engine.NewInteractiveInitRequest(workingDirectory, *environmentName, *configPath, os.Stdin, os.Stdout)
@@ -464,6 +469,8 @@ func runInit(ctx context.Context, arguments []string) error {
 	}
 	if report.Preserved {
 		fmt.Fprintf(os.Stdout, "Preserved existing %s Environment choices and encrypted secrets.\n", report.Environment)
+	} else if *companionsOnly {
+		fmt.Fprintf(os.Stdout, "Saved missing %s Environment companion credentials with SOPS. Run media-stack apply --environment %s to configure the services.\n", report.Environment, report.Environment)
 	} else {
 		fmt.Fprintf(os.Stdout, "Initialized %s Environment Declared Configuration and encrypted secrets.\n", report.Environment)
 	}

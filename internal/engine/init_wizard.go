@@ -142,6 +142,12 @@ func NewInteractiveInitRequest(workingDirectory, environment, configPath string,
 			return InitRequest{}, err
 		}
 	}
+	if !secretExists && declared.Spec.Environments[environment].SeriesAutomation != nil {
+		fmt.Fprintln(output, "Choose the administrator credentials for each series companion. They are encrypted in this Environment’s SOPS document before apply creates the accounts.")
+		if err := promptCompanionAnswers(reader, input, output, &answers, false); err != nil {
+			return InitRequest{}, err
+		}
+	}
 	request.answers = &answers
 	return request, nil
 }

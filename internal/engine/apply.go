@@ -36,12 +36,13 @@ type ApplyReport struct {
 }
 
 type environmentSecrets struct {
-	Houndarr      companions.AdminCredentials
-	CleanuparrKey string
-	OpenVPN       openVPNCredentials
-	ProfilarrKey  string
-	Jellyfin      jellyfin.Credentials
-	QBittorrent   qbittorrent.Credentials
+	Houndarr        companions.AdminCredentials
+	CleanuparrKey   string
+	CleanuparrAdmin companions.AdminCredentials
+	OpenVPN         openVPNCredentials
+	ProfilarrKey    string
+	Jellyfin        jellyfin.Credentials
+	QBittorrent     qbittorrent.Credentials
 }
 
 func NewApplyRequest(workingDirectory, environment, configPath string) (ApplyRequest, error) {
@@ -218,6 +219,11 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if environment.SeriesAutomation != nil {
 		if output, err := runDockerCompose(ctx, plan, "up", "-d", "houndarr", "cleanuparr"); err != nil {
 			return ApplyReport{}, fmt.Errorf("start series companions: %w: %s", err, redactCredentials(output, credentials))
+		}
+		if !restoreDrillConfirmed {
+			if err := bootstrapSeriesCompanions(ctx, request.plan.configPath, environment, &secrets, sonarrAPIKey); err != nil {
+				return ApplyReport{}, err
+			}
 		}
 		if err := reconcileSeriesCompanions(ctx, environment, secrets, sonarrAPIKey, false); err != nil {
 			return ApplyReport{}, err
@@ -574,7 +580,7 @@ func decryptEnvironmentSecrets(ctx context.Context, path string) (environmentSec
 	if document.QBittorrent.Username == "" || document.QBittorrent.Password == "" {
 		return environmentSecrets{}, fmt.Errorf("selected Environment secrets require qbittorrent.username and qbittorrent.password; run media-stack init with the new keys to migrate this SOPS document without overwriting existing values")
 	}
-	return environmentSecrets{Houndarr: companions.AdminCredentials{Username: document.Houndarr.Username, Password: document.Houndarr.Password}, CleanuparrKey: document.Cleanuparr.APIKey, OpenVPN: credentials, ProfilarrKey: document.Profilarr.APIKey, Jellyfin: jellyfin.Credentials{Username: document.Jellyfin.Username, Password: document.Jellyfin.Password}, QBittorrent: qbittorrent.Credentials{Username: document.QBittorrent.Username, Password: document.QBittorrent.Password}}, nil
+	return environmentSecrets{Houndarr: companions.AdminCredentials{Username: document.Houndarr.Username, Password: document.Houndarr.Password}, CleanuparrKey: document.Cleanuparr.APIKey, CleanuparrAdmin: companions.AdminCredentials{Username: document.Cleanuparr.Username, Password: document.Cleanuparr.Password}, OpenVPN: credentials, ProfilarrKey: document.Profilarr.APIKey, Jellyfin: jellyfin.Credentials{Username: document.Jellyfin.Username, Password: document.Jellyfin.Password}, QBittorrent: qbittorrent.Credentials{Username: document.QBittorrent.Username, Password: document.QBittorrent.Password}}, nil
 }
 
 func decryptSelectedEnvironmentSecrets(ctx context.Context, configPath string, environment config.Environment) (environmentSecrets, error) {

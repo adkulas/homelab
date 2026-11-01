@@ -9,15 +9,17 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/adkulas/homelab/internal/companions"
 	"github.com/adkulas/homelab/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
 type InitRequest struct {
-	environment string
-	configPath  string
-	answersPath string
-	answers     *initAnswers
+	environment    string
+	configPath     string
+	answersPath    string
+	answers        *initAnswers
+	companionsOnly bool
 }
 
 type InitReport struct {
@@ -26,6 +28,10 @@ type InitReport struct {
 }
 
 type initAnswers struct {
+	HoundarrUsername        string                               `yaml:"houndarrUsername"`
+	HoundarrPassword        string                               `yaml:"houndarrPassword"`
+	CleanuparrUsername      string                               `yaml:"cleanuparrUsername"`
+	CleanuparrPassword      string                               `yaml:"cleanuparrPassword"`
 	RuntimeUID              int                                  `yaml:"runtimeUID"`
 	RuntimeGID              int                                  `yaml:"runtimeGID"`
 	Timezone                string                               `yaml:"timezone"`
@@ -74,6 +80,9 @@ func (localEngine) Init(ctx context.Context, request InitRequest) (InitReport, e
 	if err != nil {
 		return InitReport{}, err
 	}
+	if request.companionsOnly {
+		return initializeCompanionSecrets(ctx, request, declared.Spec.Environments[request.environment])
+	}
 	if err := declared.ValidateInitializableEnvironment(request.environment); err != nil {
 		return InitReport{}, err
 	}
@@ -115,7 +124,7 @@ func (localEngine) Init(ctx context.Context, request InitRequest) (InitReport, e
 		return InitReport{}, err
 	}
 	if !secretExists {
-		if err := encryptSecrets(ctx, secretsPath, answers); err != nil {
+		if err := encryptSecrets(ctx, secretsPath, answers, environment.SeriesAutomation != nil); err != nil {
 			return InitReport{}, err
 		}
 	}
@@ -194,8 +203,15 @@ func validateInitAnswers(answers initAnswers, requireSecrets bool) error {
 	return nil
 }
 
-func encryptSecrets(ctx context.Context, destination string, answers initAnswers) error {
+func encryptSecrets(ctx context.Context, destination string, answers initAnswers, companionsRequired bool) error {
+	if err := validateCompanionAnswers(answers, companionsRequired); err != nil {
+		return err
+	}
 	var document environmentSecretDocument
+	document.Houndarr.Username = answers.HoundarrUsername
+	document.Houndarr.Password = answers.HoundarrPassword
+	document.Cleanuparr.Username = answers.CleanuparrUsername
+	document.Cleanuparr.Password = answers.CleanuparrPassword
 	document.NordVPN.OpenVPN.ServiceUsername = answers.ServiceUsername
 	document.NordVPN.OpenVPN.ServicePassword = answers.ServicePassword
 	document.Profilarr.APIKey = answers.ProfilarrAPIKey
@@ -245,4 +261,19 @@ func writeSecretAtomic(path string, contents []byte) error {
 		return err
 	}
 	return os.Rename(temporaryPath, path)
+}
+
+func validateCompanionAnswers(answers initAnswers, required bool) error {
+	for _, item := range []struct {
+		service     string
+		credentials companions.AdminCredentials
+	}{{"Houndarr", companions.AdminCredentials{Username: answers.HoundarrUsername, Password: answers.HoundarrPassword}}, {"Cleanuparr", companions.AdminCredentials{Username: answers.CleanuparrUsername, Password: answers.CleanuparrPassword}}} {
+		if !required && item.credentials.Username == "" && item.credentials.Password == "" {
+			continue
+		}
+		if err := companions.ValidateAdminCredentials(item.service, item.credentials); err != nil {
+			return err
+		}
+	}
+	return nil
 }

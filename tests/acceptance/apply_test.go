@@ -15,6 +15,23 @@ import (
 )
 
 func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *testing.T) {
+	testApplyFlow(t, false)
+}
+
+func TestApplyBootstrapsCompanionsUsingChosenCredentials(t *testing.T) { testApplyFlow(t, true) }
+
+func TestApplyCompanionBootstrapPreservesStateOnFailure(t *testing.T) {
+	for _, scenario := range []string{"sops-write-failure", "interrupted-houndarr", "invalid-existing-password"} {
+		t.Run(scenario, func(t *testing.T) { testApplyFlow(t, true, scenario) })
+	}
+}
+
+func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
+	scenario := ""
+	if len(scenarios) > 0 {
+		scenario = scenarios[0]
+	}
+
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
 	preferences := map[string]any{}
@@ -465,6 +482,9 @@ func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *test
 	}
 	declared = strings.Replace(declared, "sonarr: 18989", "sonarr: "+sonarrURL.Port(), 1)
 	companions := newCompanionAPIFixture(t, fixturePort(t, api.URL))
+	if bootstrap {
+		companions.bootstrap = &companionBootstrapFixture{}
+	}
 	declared = strings.Replace(declared, "houndarr: 18877", "houndarr: "+strconv.Itoa(fixturePort(t, companions.hound.URL)), 1)
 	declared = strings.Replace(declared, "cleanuparr: 21011", "cleanuparr: "+strconv.Itoa(fixturePort(t, companions.cleanup.URL)), 1)
 	writeFile(t, configPath, []byte(declared), 0o600)
@@ -498,6 +518,9 @@ qbittorrent:
   password: fixture-qbittorrent-password
 EOF
 `), 0o700)
+	if bootstrap {
+		installBootstrapSOPSFixture(t, binDirectory, filepath.Join(temporary, "secrets", "staging.sops.yaml"))
+	}
 	dockerLog := filepath.Join(temporary, "docker-arguments")
 	composeCapture := filepath.Join(temporary, "compose.yaml")
 	healthCount := filepath.Join(temporary, "health-count")
@@ -609,9 +632,74 @@ EOF
 			t.Errorf("initial plan output does not contain %q:\n%s", want, initialPlanOutput)
 		}
 	}
+	if bootstrap && companions.bootstrap.accounts != 0 {
+		t.Fatal("plan created companion accounts")
+	}
 	writeFile(t, dockerLog, nil, 0o600)
 
+	if scenario == "sops-write-failure" {
+		sopsPath := filepath.Join(binDirectory, "sops")
+		if err := os.Rename(sopsPath, sopsPath+"-working"); err != nil {
+			t.Fatal(err)
+		}
+		writeExecutable(t, sopsPath, "#!/bin/sh\nif [ \"$1\" = set ]; then exit 1; fi\nexec \"$0-working\" \"$@\"\n")
+	}
+	if scenario == "interrupted-houndarr" {
+		companions.bootstrap.failOnce = "/settings/instances/1"
+	}
+	if scenario == "invalid-existing-password" {
+		companions.bootstrap.cleanupUser = "chosen-clean-admin"
+		companions.bootstrap.cleanupPassword = "existing-password-preserved"
+		companions.bootstrap.cleanupComplete = true
+	}
+	secretsBeforeFailure := readFile(t, filepath.Join(temporary, "secrets/staging.sops.yaml"))
 	output, err := command.CombinedOutput()
+	if scenario != "" {
+		if err == nil {
+			t.Fatal("bootstrap unexpectedly succeeded")
+		}
+		for _, secret := range []string{"chosen-hound-password", "chosen-clean-password", "fixture-cleanuparr-key"} {
+			if strings.Contains(string(output), secret) {
+				t.Fatal("bootstrap failure exposed a credential")
+			}
+		}
+		if companions.documents["queue_cleaner"]["enabled"] == true || companions.bootstrap.houndEnabled {
+			t.Fatal("failed bootstrap enabled automation")
+		}
+		switch scenario {
+		case "sops-write-failure":
+			if companions.bootstrap.accounts != 1 || companions.bootstrap.houndUser != "" {
+				t.Fatal("automation continued after encrypted persistence failed")
+			}
+			if string(secretsBeforeFailure) != string(readFile(t, filepath.Join(temporary, "secrets/staging.sops.yaml"))) {
+				t.Fatal("failed persistence changed the original document")
+			}
+			sopsPath := filepath.Join(binDirectory, "sops")
+			if err := os.Rename(sopsPath+"-working", sopsPath); err != nil {
+				t.Fatal(err)
+			}
+		case "interrupted-houndarr":
+			if companions.bootstrap.accounts != 2 || !companions.bootstrap.houndInstance {
+				t.Fatal("fixture did not interrupt a partial first run")
+			}
+		case "invalid-existing-password":
+			if companions.bootstrap.accounts != 0 || companions.bootstrap.cleanupPassword != "existing-password-preserved" || companions.bootstrap.houndUser != "" {
+				t.Fatal("authentication failure altered an existing account")
+			}
+			return
+		}
+		retry := exec.Command(command.Path, command.Args[1:]...)
+		retry.Dir = command.Dir
+		retry.Env = command.Env
+		retried, err := retry.CombinedOutput()
+		if err != nil {
+			t.Fatalf("resume bootstrap: %v\n%s", err, retried)
+		}
+		if companions.bootstrap.accounts != 2 || !companions.bootstrap.houndEnabled || companions.documents["queue_cleaner"]["enabled"] != true {
+			t.Fatal("retry failed to resume without duplicate accounts")
+		}
+		return
+	}
 	if err != nil {
 		t.Fatalf("media-stack apply failed: %v\n%s", err, output)
 	}
@@ -629,7 +717,7 @@ EOF
 		t.Errorf("Docker invocation = %q", got)
 	}
 	rendered := string(readFile(t, composeCapture))
-	for _, secret := range []string{"apply-service-user", "apply-service-password", "fixture-profilarr-api-key-32-characters", "fixture-jellyfin-password", "fixture-qbittorrent-password"} {
+	for _, secret := range []string{"apply-service-user", "apply-service-password", "fixture-profilarr-api-key-32-characters", "fixture-jellyfin-password", "fixture-qbittorrent-password", "chosen-hound-password", "chosen-clean-password", "fixture-cleanuparr-key"} {
 		if strings.Contains(rendered, secret) || strings.Contains(string(output), secret) {
 			t.Errorf("apply exposed secret %q\noutput: %s\nCompose: %s", secret, output, rendered)
 		}
@@ -754,6 +842,17 @@ EOF
 	if companions.documents["seeker"]["proactiveSearchEnabled"] != false || companions.documents["queue_cleaner"]["enabled"] != true {
 		t.Fatal("companion ownership and recovery policy not reconciled")
 	}
+	if bootstrap {
+		if companions.bootstrap.accounts != 2 || companions.bootstrap.houndUser != "chosen-hound-admin" || companions.bootstrap.cleanupUser != "chosen-clean-admin" {
+			t.Fatal("apply did not create exactly the chosen companion accounts")
+		}
+		if companions.bootstrap.houndFields.Get("batch_size") != "12" || companions.bootstrap.houndFields.Get("sonarr_search_mode") != "episode" || !companions.bootstrap.houndEnabled {
+			t.Fatal("apply did not automatically configure Houndarr")
+		}
+		if companions.bootstrap.houndPassword != "chosen-hound-password" || companions.bootstrap.cleanupPassword != "chosen-clean-password" {
+			t.Fatal("apply changed the chosen passwords")
+		}
+	}
 	companionWrites := companions.writes
 	seerrWritesAfterFirstRun := seerrWrites
 	preferences["save_path"] = "/data/torrents/drifted"
@@ -780,6 +879,9 @@ EOF
 	}
 	if len(rootFolders) != 1 || len(downloadClients) != 1 || len(seriesRootFolders) != 1 || len(seriesDownloadClients) != 1 || len(indexers) != 1 || len(applications) != 2 || len(jellyfinLibraries) != 2 || jellyfinPolicyWrites != 1 {
 		t.Errorf("repeated apply did not converge: movieRoots=%v movieDownloadClients=%v seriesRoots=%v seriesDownloadClients=%v indexers=%v applications=%v", rootFolders, downloadClients, seriesRootFolders, seriesDownloadClients, indexers, applications)
+	}
+	if bootstrap && companions.bootstrap.accounts != 2 {
+		t.Fatal("repeated apply recreated a companion account")
 	}
 	if companions.writes != companionWrites {
 		t.Errorf("repeated apply mutated companion policy %d times", companions.writes-companionWrites)

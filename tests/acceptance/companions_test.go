@@ -90,7 +90,7 @@ func TestConfigDescribeExplainsCompanionOwnershipAndSafety(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config describe: %v\n%s", err, output)
 	}
-	for _, want := range []string{"houndarr", "cleanuparr", "proactiveSearchOwner", "replacementSearchOwner", "search.batchSize", "recovery.strikes", "fullyDeselectedTorrents", "chronological"} {
+	for _, want := range []string{"houndarr", "cleanuparr", "proactiveSearchOwner", "replacementSearchOwner", "search.batchSize", "recovery.strikes", "fullyDeselectedTorrents", "chronological", "operator-selected credentials", "authenticated web forms", "cleanuparr.username", "cleanuparr.password", "authenticated Cleanuparr account API"} {
 		if !strings.Contains(string(output), want) {
 			t.Errorf("contract missing %s", want)
 		}
@@ -100,6 +100,7 @@ func TestConfigDescribeExplainsCompanionOwnershipAndSafety(t *testing.T) {
 // These HTTP fixtures model released public API/form payloads. They do not
 // implement the companions' schedulers; disposable tests exercise those images.
 type companionAPIFixture struct {
+	bootstrap      *companionBootstrapFixture
 	events         []map[string]any
 	hound, cleanup *httptest.Server
 	documents      map[string]map[string]any
@@ -123,6 +124,9 @@ func newCompanionAPIFixture(t *testing.T, qbitPort int) *companionAPIFixture {
 		fixture.documents[name] = map[string]any{"instances": []any{}}
 	}
 	fixture.cleanup = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fixture.bootstrap != nil && fixture.bootstrap.serveCleanupAccount(w, r) {
+			return
+		}
 		if r.Header.Get("X-Api-Key") != "fixture-cleanuparr-key" {
 			http.Error(w, "unauthorized", 401)
 			return
@@ -186,6 +190,13 @@ func newCompanionAPIFixture(t *testing.T, qbitPort int) *companionAPIFixture {
 		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	}))
 	fixture.hound = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fixture.bootstrap != nil && fixture.bootstrap.serveHound(w, r, fixture.mode) {
+			return
+		}
+		if r.URL.Path == "/setup" {
+			http.Redirect(w, r, "/login", 302)
+			return
+		}
 		if r.URL.Path == "/login" {
 			_ = r.ParseForm()
 			if r.Form.Get("username") != "companion-admin" || r.Form.Get("password") != "fixture-houndarr-password" {
@@ -193,6 +204,7 @@ func newCompanionAPIFixture(t *testing.T, qbitPort int) *companionAPIFixture {
 				return
 			}
 			http.SetCookie(w, &http.Cookie{Name: "session", Value: "fixture", Path: "/"})
+			w.Header().Set("Location", "/")
 			w.WriteHeader(303)
 			return
 		}
@@ -290,6 +302,19 @@ case "$*" in
  *) exit 99 ;;
 esac
 `)
+	t.Run("first run remains read only", func(t *testing.T) {
+		fixtures.bootstrap = &companionBootstrapFixture{}
+		defer func() { fixtures.bootstrap = nil }()
+		command := exec.Command("go", "run", "./cmd/media-stack", "verify", "--environment", "staging", "--config", configPath, "--suite", "companions", "--output", "json")
+		command.Dir = repositoryRoot(t)
+		command.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+		if output, err := command.CombinedOutput(); err == nil || !strings.Contains(string(output), "VERIFY_COMPANION_CREDENTIALS_INVALID") {
+			t.Fatalf("first-run verification should fail without setup: %v\n%s", err, output)
+		}
+		if fixtures.bootstrap.accounts != 0 || fixtures.writes != 0 {
+			t.Fatal("verify bootstrapped or configured a companion")
+		}
+	})
 	for _, scenario := range []struct{ name, mode, code string }{{"wrong episode context", "season_context", "VERIFY_EPISODE_SEARCH_CONTEXT_INVALID"}, {"duplicate proactive owner", "episode", "VERIFY_DUPLICATE_PROACTIVE_OWNER"}} {
 		t.Run(scenario.name, func(t *testing.T) {
 			fixtures.mode = scenario.mode

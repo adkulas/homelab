@@ -14,6 +14,7 @@ import (
 type Failure struct {
 	Code, Remedy string
 	cause        error
+	status       int
 }
 
 func (failure *Failure) Error() string { return failure.Code + ": " + failure.Remedy }
@@ -24,6 +25,7 @@ type document map[string]any
 
 type api struct {
 	base, key string
+	bearer    string
 	http      *http.Client
 }
 
@@ -46,7 +48,11 @@ func (client api) request(ctx context.Context, method, path string, body, result
 	if err != nil {
 		return fail("VERIFY_COMPANION_UNAVAILABLE", "Check the companion management address.")
 	}
-	request.Header.Set("X-Api-Key", client.key)
+	if client.key != "" {
+		request.Header.Set("X-Api-Key", client.key)
+	} else if client.bearer != "" {
+		request.Header.Set("Authorization", "Bearer "+client.bearer)
+	}
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
@@ -59,7 +65,7 @@ func (client api) request(ctx context.Context, method, path string, body, result
 		return fail("VERIFY_COMPANION_CREDENTIALS_INVALID", "Correct the selected Environment companion credential and retry.")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fail("VERIFY_COMPANION_API_FAILED", fmt.Sprintf("Companion API %s %s returned HTTP %d; inspect its local logs.", method, path, response.StatusCode))
+		return &Failure{Code: "VERIFY_COMPANION_API_FAILED", Remedy: fmt.Sprintf("Companion API %s %s returned HTTP %d; inspect its local logs.", method, path, response.StatusCode), status: response.StatusCode}
 	}
 	if result != nil {
 		if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(result); err != nil {

@@ -14,8 +14,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-// AdminCredentials authenticates read-only settings observation. Initial account
-// creation and policy changes remain guided through the upstream web interface.
+// AdminCredentials contains operator-selected credentials for setup and observation.
 type AdminCredentials struct{ Username, Password string }
 
 type Houndarr struct {
@@ -31,80 +30,26 @@ func NewHoundarr(base string, client *http.Client) *Houndarr {
 
 func (client *Houndarr) Verify(ctx context.Context, credentials AdminCredentials, policy config.SeriesAutomation) error {
 	if credentials.Username == "" || credentials.Password == "" {
-		return fail("VERIFY_COMPANION_BOOTSTRAP_REQUIRED", "Create the selected Environment Houndarr account and store houndarr.username and houndarr.password in its SOPS document; configure one local Sonarr instance in the UI.")
+		return fail("VERIFY_COMPANION_BOOTSTRAP_REQUIRED", "Run media-stack init --companions for the selected Environment to encrypt chosen credentials, then run apply to configure Houndarr.")
 	}
-	_, _, err := client.page(ctx, "POST", "/login", url.Values{"username": {credentials.Username}, "password": {credentials.Password}})
+	if err := client.login(ctx, credentials); err != nil {
+		return err
+	}
+	instances, err := client.instances(ctx)
 	if err != nil {
 		return err
 	}
-	page, _, err := client.page(ctx, "GET", "/settings", nil)
+	if len(instances) != 1 {
+		return fail("VERIFY_COMPANION_BOOTSTRAP_REQUIRED", "Keep exactly one local Sonarr instance in this Environment's Houndarr UI; run apply for first-run setup.")
+	}
+	instance, err := client.instanceSettings(ctx, instances[0])
 	if err != nil {
 		return err
 	}
-	nodes, err := html.Parse(strings.NewReader(page))
-	if err != nil {
-		return fail("VERIFY_COMPANION_RESPONSE_INVALID", "Check the pinned Houndarr version and its settings page.")
-	}
-	var rows []*html.Node
-	walk(nodes, func(node *html.Node) {
-		if node.Data == "tr" && strings.HasPrefix(attribute(node, "id"), "instance-row-") {
-			rows = append(rows, node)
-		}
-	})
-	values := formValues(nodes)
-	client.csrf = values.Get("csrf_token")
-	if len(rows) != 1 {
-		return fail("VERIFY_COMPANION_BOOTSTRAP_REQUIRED", "Keep exactly one local Sonarr instance in this Environment's Houndarr UI; other connections can create overlapping searches.")
-	}
-	row := rows[0]
-	id := strings.TrimPrefix(attribute(row, "id"), "instance-row-")
-	if _, err := strconv.Atoi(id); err != nil {
-		return fail("VERIFY_COMPANION_RESPONSE_INVALID", "Check the pinned Houndarr settings page.")
-	}
-	enabled := false
-	walk(row, func(node *html.Node) {
-		if node.Data == "button" && strings.HasSuffix(attribute(node, "hx-post"), "/toggle-enabled") {
-			enabled = strings.TrimSpace(nodeText(node)) == "Disable"
-		}
-	})
-	if enabled != policy.Enabled {
-		return fail("VERIFY_DUPLICATE_PROACTIVE_OWNER", "Set the Houndarr instance enabled state to match this Environment's seriesAutomation.enabled policy.")
-	}
-	form, _, err := client.page(ctx, "GET", "/settings/instances/"+id+"/edit", nil)
-	if err != nil {
-		return err
-	}
-	fields, err := html.Parse(strings.NewReader(form))
-	if err != nil {
-		return fail("VERIFY_COMPANION_RESPONSE_INVALID", "Check Houndarr's instance editor.")
-	}
-	current := formValues(fields)
-	if current.Get("type") != "sonarr" || strings.TrimRight(current.Get("url"), "/") != "http://sonarr:8989" {
-		return fail("VERIFY_COMPANION_TARGET_INVALID", "Configure Houndarr for http://sonarr:8989 on this Environment's application network.")
-	}
-	if current.Get("sonarr_search_mode") != "episode" {
-		return fail("VERIFY_EPISODE_SEARCH_CONTEXT_INVALID", "Select Episode search for Houndarr's Sonarr missing pass; rerun apply after guided correction.")
-	}
-	desired := HoundarrFields(policy)
-	for name, expected := range desired {
-		actual, exists := current[name]
-		if !exists || len(actual) != 1 || actual[0] != expected {
-			return fail("VERIFY_COMPANION_POLICY_DRIFT", fmt.Sprintf("Set Houndarr instance field %s to %q through its UI, then rerun apply. See the series automation runbook.", name, expected))
-		}
-	}
-	if policy.Enabled {
-		_, headers, err := client.page(ctx, "POST", "/settings/instances/test-connection", url.Values{"type": {"sonarr"}, "url": {"http://sonarr:8989"}, "api_key": {"__UNCHANGED__"}, "instance_id": {id}})
-		if err != nil {
-			return err
-		}
-		if !strings.Contains(headers.Get("HX-Trigger"), "houndarr-connection-test-success") {
-			return fail("VERIFY_COMPANION_TARGET_CREDENTIALS_INVALID", "Update Houndarr's stored Sonarr API key and test the Environment-local connection in its UI.")
-		}
-	}
-	return nil
+	return client.verifyInstance(ctx, instance, policy)
 }
 
-// HoundarrFields supplies the exact upstream form settings for guided bootstrap.
+// HoundarrFields supplies the exact upstream form settings for first-run setup.
 func HoundarrFields(policy config.SeriesAutomation) map[string]string {
 	s := policy.Search
 	return map[string]string{"batch_size": strconv.Itoa(s.BatchSize), "sleep_interval_mins": strconv.Itoa(s.IntervalMinutes), "hourly_cap": strconv.Itoa(s.HourlyCap), "cooldown_days": strconv.Itoa(s.CooldownDays), "post_release_grace_hrs": strconv.Itoa(s.ReleaseGraceHours), "allowed_time_window": s.AllowedWindow, "queue_limit": strconv.Itoa(s.QueueLimit), "search_order": "chronological", "missing_hot_retry_window_hrs": "0", "missing_enabled": "on", "cutoff_enabled": "", "upgrade_enabled": "", "tag_filter_include": "", "tag_filter_exclude": ""}
@@ -133,11 +78,16 @@ func (client *Houndarr) page(ctx context.Context, method, path string, form url.
 	if response.StatusCode == 401 || response.StatusCode == 403 {
 		return "", nil, fail("VERIFY_COMPANION_CREDENTIALS_INVALID", "Correct Houndarr admin credentials or its CSRF-protected session.")
 	}
-	if method == "POST" && path == "/login" && response.StatusCode == 303 {
+	if method == "POST" && path == "/login" && response.StatusCode == 200 {
+		return "", nil, fail("VERIFY_COMPANION_CREDENTIALS_INVALID", "Correct the selected Environment Houndarr credentials; existing accounts are never reset.")
+	}
+	setupRedirect := path == "/setup" && response.Header.Get("Location") == "/login" && ((method == "GET" && response.StatusCode == 302) || (method == "POST" && response.StatusCode == 303))
+	loginRedirect := method == "POST" && path == "/login" && response.StatusCode == 303 && response.Header.Get("Location") == "/"
+	if setupRedirect || loginRedirect {
 		return "", response.Header, nil
 	}
 	if response.StatusCode == 302 || response.StatusCode == 303 {
-		return "", nil, fail("VERIFY_COMPANION_BOOTSTRAP_REQUIRED", "Complete the Houndarr account setup through its loopback management endpoint.")
+		return "", nil, fail("VERIFY_COMPANION_BOOTSTRAP_REQUIRED", "Run init --companions and apply for the selected Environment to complete Houndarr setup.")
 	}
 	if response.StatusCode != 200 {
 		return "", nil, fail("VERIFY_COMPANION_API_FAILED", fmt.Sprintf("Houndarr %s %s returned HTTP %d; inspect local service logs.", method, path, response.StatusCode))

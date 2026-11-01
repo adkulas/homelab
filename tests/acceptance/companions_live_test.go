@@ -135,11 +135,11 @@ func TestDisposablePinnedSeriesCompanions(t *testing.T) {
 		}
 		return result
 	}
-	liveRequest("POST", cleanupAddress+"/api/auth/setup/account", map[string]string{"username": "companion-admin", "password": "fixture-admin-password"}, "")
-	liveRequest("POST", cleanupAddress+"/api/auth/setup/complete", map[string]any{}, "")
-	login := liveRequest("POST", cleanupAddress+"/api/auth/login", map[string]string{"username": "companion-admin", "password": "fixture-admin-password"}, "")
-	token := login["tokens"].(map[string]any)["accessToken"].(string)
-	cleanupKey := liveRequest("GET", cleanupAddress+"/api/account/api-key", nil, token)["apiKey"].(string)
+	cleanupCredentials := companions.AdminCredentials{Username: "companion-admin", Password: "fixture-admin-password"}
+	cleanupKey, err := companions.NewCleanuparr(cleanupAddress, "", client).Bootstrap(context.Background(), cleanupCredentials)
+	if err != nil {
+		t.Fatal(err)
+	}
 	houndForm := func(path string, form url.Values) string {
 		t.Helper()
 		request, err := http.NewRequest("POST", houndAddress+path, strings.NewReader(form.Encode()))
@@ -188,15 +188,30 @@ func TestDisposablePinnedSeriesCompanions(t *testing.T) {
 		}
 		return string(encoded)
 	}
-	houndForm("/setup", url.Values{"username": {"companion-admin"}, "password": {"fixture-houndarr-password"}, "password_confirm": {"fixture-houndarr-password"}})
-	houndForm("/login", url.Values{"username": {"companion-admin"}, "password": {"fixture-houndarr-password"}})
+	houndCredentials := companions.AdminCredentials{Username: "companion-admin", Password: "fixture-houndarr-password"}
 	policy := config.SeriesAutomation{Enabled: true, Search: config.EpisodeSearchPolicy{BatchSize: 12, IntervalMinutes: 30, HourlyCap: 12, CooldownDays: 1, ReleaseGraceHours: 6, AllowedWindow: "06:00-00:00", QueueLimit: 2}, Recovery: config.QueueRecoveryPolicy{IntervalMinutes: 5, Strikes: 12, MinimumSpeedKiB: 100, MaximumRemainingHours: 24}}
-	form := url.Values{"name": {"Sonarr"}, "type": {"sonarr"}, "url": {"http://sonarr:8989"}, "api_key": {"fixture-sonarr-api-key"}, "connection_verified": {"true"}, "sonarr_search_mode": {"episode"}}
+	houndClient := companions.NewHoundarr(houndAddress, client)
+	if err := houndClient.Bootstrap(context.Background(), houndCredentials, policy, "fixture-sonarr-api-key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := houndClient.Bootstrap(context.Background(), houndCredentials, policy, "fixture-sonarr-api-key"); err != nil {
+		t.Fatal(err)
+	}
+	houndForm("/login", url.Values{"username": {houndCredentials.Username}, "password": {houndCredentials.Password}})
+	form := url.Values{"name": {"media-stack Sonarr"}, "type": {"sonarr"}, "url": {"http://sonarr:8989"}, "api_key": {"fixture-sonarr-api-key"}, "connection_verified": {"true"}, "sonarr_search_mode": {"episode"}}
 	for key, value := range companions.HoundarrFields(policy) {
 		form.Set(key, value)
 	}
-	houndForm("/settings/instances/test-connection", form)
-	body := houndForm("/settings/instances", form)
+	response, err := client.Get(houndAddress + "/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedSettings, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(encodedSettings)
 	match := regexp.MustCompile(`/settings/instances/([0-9]+)/edit`).FindStringSubmatch(body)
 	if len(match) != 2 {
 		t.Fatalf("Houndarr did not create its disposable instance")
@@ -207,6 +222,26 @@ func TestDisposablePinnedSeriesCompanions(t *testing.T) {
 	if err := cleanupClient.Reconcile(context.Background(), policy, "fixture-sonarr-api-key", qbit, false); err != nil {
 		t.Fatal(err)
 	}
+	if os.Getenv("MEDIA_STACK_LIVE_COMPANIONS_BOOTSTRAP_ONLY") == "1" {
+		wrongHound := houndCredentials
+		wrongHound.Password = "incorrect-fixture-password"
+		if err := companions.NewHoundarr(houndAddress, client).Bootstrap(context.Background(), wrongHound, policy, "fixture-sonarr-api-key"); err == nil {
+			t.Fatal("existing Houndarr account accepted wrong credentials")
+		}
+		if err := houndClient.Verify(context.Background(), houndCredentials, policy); err != nil {
+			t.Fatalf("Houndarr account changed after failed authentication: %v", err)
+		}
+		if err := cleanupClient.Reconcile(context.Background(), policy, "fixture-sonarr-api-key", qbit, true); err != nil {
+			t.Fatal(err)
+		}
+		reusedKey, err := companions.NewCleanuparr(cleanupAddress, "", client).Bootstrap(context.Background(), cleanupCredentials)
+		if err != nil || reusedKey != cleanupKey {
+			t.Fatalf("existing account API key was not preserved: %v", err)
+		}
+		return
+	}
+	login := liveRequest("POST", cleanupAddress+"/api/auth/login", map[string]string{"username": cleanupCredentials.Username, "password": cleanupCredentials.Password}, "")
+	token := login["tokens"].(map[string]any)["accessToken"].(string)
 	t.Cleanup(func() {
 		if t.Failed() {
 			response, err := client.Get(fixtureAddress + "/fixture")

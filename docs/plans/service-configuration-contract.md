@@ -81,7 +81,7 @@ reconcilers and add any setting they read, write, or verify that is missing here
 | Radarr | image, LAN port, runtime identity, Movie Library root, qBittorrent client and category, internal URLs and credentials, quality profile, quality definitions, custom-format scores, naming formats, media management, and unmanaged settings |
 | Profilarr | image, LAN port, API key, pinned PCD repository revision, guided Radarr and Sonarr connections, owned policy domains, and unmanaged settings |
 | Jellyfin | image, LAN port, runtime identity, hardware-transcoding preference and derived device mapping, administrator credentials, startup locale and remote-access policy, Movie and Series Library definitions, deletion policy, and unmanaged settings |
-| Houndarr | pinned image, loopback management port, Environment state, guided Sonarr connection, episode search context, chronological order, bounded search policy, and unmanaged settings |
+| Houndarr | pinned image, loopback management port, Environment state, operator-selected SOPS credentials, automatic first-run Sonarr connection, episode search context, chronological order, bounded search policy, and unmanaged settings |
 | Cleanuparr | pinned image, loopback management port, Environment state, Sonarr/qBittorrent credentials, queue recovery thresholds, reactive replacement ownership, disabled proactive Seeker, and unmanaged settings |
 | Seerr | image, LAN port, runtime identity, Jellyfin and emergency-local authentication, default request permission, initialization state, internal Jellyfin connection, and unmanaged settings |
 

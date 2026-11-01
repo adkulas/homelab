@@ -20,6 +20,53 @@ func seriesAutomationEnabled(environment config.Environment) bool {
 }
 func companionAddress(port int) string { return "http://127.0.0.1:" + strconv.Itoa(port) }
 
+func bootstrapSeriesCompanions(ctx context.Context, configPath string, environment config.Environment, secrets *environmentSecrets, sonarrKey string) error {
+	if err := companions.ValidateAdminCredentials("Houndarr", secrets.Houndarr); err != nil {
+		return fmt.Errorf("run init --companions for the selected Environment: %w", err)
+	}
+	if secrets.CleanuparrKey == "" {
+		if err := companions.ValidateAdminCredentials("Cleanuparr", secrets.CleanuparrAdmin); err != nil {
+			return fmt.Errorf("run init --companions for the selected Environment: %w", err)
+		}
+		cleanup := companions.NewCleanuparr(companionAddress(environment.Ports.Cleanuparr), "", &http.Client{})
+		var key string
+		err := waitForCompanionBootstrap(ctx, func(ctx context.Context) error {
+			var err error
+			key, err = cleanup.Bootstrap(ctx, secrets.CleanuparrAdmin)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		branch := map[string]string{"username": secrets.CleanuparrAdmin.Username, "password": secrets.CleanuparrAdmin.Password, "apiKey": key}
+		if err := patchEncryptedSecrets(ctx, selectedSecretPath(configPath, environment), map[string]any{"cleanuparr": branch}); err != nil {
+			return err
+		}
+		secrets.CleanuparrKey = key
+	}
+	hound := companions.NewHoundarr(companionAddress(environment.Ports.Houndarr), &http.Client{})
+	return waitForCompanionBootstrap(ctx, func(ctx context.Context) error {
+		return hound.Bootstrap(ctx, secrets.Houndarr, *environment.SeriesAutomation, sonarrKey)
+	})
+}
+
+func waitForCompanionBootstrap(ctx context.Context, bootstrap func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	for {
+		err := bootstrap(ctx)
+		var failure *companions.Failure
+		if !errors.As(err, &failure) || failure.Code != "VERIFY_COMPANION_UNAVAILABLE" {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(time.Second):
+		}
+	}
+}
+
 func reconcileSeriesCompanions(ctx context.Context, environment config.Environment, secrets environmentSecrets, sonarrKey string, observeOnly bool) error {
 	if environment.SeriesAutomation == nil {
 		return nil

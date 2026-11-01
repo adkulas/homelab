@@ -6,7 +6,9 @@ type environmentSecretDocument struct {
 		Password string `yaml:"password"`
 	} `yaml:"houndarr,omitempty"`
 	Cleanuparr struct {
-		APIKey string `yaml:"apiKey"`
+		Username string `yaml:"username,omitempty"`
+		Password string `yaml:"password,omitempty"`
+		APIKey   string `yaml:"apiKey,omitempty"`
 	} `yaml:"cleanuparr,omitempty"`
 	NordVPN struct {
 		OpenVPN struct {

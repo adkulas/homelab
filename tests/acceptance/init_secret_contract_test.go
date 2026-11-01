@@ -42,6 +42,8 @@ func TestInitSendsOnlyOpenVPNServiceCredentialsToSOPS(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{
+		"houndarr":   map[string]any{"username": "chosen-hound-admin", "password": "chosen-hound-password"},
+		"cleanuparr": map[string]any{"username": "chosen-clean-admin", "password": "chosen-clean-password"},
 		"nordvpn": map[string]any{
 			"openvpn": map[string]any{
 				"serviceUsername": "service-user",
