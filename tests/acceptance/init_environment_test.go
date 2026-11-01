@@ -51,7 +51,11 @@ func completeAnswers(uid, gid, country, protocol, username, password string) []b
 		"jellyfinUsername: household\n" +
 		"jellyfinPassword: fixture-jellyfin-password\n" +
 		"qbittorrentUsername: household\n" +
-		"qbittorrentPassword: fixture-qbittorrent-password\n")
+		"qbittorrentPassword: fixture-qbittorrent-password\n" +
+		"houndarrUsername: chosen-hound-admin\n" +
+		"houndarrPassword: chosen-hound-password\n" +
+		"cleanuparrUsername: chosen-clean-admin\n" +
+		"cleanuparrPassword: chosen-clean-password\n")
 }
 
 func runNonInteractiveInit(t *testing.T, binDirectory, configPath, environment, answersPath string) {

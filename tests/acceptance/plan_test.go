@@ -20,6 +20,8 @@ func TestPlanRendersCheckedInImagesForSelectedEnvironment(t *testing.T) {
 	}
 
 	want := map[string]string{
+		"houndarr":    "ghcr.io/av1155/houndarr@sha256:b2e4ff8b550d385a56ea3380bddf88253eac00d750a811a8f97090ff77dcc79e",
+		"cleanuparr":  "ghcr.io/cleanuparr/cleanuparr@sha256:d0212e4c66bd0522e23c5e5da5d3006bd5ff0e0de1e3ecfcf892e039d55721e2",
 		"gluetun":     "ghcr.io/qdm12/gluetun@sha256:e3272b29a4bc177b389fbdcb54cf9716ccbfc30f04d8b7a35b0a5be9cdb58461",
 		"jellyfin":    "jellyfin/jellyfin@sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db",
 		"profilarr":   "ghcr.io/dictionarry-hub/profilarr@sha256:75a43c9c19c70f6e48315d4ed5cef3232d905da8fab397391a2078a5e0fd7ec1",

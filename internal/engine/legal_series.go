@@ -21,14 +21,15 @@ type legalSeriesFixture struct {
 	APIVersion string `yaml:"apiVersion"`
 	Kind       string `yaml:"kind"`
 	Spec       struct {
-		Title         string `yaml:"title"`
-		TMDBID        int    `yaml:"tmdbId"`
-		TVDBID        int    `yaml:"tvdbId"`
-		SeasonNumber  int    `yaml:"seasonNumber"`
-		EpisodeNumber int    `yaml:"episodeNumber"`
-		ReleaseTitle  string `yaml:"releaseTitle"`
-		Indexer       string `yaml:"indexer"`
-		Timeout       string `yaml:"timeout"`
+		Title          string `yaml:"title"`
+		TMDBID         int    `yaml:"tmdbId"`
+		TVDBID         int    `yaml:"tvdbId"`
+		SeasonNumber   int    `yaml:"seasonNumber"`
+		EpisodeNumber  int    `yaml:"episodeNumber"`
+		EpisodeNumbers []int  `yaml:"episodeNumbers,omitempty"`
+		ReleaseTitle   string `yaml:"releaseTitle"`
+		Indexer        string `yaml:"indexer"`
+		Timeout        string `yaml:"timeout"`
 	} `yaml:"spec"`
 }
 
@@ -49,6 +50,16 @@ func loadLegalSeriesFixture(path string) (legalSeriesFixture, time.Duration, err
 	}
 	if fixture.Spec.Title == "" || fixture.Spec.TMDBID <= 0 || fixture.Spec.TVDBID <= 0 || fixture.Spec.SeasonNumber < 0 || fixture.Spec.EpisodeNumber <= 0 || fixture.Spec.ReleaseTitle == "" || fixture.Spec.Indexer != "Internet Archive" {
 		return fixture, 0, fmt.Errorf("legal series fixture requires title, positive tmdbId, positive tvdbId, non-negative seasonNumber, positive episodeNumber, releaseTitle, and approved Internet Archive indexer")
+	}
+	if len(fixture.Spec.EpisodeNumbers) == 0 {
+		fixture.Spec.EpisodeNumbers = []int{fixture.Spec.EpisodeNumber}
+	}
+	seen := map[int]bool{}
+	for _, number := range fixture.Spec.EpisodeNumbers {
+		if number <= 0 || seen[number] {
+			return fixture, 0, fmt.Errorf("episodeNumbers must contain distinct positive episode numbers")
+		}
+		seen[number] = true
 	}
 	timeout, err := time.ParseDuration(fixture.Spec.Timeout)
 	if err != nil || timeout <= 0 {
@@ -81,6 +92,7 @@ func verifyLegalSeries(ctx context.Context, plan Plan, declared config.MediaStac
 		return
 	}
 	credentials := seerr.Credentials{Username: secrets.Jellyfin.Username, Password: secrets.Jellyfin.Password}
+	requestedAfter := time.Now().UTC()
 	if err := seerrClient.RequestSeries(ctx, credentials, fixture.Spec.TMDBID, fixture.Spec.SeasonNumber); err != nil {
 		report.add("VERIFY_SERIES_REQUEST_FAILED", "approved Seerr series request", err.Error(), false)
 		return
@@ -110,7 +122,20 @@ func verifyLegalSeries(ctx context.Context, plan Plan, declared config.MediaStac
 			return
 		}
 	}
-	seriesID, _, err := sonarrClient.AcquireLegalEpisode(ctx, fixture.Spec.TVDBID, fixture.Spec.SeasonNumber, fixture.Spec.EpisodeNumber, fixture.Spec.ReleaseTitle, fixture.Spec.Indexer)
+	var seriesID int
+	if seriesAutomationEnabled(environment) {
+		seriesID, _, err = sonarrClient.RequestedSeriesID(ctx, fixture.Spec.TVDBID)
+		if err == nil {
+			err = waitForRequestedEpisodeSearches(ctx, sonarrEvidence("http://"+environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Sonarr), apiKey), seriesID, fixture.Spec.SeasonNumber, fixture.Spec.EpisodeNumbers, requestedAfter, deadline)
+		}
+		if err != nil {
+			report.add("VERIFY_EPISODE_SEARCH_DISPATCH_FAILED", "Requested missing episodes", "Wait for Houndarr and inspect its schedule, cap, cooldown, grace and queue gates; verify EpisodeSearch command traffic.", false)
+			return
+		}
+		report.add("VERIFY_EPISODE_SEARCH_DISPATCHED", "Each requested legal fixture episode received an EpisodeSearch", "", true)
+	} else {
+		seriesID, _, err = sonarrClient.AcquireLegalEpisode(ctx, fixture.Spec.TVDBID, fixture.Spec.SeasonNumber, fixture.Spec.EpisodeNumber, fixture.Spec.ReleaseTitle, fixture.Spec.Indexer)
+	}
 	if err != nil {
 		report.add("VERIFY_SERIES_EPISODE_ACQUISITION_FAILED", "legal series episode acquisition", err.Error(), false)
 		return

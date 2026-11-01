@@ -25,6 +25,7 @@ type VerifyRequest struct {
 	suite                  string
 	legalFixturePath       string
 	legalSeriesFixturePath string
+	recoveryFixturePath    string
 }
 
 type VerifyReport struct {
@@ -36,7 +37,7 @@ type VerifyReport struct {
 	Diagnostics    []Diagnostic `json:"diagnostics"`
 }
 
-func NewVerifyRequest(workingDirectory, environment, configPath, suite, legalFixturePath, legalSeriesFixturePath string) (VerifyRequest, error) {
+func NewVerifyRequest(workingDirectory, environment, configPath, suite, legalFixturePath, legalSeriesFixturePath string, recoveryFixturePaths ...string) (VerifyRequest, error) {
 	plan, err := NewPlanRequest(workingDirectory, environment, configPath)
 	if err != nil {
 		return VerifyRequest{}, err
@@ -47,7 +48,14 @@ func NewVerifyRequest(workingDirectory, environment, configPath, suite, legalFix
 	if legalSeriesFixturePath != "" && !filepath.IsAbs(legalSeriesFixturePath) {
 		legalSeriesFixturePath = filepath.Join(workingDirectory, legalSeriesFixturePath)
 	}
-	return VerifyRequest{plan: plan, suite: suite, legalFixturePath: legalFixturePath, legalSeriesFixturePath: legalSeriesFixturePath}, nil
+	recoveryPath := ""
+	if len(recoveryFixturePaths) > 0 {
+		recoveryPath = recoveryFixturePaths[0]
+		if recoveryPath != "" && !filepath.IsAbs(recoveryPath) {
+			recoveryPath = filepath.Join(workingDirectory, recoveryPath)
+		}
+	}
+	return VerifyRequest{plan: plan, suite: suite, legalFixturePath: legalFixturePath, legalSeriesFixturePath: legalSeriesFixturePath, recoveryFixturePath: recoveryPath}, nil
 }
 
 func (report VerifyReport) Failed() bool {
@@ -74,6 +82,14 @@ func (engine localEngine) Verify(ctx context.Context, request VerifyRequest) (re
 	}
 	if err := declared.ValidateEnvironment(request.plan.environment); err != nil {
 		return report, err
+	}
+	if request.suite == "companions" {
+		plan, err := engine.Plan(ctx, request.plan)
+		if err != nil {
+			return report, err
+		}
+		verifySeriesCompanions(ctx, plan, declared, request, &report)
+		return report, nil
 	}
 	if len(declared.Spec.Acquisition.VPN.Server.Countries) == 0 {
 		report.add("VERIFY_SERVER_SELECTION_EMPTY", "VPN server selection", "Declare at least one NordVPN server country.", false)
@@ -166,6 +182,12 @@ func (engine localEngine) Verify(ctx context.Context, request VerifyRequest) (re
 		return report, nil
 	}
 	report.add("VERIFY_QBITTORRENT_AUTH_PERSISTED", "stable qBittorrent authentication after recreation from an application-network peer", "", true)
+	if environment.SeriesAutomation != nil {
+		verifySeriesCompanions(ctx, plan, declared, request, &report)
+		if report.Failed() {
+			return report, nil
+		}
+	}
 	if request.suite == "promotion" {
 		if request.legalFixturePath != "" {
 			verifyLegalMovie(ctx, plan, declared, request, &report)

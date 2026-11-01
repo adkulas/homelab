@@ -326,7 +326,8 @@ func (client *Client) requestApproved(ctx context.Context, credentials Credentia
 	return nil
 }
 
-func (client *Client) ReconcileSonarr(ctx context.Context, apiKey, profileName string) error {
+func (client *Client) ReconcileSonarr(ctx context.Context, apiKey, profileName string, companionOwnsSearch ...bool) error {
+	preventSearch := len(companionOwnsSearch) > 0 && companionOwnsSearch[0]
 	connection := internalSonarrDestination(apiKey)
 	return reconcileDestination(
 		ctx, client, "Sonarr", "/api/v1/settings/sonarr", profileName, "/data/media/series", "Series Library",
@@ -338,7 +339,7 @@ func (client *Client) ReconcileSonarr(ctx context.Context, apiKey, profileName s
 			desired.SeriesType = "standard"
 			desired.Tags, desired.AnimeTags = []int{}, []int{}
 			desired.Is4K, desired.IsDefault, desired.EnableSeasonFolders = false, true, true
-			desired.ExternalURL, desired.SyncEnabled, desired.PreventSearch = "", true, false
+			desired.ExternalURL, desired.SyncEnabled, desired.PreventSearch = "", true, preventSearch
 			desired.TagRequests, desired.MonitorNewItems = false, "all"
 			return desired
 		},
@@ -439,6 +440,22 @@ func (client *Client) doJSON(ctx context.Context, method, path string, input, ou
 		if err := json.NewDecoder(response.Body).Decode(output); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// VerifySonarrSearchOwnership observes request routing without creating requests
+// or reconciling settings. Authentication creates only an upstream session.
+func (client *Client) VerifySonarrSearchOwnership(ctx context.Context, credentials Credentials, preventSearch bool) error {
+	if _, err := client.authenticateJellyfin(ctx, credentials, false); err != nil {
+		return fmt.Errorf("Seerr request-routing authentication failed")
+	}
+	var destinations []sonarrDestination
+	if err := client.doJSON(ctx, http.MethodGet, "/api/v1/settings/sonarr", nil, &destinations); err != nil {
+		return fmt.Errorf("Seerr request-routing observation failed")
+	}
+	if len(destinations) != 1 || destinations[0].Hostname != "sonarr" || destinations[0].Port != 8989 || destinations[0].UseSSL || destinations[0].BaseURL != "" || !destinations[0].IsDefault || destinations[0].PreventSearch != preventSearch {
+		return fmt.Errorf("Seerr must route to the Environment-local default Sonarr with automatic search matching series automation ownership")
 	}
 	return nil
 }

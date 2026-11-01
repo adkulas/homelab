@@ -6,6 +6,7 @@ spec:
   tvdbId: 103354
   seasonNumber: 1
   episodeNumber: 1
+  episodeNumbers: [1, 2]
   releaseTitle: The Lucy Show S01E01
   indexer: Internet Archive
   timeout: 45m

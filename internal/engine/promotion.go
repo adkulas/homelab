@@ -80,6 +80,39 @@ func (engine localEngine) Promote(ctx context.Context, request PromoteRequest) (
 	if backup.Environment != "staging" {
 		return PromoteReport{}, fmt.Errorf("promotion requires a Staging backup")
 	}
+	if seriesAutomationEnabled(declared.Spec.Environments["production"]) {
+		if err := validateCompanionPromotion(declared, verification, backup); err != nil {
+			return PromoteReport{}, err
+		}
+	}
 	preview := fmt.Sprintf("promote the verified Staging change to Production using backup %s", request.backupPath)
 	return PromoteReport{SchemaVersion: promotionSchemaVersion, Environment: request.plan.environment, Preview: preview}, nil
+}
+
+func validateCompanionPromotion(declared config.MediaStack, verification VerifyReport, backup BackupReport) error {
+	if !seriesAutomationEnabled(declared.Spec.Environments["staging"]) || verification.Suite != "promotion" || verification.Failed() {
+		return fmt.Errorf("series companion Promotion requires successful enabled Staging request and recovery verification")
+	}
+	passed := map[string]bool{}
+	for _, diagnostic := range verification.Diagnostics {
+		if diagnostic.Status == "pass" {
+			passed[diagnostic.Code] = true
+		}
+	}
+	for _, code := range []string{"VERIFY_COMPANION_POLICY_CONVERGED", "VERIFY_EPISODE_SEARCH_DISPATCHED", "VERIFY_SERIES_RECOVERY_PROVEN", "VERIFY_SERIES_REQUESTED", "VERIFY_SERIES_EPISODE_ACQUIRED", "VERIFY_SERIES_EPISODE_HARDLINKED", "VERIFY_SERIES_EPISODE_PLAYBACK_READY"} {
+		if !passed[code] {
+			return fmt.Errorf("series companion Promotion evidence is missing %s", code)
+		}
+	}
+	project := declared.Spec.Environments["staging"].ProjectName
+	covered := map[string]bool{}
+	for _, service := range backup.Services {
+		if service.Volume == service.Name+"-config" && service.DockerVolume == project+"_"+service.Volume {
+			covered[service.Name] = true
+		}
+	}
+	if !covered["houndarr"] || !covered["cleanuparr"] {
+		return fmt.Errorf("Staging backup must include Environment-scoped companion state for Houndarr and Cleanuparr")
+	}
+	return nil
 }

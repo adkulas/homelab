@@ -144,9 +144,14 @@ func observeApplications(ctx context.Context, request PlanRequest, plan Plan) []
 			err = seerrClient.ReconcileRadarr(ctx, radarrKey, moviePolicy.Profile.Name)
 		}
 		if err == nil && sonarrKeyErr == nil {
-			err = seerrClient.ReconcileSonarr(ctx, sonarrKey, seriesPolicy.Profile.Name)
+			err = seerrClient.ReconcileSonarr(ctx, sonarrKey, seriesPolicy.Profile.Name, seriesAutomationEnabled(environment))
 		}
 		actions = append(actions, applicationPlanAction("seerr", err)...)
+	}
+	if environment.SeriesAutomation != nil && sonarrKeyErr == nil {
+		if err := reconcileSeriesCompanions(ctx, environment, secrets, sonarrKey, true); err != nil {
+			actions = append(actions, PlanAction{Kind: planActionGuide, Subject: "series companions", Explanation: err.Error()})
+		}
 	}
 	return actions
 }

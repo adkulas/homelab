@@ -1,6 +1,7 @@
 package configcontract
 
 import (
+	"github.com/adkulas/homelab/internal/companions"
 	"github.com/adkulas/homelab/internal/contractmodel"
 	"github.com/adkulas/homelab/internal/engine"
 	"github.com/adkulas/homelab/internal/jellyfin"
@@ -17,6 +18,8 @@ type serviceRegistration struct {
 }
 
 var serviceRegistry = map[string]serviceRegistration{
+	"houndarr":    {title: "Houndarr", settings: companions.HoundarrConfigurationContract},
+	"cleanuparr":  {title: "Cleanuparr", settings: companions.CleanuparrConfigurationContract},
 	"gluetun":     {title: "Gluetun"},
 	"jellyfin":    {title: "Jellyfin", settings: jellyfin.ConfigurationContract},
 	"profilarr":   {title: "Profilarr", settings: engine.ProfilarrConfigurationContract},

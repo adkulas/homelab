@@ -24,7 +24,7 @@ const usage = `usage:
   media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--now RFC3339] [--output human|json]
   media-stack restore --environment production|staging --backup path [--config path] [--confirm] [--as-restore-drill] [--credentials path] [--output human|json]
   media-stack restore --environment staging --as-restore-drill --credentials path --confirm-integrations [--config path] [--output human|json]
-  media-stack verify --environment production|staging [--config path] --suite full|promotion [--legal-fixture path] [--legal-series-fixture path] [--output human|json]
+  media-stack verify --environment production|staging [--config path] --suite full|promotion|companions [--legal-fixture path] [--legal-series-fixture path] [--recovery-fixture path] [--output human|json]
   media-stack test [--run pattern]`
 
 type operationalFailure struct {
@@ -92,23 +92,24 @@ func runVerify(ctx context.Context, arguments []string) error {
 	output := flags.String("output", "human", "human or json")
 	legalFixture := flags.String("legal-fixture", "", "legal movie fixture for Promotion verification")
 	legalSeriesFixture := flags.String("legal-series-fixture", "", "legal series fixture for Promotion verification")
+	recoveryFixture := flags.String("recovery-fixture", "", "disposable legal series recovery observation fixture")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
 	if *environmentName == "" {
 		return fmt.Errorf("environment is required\n%s", usage)
 	}
-	if *environmentName == "production" {
+	if *environmentName == "production" && (*suite != "companions" || *recoveryFixture != "") {
 		if *suite == "promotion" {
 			return fmt.Errorf("Promotion verification is disruptive and requires the Staging Environment")
 		}
 		return fmt.Errorf("full verification is disruptive and requires the Staging Environment")
 	}
-	if *suite != "full" && *suite != "promotion" {
-		return fmt.Errorf("suite must be full or promotion")
+	if *suite != "full" && *suite != "promotion" && *suite != "companions" {
+		return fmt.Errorf("suite must be full, promotion, or companions")
 	}
-	if *suite == "promotion" && *legalFixture == "" && *legalSeriesFixture == "" {
-		return fmt.Errorf("Promotion verification requires --legal-fixture or --legal-series-fixture")
+	if *suite == "promotion" && *legalFixture == "" && *legalSeriesFixture == "" && *recoveryFixture == "" {
+		return fmt.Errorf("Promotion verification requires --legal-fixture, --legal-series-fixture, or --recovery-fixture")
 	}
 	if *output != "human" && *output != "json" {
 		return fmt.Errorf("output must be human or json")
@@ -117,7 +118,7 @@ func runVerify(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("locate working directory: %w", err)
 	}
-	request, err := engine.NewVerifyRequest(workingDirectory, *environmentName, *configPath, *suite, *legalFixture, *legalSeriesFixture)
+	request, err := engine.NewVerifyRequest(workingDirectory, *environmentName, *configPath, *suite, *legalFixture, *legalSeriesFixture, *recoveryFixture)
 	if err != nil {
 		return err
 	}
@@ -438,6 +439,7 @@ func runInit(ctx context.Context, arguments []string) error {
 	configPath := flags.String("config", "", "Declared Configuration path")
 	nonInteractive := flags.Bool("non-interactive", false, "Read all answers from a file")
 	answersPath := flags.String("answers", "", "Initialization answers path")
+	companionsOnly := flags.Bool("companions", false, "Add missing companion credentials to existing encrypted secrets")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -449,7 +451,11 @@ func runInit(ctx context.Context, arguments []string) error {
 		return fmt.Errorf("locate working directory: %w", err)
 	}
 	var request engine.InitRequest
-	if *nonInteractive {
+	if *companionsOnly && *nonInteractive {
+		request, err = engine.NewCompanionInitRequest(workingDirectory, *environmentName, *configPath, *answersPath)
+	} else if *companionsOnly {
+		request, err = engine.NewInteractiveCompanionInitRequest(ctx, workingDirectory, *environmentName, *configPath, os.Stdin, os.Stdout)
+	} else if *nonInteractive {
 		request, err = engine.NewInitRequest(workingDirectory, *environmentName, *configPath, *answersPath)
 	} else {
 		request, err = engine.NewInteractiveInitRequest(workingDirectory, *environmentName, *configPath, os.Stdin, os.Stdout)
@@ -463,6 +469,8 @@ func runInit(ctx context.Context, arguments []string) error {
 	}
 	if report.Preserved {
 		fmt.Fprintf(os.Stdout, "Preserved existing %s Environment choices and encrypted secrets.\n", report.Environment)
+	} else if *companionsOnly {
+		fmt.Fprintf(os.Stdout, "Saved missing %s Environment companion credentials with SOPS. Run media-stack apply --environment %s to configure the services.\n", report.Environment, report.Environment)
 	} else {
 		fmt.Fprintf(os.Stdout, "Initialized %s Environment Declared Configuration and encrypted secrets.\n", report.Environment)
 	}

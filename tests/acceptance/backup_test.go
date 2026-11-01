@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-var backupFixtureServiceNames = []string{"gluetun", "qbittorrent", "prowlarr", "sonarr", "radarr", "profilarr", "jellyfin", "seerr"}
+var backupFixtureServiceNames = []string{"gluetun", "qbittorrent", "prowlarr", "sonarr", "radarr", "profilarr", "jellyfin", "seerr", "houndarr", "cleanuparr"}
 
 func TestBackupAppliesConfiguredRetentionToPublishedEnvironmentArchives(t *testing.T) {
 	repository := repositoryRoot(t)
@@ -506,7 +506,7 @@ case "$1" in
 		fi
 		;;
       *" ps --status running --services "*)
-        printf '%s\n' gluetun qbittorrent prowlarr sonarr radarr profilarr jellyfin seerr
+        printf '%s\n' gluetun qbittorrent prowlarr sonarr radarr profilarr jellyfin seerr houndarr cleanuparr
         ;;
     esac
     ;;

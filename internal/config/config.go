@@ -57,6 +57,7 @@ type Environment struct {
 	SecretsFile         string                        `yaml:"secretsFile"`
 	BackupRoot          string                        `yaml:"backupRoot,omitempty"`
 	HardwareTranscoding HardwareTranscodingPreference `yaml:"hardwareTranscoding"`
+	SeriesAutomation    *SeriesAutomation             `yaml:"seriesAutomation,omitempty"`
 	Ports               Ports                         `yaml:"ports"`
 }
 
@@ -91,6 +92,8 @@ type Ports struct {
 	Profilarr   int `yaml:"profilarr"`
 	Jellyfin    int `yaml:"jellyfin"`
 	Seerr       int `yaml:"seerr"`
+	Houndarr    int `yaml:"houndarr"`
+	Cleanuparr  int `yaml:"cleanuparr"`
 }
 
 type Versions struct {
@@ -150,6 +153,19 @@ func (declared MediaStack) validateEnvironment(name string, allowMissingHardware
 	if _, exists := declared.Spec.Environments[name]; !exists {
 		return fmt.Errorf("environment %q is not declared", name)
 	}
+	for environmentName, environment := range declared.Spec.Environments {
+		if environment.SeriesAutomation != nil {
+			if err := environment.SeriesAutomation.Validate(); err != nil {
+				return fmt.Errorf("environment %s: %w", environmentName, err)
+			}
+			if environment.Ports.Houndarr < 1 || environment.Ports.Houndarr > 65535 || environment.Ports.Cleanuparr < 1 || environment.Ports.Cleanuparr > 65535 || environment.Ports.Houndarr == environment.Ports.Cleanuparr {
+				return fmt.Errorf("environment %s companion ports must be distinct TCP ports", environmentName)
+			}
+		}
+	}
+	if err := validateCompanionPortIsolation(declared.Spec.Environments); err != nil {
+		return err
+	}
 	preference := declared.Spec.Environments[name].HardwareTranscoding
 	if !preference.Valid() && !(allowMissingHardwarePreference && preference == "") {
 		return fmt.Errorf("environment %q hardwareTranscoding must be auto or disabled", name)
@@ -158,6 +174,11 @@ func (declared MediaStack) validateEnvironment(name string, allowMissingHardware
 	staging, stagingExists := declared.Spec.Environments["staging"]
 	if !productionExists || !stagingExists {
 		return fmt.Errorf("Production and Staging Environments must both be declared")
+	}
+	if production.SeriesAutomation != nil || staging.SeriesAutomation != nil {
+		if production.ProjectName == "" || staging.ProjectName == "" || production.ProjectName == staging.ProjectName || filepath.Clean(production.SecretsFile) == filepath.Clean(staging.SecretsFile) {
+			return fmt.Errorf("Production and Staging companion state and secrets require distinct project names and secret documents")
+		}
 	}
 	if !filepath.IsAbs(production.DataRoot) || !filepath.IsAbs(staging.DataRoot) {
 		return fmt.Errorf("Production and Staging data roots must be absolute")
