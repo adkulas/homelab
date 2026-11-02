@@ -6,7 +6,8 @@ of reimaging to the plan's initial 32-bit suggestion. Another architecture requi
 separate runtime pin and pilot. Do not run the namespace pilot as a production installer.
 Bell remains the gateway and sole DHCP responder. Keep homelab and client DNS unchanged.
 DNS Cluster membership, permanent zones and household DNS advertisement belong to later
-tickets. This DNS-only installation creates no DHCP scope.
+tickets. This DNS-only installation enables no DHCP scope; the factory `Default` sample
+remains disabled.
 
 Commands run at the **Pi console** from this checkout unless a different machine is
 named. SSH via `ssh adam@rasp-pi` can do read-only preparation; address changes require
@@ -23,8 +24,10 @@ publish addresses, MACs, profiles, firewall content, certificates' private keys 
 | `secondary/native.py stage` and generated install/removal commands | #104/#99: checksum-pinned native release/runtime; fresh state; stopped systemd install; private credentials; preserved recovery data | Tamper/ACL rejection checks, real-archive staging, unit validation, live start/removal rehearsal |
 | Pi console and recovery client | #104, ADR-0007/0008: static address, independent recursive DNS, trusted HTTPS, restricted LAN/VPN access, DHCP absent and working rollback | Private acceptance record and supervised reboot/soak |
 
-Repository artifacts and automated tests do not complete live acceptance. Keep #104
-open until the complete private checklist passes. The verified pins are Technitium
+The [commissioning record](secondary-commissioning.md) documents the completed live
+checks, full 24-hour soak and explicit operator-approved exceptions for #104. The
+default prerequisites below still apply to future deployments. Repository artifacts
+and automated tests alone do not establish live acceptance. The verified pins are Technitium
 15.6.2 (SHA-256 in `native.py`) and ASP.NET Core/.NET 10.0.13 ARM64 (SHA-512 in `native.py`).
 Sources: [vendor release archive](https://download.technitium.com/dns/archive/15.6.2/DnsServerPortable.tar.gz.sha256),
 [Microsoft release metadata](https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json),

@@ -53,6 +53,7 @@ Use the [raspberrypi native DNS procedure](docs/secondary-dns.md) for #104's pin
 ARM64 bundle, stopped systemd installation, private fresh state, persistent access rules,
 static-address approval/rollback, trusted HTTPS and service removal. Bell retains DHCP.
 SSH preparation uses the existing `adam@rasp-pi` alias; privileged actions require the
-operator's local sudo session. Live acceptance includes reboot, rollback and a 24-hour
-soak and remains pending until recorded. Run staging command checks with
+operator's local sudo session. Reboot, removal/reinstall recovery and the full 24-hour
+soak passed; see the [Pi commissioning record](docs/secondary-commissioning.md) for
+redacted evidence and operator-approved exceptions. Run staging command checks with
 `go test ./tests/acceptance -run '^TestNetworkSecondaryDeployment$'`.
