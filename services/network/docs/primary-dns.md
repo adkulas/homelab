@@ -6,6 +6,11 @@ This is the production path for `homelab-dns`, using the pinned image in
 its existing gateway, subnet, DHCP pool and DNS options. Do not start the Pi, join a
 cluster, create DHCP scopes or import pilot/restored state during this procedure.
 
+The [commissioning record](primary-commissioning.md) documents the completed home Site
+deployment, its operator-approved SSH recovery and storage choices, and live results.
+The steps below are the reference first-install procedure; do not rerun them over an
+existing configuration.
+
 ## Behavior and evidence
 
 | Public seam | Required behavior and source | Observable evidence |
