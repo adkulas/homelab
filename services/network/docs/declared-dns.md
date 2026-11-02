@@ -43,6 +43,9 @@ references fail closed. The aliases match the existing home Traefik routes. Both
 zones get an apex NS pointing to the primary Host and an SOA with a seven-day
 expiry, above the 72-hour service margin. SOA serials and serial date schemes
 remain runtime state, rather than Git-owned counters.
+The SOA contact is the DNS RNAME `hostmaster.home`; Technitium's API renders the
+same value as `hostmaster@home`. Reconciliation normalizes that representation
+before comparing records.
 
 `cluster.home` and its descendants are reserved for Technitium. Alias declarations
 cannot claim them. Existing cluster records/configuration are observed and included

@@ -210,7 +210,14 @@ with urllib.request.urlopen(os.environ['FIXTURE_URL'] + '/resolve?' + query) as 
         if path == 'zones/records/get':
             if values.get('listZone') != 'true':
                 raise ValueError('must read whole zone')
-            return {'records': copy.deepcopy(self.zones[zone]['records'])}
+            records = copy.deepcopy(self.zones[zone]['records'])
+            # Technitium exposes SOA RNAME as a mailbox through the API.
+            for record in records:
+                if record['type'] == 'SOA':
+                    contact = record['rData']['responsiblePerson']
+                    if contact == 'hostmaster.home':
+                        record['rData']['responsiblePerson'] = 'hostmaster@home'
+            return {'records': records}
         self.writes.append((path, values))
         if self.fail_write:
             raise ValueError('fixture rejection')

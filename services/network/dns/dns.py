@@ -240,6 +240,10 @@ def normalize(record):
     for key in ('cname', 'ptrName', 'nameServer', 'primaryNameServer', 'responsiblePerson'):
         if key in data:
             data[key] = data[key].lower().rstrip('.')
+    contact = data.get('responsiblePerson', '')
+    if '@' in contact:
+        mailbox, domain = contact.rsplit('@', 1)
+        data['responsiblePerson'] = mailbox.replace('\\', '\\\\').replace('.', '\\.') + '.' + domain
     return {'name': record['name'].lower().rstrip('.'), 'type': record['type'],
             'ttl': record['ttl'], 'disabled': record.get('disabled', False),
             'expiryTtl': record.get('expiryTtl', 0), 'data': data}
