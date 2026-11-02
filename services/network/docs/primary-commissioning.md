@@ -91,6 +91,34 @@ sudo docker compose --env-file /etc/homelab-dns/runtime.env \
   -f /etc/homelab-dns/compose.yaml ps
 ```
 
-For removal/recovery, follow [the primary DNS rollback procedure](primary-dns.md#6-rollback-and-acceptance-record)
-using the saved private packet. Do not reset live configuration with a commissioning
-helper. Local names, cluster membership and DHCP handoff remain their separate tickets.
+## Recovery of the commissioned Host
+
+Use the installed paths to stop only this DNS Stack Instance, retaining its state:
+
+```bash
+sudo docker compose --env-file /etc/homelab-dns/runtime.env \
+  -f /etc/homelab-dns/compose.yaml stop primary
+```
+
+Verify its DNS/management listeners and UDP 67 are absent. For full prior-state
+recovery, use local console access and the verified encrypted pre-change Host packet
+(`recovery-20261101T014401Z.tar.age` in the laptop packet). Decrypt only into a
+root-private recovery directory and inspect its saved profiles and restoration
+metadata before applying them. Restore the original Netplan profiles, the prior
+`systemd-resolved` configuration and the original `/etc/resolv.conf` file or symlink,
+preserving its saved target and permissions. Remove the commissioning-only
+`/etc/systemd/resolved.conf.d/60-homelab-dns.conf` if absent from that saved state;
+restart `systemd-resolved` after restoring its configuration. Use the tested local
+network rollback with its timer when restoring Netplan; SSH may move back to the
+prior address.
+
+Restore the saved firewall state and Docker unit dependencies together: remove the
+commissioning-only Docker dependency on `homelab-dns-firewall.service` before
+retiring that unit, reload systemd, and remove only this Stack Instance's nftables
+rules. Preserve unrelated firewall rules and Compose projects. Verify prior-address
+SSH, independent Host DNS, gateway, Docker and selected household services. Bell's
+subnet, gateway and DHCP settings remain unchanged. The general
+[rollback checklist](primary-dns.md#6-rollback-and-acceptance-record) uses first-install
+shell helpers; use the installed Compose command above on this commissioned Host.
+Do not reset live configuration with a commissioning helper. Local names, cluster
+membership and DHCP handoff remain their separate tickets.
