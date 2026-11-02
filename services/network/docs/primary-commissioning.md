@@ -1,53 +1,86 @@
-# Primary DNS commissioning readiness — #103
+# Primary DNS commissioning — #103
 
-Read-only inspection on 2026-10-31 (America/Toronto), using branch
-`feat/103-primary-dns-commission` based on
+Commissioned on 2026-11-01 (America/Toronto). The `homelab-dns` Stack Instance is
+running on the homelab Host at the static address referenced by `homelab-address`
+in the encrypted home Site Inventory. Bell retains DHCP, its gateway, subnet and
+advertised client settings. This deployment does not perform a household DNS/DHCP
+handoff or join the DNS Cluster.
+
+The production Compose artifacts were already implemented in #103's merged change.
+Commissioning used the bundle captured at
+`55e31c10ff9f7f8e9f4d2e10a66240ccde0b4c87`, with the pinned Technitium 15.6.2
+image/digest in [technitium.env](../technitium.env). The worktree's starting point was
 `2a52c9f8b60c094e13afdf952bd63cafb75b12b8`.
-The deployment artifacts already exist from #103's merged implementation.
-This record does not approve a live change or establish live acceptance.
 
-## Observed readiness
+## Operator decisions and installed state
 
-| Check | Result | Evidence |
-| --- | --- | --- |
-| Controller Site Inventory validation | Pass | `go run ./cmd/homelab site validate --site home --output json`: valid, no diagnostics; operational values redacted |
-| Primary deployment artifact checks | Pass | `go test ./tests/acceptance -run '^TestNetworkPrimaryDeployment$' -count=1` |
-| Host access | Pass | Key-authenticated SSH as `adam@homelab` |
-| Host tools | Present | Python 3, Docker CLI, nftables, dig and Netplan found |
-| Host services | Active | systemd-resolved, Docker and SSH |
-| Host checkout | Older than candidate | `cefb8f0f2b952d860b62aa97bf58e639f740e60b`; no tracked changes reported by `git status --porcelain` |
-| Strict first-start preflight | Blocked | Exit 2; DNS port conflict, Docker route probe unavailable and unconfirmed operator evidence |
+- The operator approved the exact address/resolver/access plan over SSH, with the
+  physical keyboard/display available as fallback. An independent five-minute Host
+  rollback remained armed until a separately pinned SSH connection verified the
+  new address, default route, Host DNS and required services.
+- Persistent runtime state uses the existing **unencrypted SSD**, explicitly chosen
+  by the operator instead of the runbook's encrypted-storage default. Directories
+  are root-owned mode 0700; credentials are mode 0600. Recovery archives and private
+  credential exports are encrypted outside Git.
+- DNS and management access allow the declared home LAN. Additional VPN and IPv6
+  client ranges were not approved. These Host input restrictions do not block a
+  household client's outbound NordVPN connection; its own DNS/local-access policy
+  remains a client setting.
+- `systemd-resolved` remains the Host resolver with the independent upstreams saved
+  in Netplan. Its stub listener is disabled by
+  `/etc/systemd/resolved.conf.d/60-homelab-dns.conf` (mode **0644**, readable by
+  `systemd-resolve`). `/etc/resolv.conf` points to
+  `/run/systemd/resolve/resolv.conf`.
+- Root-private Compose, environment, administrator credential, PFX password and
+  public certificate files live under `/etc/homelab-dns`. The bind-mounted
+  configuration is `/var/lib/homelab-dns/config`, with the issued leaf at
+  `tls/management.pfx`. No CA root private key was deployed to homelab.
+- `homelab-dns-firewall.service` loads the dedicated nftables table before Docker.
+  Docker has explicit `Requires` and `After` dependencies on that unit. Existing
+  forwarding rules and other Compose projects were preserved.
 
-The Host preflight ran from its existing checkout without sudo. Its output reports
-loopback TCP/UDP DNS listeners and a DHCP-derived Ethernet default route.
-`systemd-resolved` is active and `/etc/resolv.conf` points to its stub file.
-Do not disable it before preparing and reviewing an independent Host resolver path.
-The deployment will need the verified static address from encrypted Site Inventory;
-no operational addresses or MACs are recorded here.
+## Acceptance evidence
 
-`sudo -n true` did not succeed. Docker CLI availability does not establish Docker
-socket access; privileged Docker network inspection remains unverified. Use the
-operator's password-based sudo session for privileged work. Do not grant Docker
-group membership or weaken sudo policy to bypass this requirement.
+| Required behavior | Observed result |
+| --- | --- |
+| Read-only preflight before changes | Encrypted Site Inventory validated; privileged route/Docker inspection completed; the initial loopback DNS conflict was detected and resolved. Strict first-start preflight passed before initial startup. |
+| Static addressing and timed rollback | The first failed supervised change restored the prior Netplan, resolver and firewall state with no reported restoration failures; the prior SSH path worked again. The corrected change committed only after new-address SSH and health checks passed. |
+| Local DNS over UDP and TCP | A temporary `deployment-test.home` A record returned the exact declared Host address from the Host and laptop. The zone was removed afterward; factory local answers also passed after reboot. Permanent `home` records remain #105's scope. |
+| Independent uncached recursion and DNSSEC | No proxy or forwarders; explicit LAN recursion ACL. Cache-flushed external lookups succeeded; a signed domain validated and the deliberately invalid signed test returned SERVFAIL. Checks passed again after reboot. |
+| Trusted management HTTPS | `https://homelab.home:53443` served the issued leaf with verified name, chain, expiry and exact certificate. The operator confirmed browser trust without an exception. Plain HTTP 5380 was denied from the LAN. |
+| Approved/denied access | Approved LAN DNS and HTTPS passed. Temporary isolated probe links established connectivity before verifying denied IPv4/IPv6 access, then were removed. These test Host source policy, not every possible physical guest/VPN path. |
+| Bell remains DHCP owner | No enabled Technitium scopes and no UDP 67 listener. DISCOVER-only probes observed Bell alone with unchanged gateway/DNS options before and after startup and reboot; they did not request leases or change client profiles. |
+| Existing services and persistence | Static address, independent Host DNS, trusted HTTPS, DNS/DNSSEC, DHCP-disabled state, source restrictions and configured container restart behavior passed after reboot. Firewall activation preceded Docker. The operator reconfirmed selected household services. |
+| Recovery copy | The initial primary-only archive was copied to the laptop, checksum-checked, decrypted and validated down to ZIP members including authentication, DNS and web-service configuration. This is not a paired two-node backup or a new Restore Drill. |
 
-## Remaining behavior and evidence
+The final DNS reboot check reported every check as passed, including independent LAN
+checks, LAN HTTP denial and household services. Its temporary one-shot validation unit
+and WantedBy link were removed. The primary retains `unless-stopped` restart behavior.
 
-| Public seam | Required behavior and source | Evidence needed before acceptance |
-| --- | --- | --- |
-| Strict first-start preflight | #103: detect port/route conflicts before changes | Successful privileged network inspection, resolved port 53 conflict, dated private confirmations, exit 0 immediately before start |
-| Host addressing and recovery | #103; ADR-0007: verified static address and timed local rollback | Tested physical console and wired recovery client, saved profiles, reviewed exact private change plan, rollback rehearsal and reboot checks |
-| Primary DNS Stack Instance | #103: independent recursion with DHCP disabled | Fresh private state, pinned image, local UDP/TCP answers, uncached external recursion and DNSSEC checks; no enabled scopes or UDP 67 listener |
-| Management and household access | #103: trusted HTTPS and approved LAN/VPN restrictions | Trusted leaf installed; permitted/denied IPv4/IPv6 probes; persistent firewall before Docker; existing SSH, Docker, gateway and household service checks |
-| Rollback | #103: restore prior Host state and retain Bell subnet/gateway | Supervised service/address removal rehearsal; repeated connectivity checks; Bell remains DHCP owner |
+## Private evidence and ongoing operation
 
-Follow [the primary DNS procedure](primary-dns.md) for the exact ordered steps.
-First establish physical recovery access and save the private recovery packet.
-Review approved client/administrator networks, the resolver replacement, static
-address candidate, firewall persistence and timed rollback together as an exact
-private change plan before applying it. Confirm current Bell leases exclude the
-selected address; inventory validation alone cannot prove it is unused live.
+The private operator packet on the laptop is
+`$HOME/.local/state/homelab-dns/commissioning-103/`; it contains the encrypted
+pre-change recovery packet, reviewed candidate, encrypted credentials, per-operation
+checksums, first-start result and `final-reboot-check.json`. Protected Host copies and
+operation records are under `/var/lib/homelab-dns/commissioning`.
 
-SSH access is available, but it does not confirm the physical recovery prerequisites.
-No Host profile, resolver setting, firewall, Bell setting or production container
-was changed during this inspection. Keep #103 open until its live checks pass;
-record private evidence separately and publish only redacted results.
+The verified initial primary archive is
+`primary-initial-20261102T003350Z-7ccf5e14.tar.age`, SHA-256
+`674ec96ce5b036c6582b913bafafa4bfa35e4ba66930f63a43cd06ce7ced774b`.
+Keep the age identity recoverable independently of homelab. Use the
+[paired backup procedure](backup-restore.md) before later protected changes involving
+both DNS Stack Instances. Keep the CA's custody and recovery procedure separate.
+
+Use the private `ssh-config` in that packet for the pinned static-address SSH path.
+Container administration still requires password-based sudo. Inspect this project's
+status without re-running a first-start gate against occupied service ports:
+
+```bash
+sudo docker compose --env-file /etc/homelab-dns/runtime.env \
+  -f /etc/homelab-dns/compose.yaml ps
+```
+
+For removal/recovery, follow [the primary DNS rollback procedure](primary-dns.md#6-rollback-and-acceptance-record)
+using the saved private packet. Do not reset live configuration with a commissioning
+helper. Local names, cluster membership and DHCP handoff remain their separate tickets.

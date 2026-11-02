@@ -41,8 +41,9 @@ Use the [homelab primary DNS procedure](docs/primary-dns.md) for #103's producti
 Compose service, strict first-start preflight, private state, access restrictions,
 trusted HTTPS and timed local rollback. Bell continues DHCP throughout. The production
 Compose file is separate from the disposable pilot; do not import pilot configuration.
-Live acceptance remains pending until the operator records the complete deployment and
-rollback checklist. Run command/artifact checks with
+The primary was commissioned and reboot-verified; see the [redacted commissioning
+record](docs/primary-commissioning.md) for results, approved access/storage choices and
+private recovery locations. Bell retains DHCP and client DNS settings. Run command/artifact checks with
 `go test ./tests/acceptance -run '^TestNetworkPrimaryDeployment$'` (Python 3 and Docker
 Compose required; no Docker daemon or production service is used by these tests).
 
