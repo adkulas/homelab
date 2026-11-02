@@ -45,10 +45,13 @@ Include:
 - Profilarr
 - Jellyfin
 - Seerr
+- Houndarr for proactive missing episode searches
+- Cleanuparr for Series Library queue recovery and replacement searches
 
 Exclude Bazarr, Usenet, FlareSolverr, Recyclarr, a public reverse proxy, SSO, and full metrics or log aggregation.
 
-Every UI is available on the LAN with authentication. Nothing is intentionally exposed to the internet.
+The seven household UIs are available on the LAN with authentication. Houndarr and Cleanuparr management interfaces bind
+only to localhost with authentication and use SSH tunnels for remote administration. Nothing is intentionally exposed to the internet.
 
 Every long-running service uses `restart: unless-stopped` and a bounded per-service `json-file` logging policy with
 `max-size: 10m` and `max-file: 3`. These lifecycle defaults are rendered and verified rather than left to mutable daemon
@@ -140,7 +143,11 @@ The proposed command contracts, safety artifacts, and Declared Configuration sch
 ──────────────────────────  ──────────────────────────────────────────────────────────────────────────────────────────────────
  Profilarr                   Quality profiles, custom formats, quality definitions, naming, and media-management policy
 ──────────────────────────  ──────────────────────────────────────────────────────────────────────────────────────────────────
- Human through the wizard    Credentials, initial user accounts, and the first Profilarr connections
+ Houndarr                    Proactive missing episode searches through Sonarr
+──────────────────────────  ──────────────────────────────────────────────────────────────────────────────────────────────────
+ Cleanuparr                  Bad-release queue removal, blocklisting, and replacement searches through Sonarr
+──────────────────────────  ──────────────────────────────────────────────────────────────────────────────────────────────────
+ Human through the wizard    Credentials and the first Profilarr connections; the CLI bootstraps companion accounts
 
 Declared Configuration uses stable semantic identities. Reconciliation gets current state, creates missing resources, updates
 drifted resources, and does nothing when state already matches. Unknown resources are reported by default. Pruning requires an
@@ -185,6 +192,28 @@ recycling mechanism.
 
 Seerr uses Jellyfin authentication for household users, retains an emergency local administrator, and initially requires
 approval for requests.
+
+## Series automation
+
+Each Environment can declare `seriesAutomation` to include its own Houndarr and Cleanuparr containers, credentials,
+loopback management ports, and mutable configuration volumes. The checked-in Production and Staging Environments enable it.
+The companions have no media mounts and must address only their own Environment's Sonarr and qBittorrent.
+
+Houndarr owns proactive missing episode searches. Cleanuparr owns queue recovery and reactive replacement searches;
+its proactive Seeker is disabled. Enabled automation disables Seerr's grouped series searches while Sonarr RSS monitoring
+remains enabled. Profilarr continues to own quality and naming policy. Neither companion may remove imported media.
+
+`init` collects and encrypts operator-selected companion credentials; `init --companions` adds missing credentials to an
+existing Environment. After Seerr reconciliation, `apply` creates first-run accounts, stores Cleanuparr's API key in SOPS,
+creates one paused Environment-local Houndarr Sonarr connection, verifies its settings, and enables the declared policy.
+Existing Houndarr policy drift requires guided UI correction. `plan` and `verify --suite companions` only observe.
+
+Backups include both companion stores. Restore Drills restore those stores but leave both services stopped until explicit
+integration confirmation and a successful apply. Disable automation with `seriesAutomation.enabled: false`, disable the
+Houndarr instance in its UI, and rerun apply; removing the declaration does not stop existing containers.
+
+See the [operator runbook](../../services/media/README.md#installation-and-automatic-first-run) for ports, tuning,
+bootstrap, recovery exceptions, and disposable Staging verification.
 
 ## VPN behavior
 
@@ -256,6 +285,7 @@ Automated verification covers:
 - `/data` device, hardlink, rename, and application-runtime permission behavior through the actual container mounts;
 - internal service-name resolution, including Gluetun's `qbittorrent` network alias;
 - qBittorrent VPN egress and fail-closed behavior;
+- companion search ownership, episode search context, and controlled queue recovery in disposable Staging;
 - a test import with verified inode equality;
 - backup manifests and checksums; and
 - periodic Production-backup restore into isolated Staging.
@@ -272,7 +302,7 @@ notification hooks. A full observability stack is deferred.
 5. Add Gluetun and qBittorrent with fail-closed verification.
 6. Add Sonarr, Radarr, and Prowlarr reconciliation.
 7. Add Profilarr, pinned TRaSH-derived policy, and its guided bootstrap exception.
-8. Add Jellyfin and Seerr.
+8. Add Jellyfin and Seerr, then Houndarr/Cleanuparr with separate search ownership and automatic first-run setup.
 9. Complete plan/apply idempotence and integration verification.
 10. Add volume backups, restore, retention, and Restore Drills.
 11. Document and verify Promotion and upgrade workflows.
