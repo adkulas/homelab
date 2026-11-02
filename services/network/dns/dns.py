@@ -265,6 +265,7 @@ def observe(api, desired, previous):
         detail = api.call('dhcp/scopes/get', {'name': summary['name']})
         scopes.append(dict(detail, enabled=summary['enabled']))
     return {'zones': live, 'scopes': scopes,
+            'leases': api.call('dhcp/leases/list')['leases'],
             'version': api.call('settings/get')['version'],
             'cluster': api.call('admin/cluster/state')}
 
@@ -293,7 +294,7 @@ def configuration(value, field=None):
                 and not key.endswith(('String', 'Idn'))}
     if isinstance(value, list):
         items = [configuration(item) for item in value]
-        return sorted(items, key=encode) if field in ('records', 'clusterNodes', 'scopes') else items
+        return sorted(items, key=encode) if field in ('records', 'clusterNodes', 'scopes', 'leases') else items
     return value
 
 
@@ -319,9 +320,8 @@ def make_plan(api, desired, previous, live):
         elif current['disabled'] or current['options'].get('disabled', False) or current['options'].get('update') != 'Deny':
             changes.append({'id': label, 'action': 'secure-zone', 'protected': True})
     for scope in live['scopes']:
-        domain = scope.get('domainName', '').lower().rstrip('.')
-        if scope.get('dnsUpdates', False) and (
-                scope.get('enabled', False) or domain == 'home' or domain.endswith('.home')):
+        retained_leases = any(lease['scope'] == scope['name'] for lease in live['leases'])
+        if scope.get('dnsUpdates', False) and (scope['enabled'] or retained_leases):
             blockers.append('DHCP_DNS_UPDATES_REQUIRE_COLLISION_PROTECTION')
     previous_keys = {record_identity(item) for item in previous.get('records', [])}
     for record in desired['records']:

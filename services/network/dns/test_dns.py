@@ -30,6 +30,8 @@ class DNSTests(unittest.TestCase):
         (self.site / 'secrets').mkdir()
         self.zones = {}
         self.scopes = []
+        self.leases = []
+        self.fail_lease_read = False
         self.writes = []
         self.fail_write = False
         self.bad_answers = False
@@ -191,6 +193,10 @@ with urllib.request.urlopen(os.environ['FIXTURE_URL'] + '/resolve?' + query) as 
         if path == 'zones/list':
             return {'zones': [{'name': name, 'type': 'Primary', 'disabled': False}
                               for name in self.zones]}
+        if path == 'dhcp/leases/list':
+            if self.fail_lease_read:
+                raise ValueError('lease inventory unavailable')
+            return {'leases': copy.deepcopy(self.leases)}
         if path == 'dhcp/scopes/list':
             return {'scopes': [{'name': scope['name'], 'enabled': scope.get('enabled', False)}
                                for scope in self.scopes]}
@@ -597,6 +603,48 @@ os.execv(os.environ['FIXTURE_REAL_AGE'], ['age', *sys.argv[1:]])
         count = len(self.writes)
         self.cli('apply', '--plan', plan['plan'], success=False)
         self.cli('verify', success=False)
+        self.assertEqual(len(self.writes), count)
+
+    def test_disabled_factory_scope_allows_dns_until_publishing_is_enabled(self):
+        self.scopes = [{'name': 'Default', 'domainName': 'home', 'enabled': False,
+                        'dnsUpdates': True, 'dnsOverwriteForDynamicLease': False}]
+        plan = self.cli('plan')
+        self.assertEqual(plan['blockers'], [])
+        self.cli('apply', '--plan', plan['plan'])
+        self.assertEqual(self.cli('verify')['status'], 'verified')
+        self.assertFalse(self.scopes[0]['enabled'])
+        self.assertFalse(any(path.startswith('dhcp/') for path, values in self.writes))
+        plan = self.cli('plan')
+        count = len(self.writes)
+        self.scopes[0]['enabled'] = True
+        enabled_plan = self.cli('plan')
+        self.assertNotEqual(enabled_plan['plan'], plan['plan'])
+        self.assertIn('DHCP_DNS_UPDATES_REQUIRE_COLLISION_PROTECTION', enabled_plan['blockers'])
+        self.cli('apply', '--plan', plan['plan'], success=False)
+        self.cli('verify', success=False)
+        self.assertEqual(len(self.writes), count)
+
+    def test_disabled_scope_with_retained_leases_is_not_inert(self):
+        self.bootstrap()
+        self.scopes = [{'name': 'Default', 'domainName': 'home', 'enabled': False,
+                        'dnsUpdates': True, 'dnsOverwriteForDynamicLease': False}]
+        inert_plan = self.cli('plan')
+        self.assertEqual(inert_plan['blockers'], [])
+        self.leases = [{'scope': 'Default', 'type': 'Dynamic', 'hostName': 'homelab.home',
+                        'address': '192.0.2.10', 'leaseObtained': '11/01/2026 00:00:00',
+                        'leaseExpires': '11/02/2026 23:00:00'}]
+        unsafe_plan = self.cli('plan')
+        self.assertIn('DHCP_DNS_UPDATES_REQUIRE_COLLISION_PROTECTION', unsafe_plan['blockers'])
+        self.assertNotEqual(inert_plan['plan'], unsafe_plan['plan'])
+        count = len(self.writes)
+        self.cli('apply', '--plan', inert_plan['plan'], success=False)
+        self.cli('verify', success=False)
+        self.assertEqual(len(self.writes), count)
+        self.leases.clear()
+        self.assertEqual(self.cli('verify')['status'], 'verified')
+        self.fail_lease_read = True
+        self.cli('plan', success=False)
+        self.cli('apply', success=False)
         self.assertEqual(len(self.writes), count)
 
 

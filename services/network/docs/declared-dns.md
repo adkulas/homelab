@@ -16,7 +16,7 @@ not commission either Host, establish the DNS Cluster, or install a polling time
 | Protected `apply` | Invoke the existing decrypt/integrity/freshness backup gate immediately before mutation, then re-read declarations, credentials, ownership and live state | Backup runbook; ADR-0007 | Real age-encrypted paired archive tests reject missing, corrupt and stale backups |
 | `apply`, `verify` | Check API state and exact A, CNAME and PTR answers through the declared primary resolver; publish ownership only after success | #105 | Query mismatch and API failure tests return nonzero without publishing successful ownership |
 | `plan`, `apply` | Report unknown records, preserve them; block retirement of a zone containing unknown records | #105 | Unknown alias collision, preservation and retired-zone tests |
-| `plan`, `apply`, `verify` | Deny external dynamic updates; reject enabled DHCP DNS publishers under every suffix, including PTR overwrite paths | #105; pinned DHCP implementation | Zone-security and DHCP collision tests |
+| `plan`, `apply`, `verify` | Deny external dynamic updates; reject enabled DHCP DNS publishers and retained lease cleanup under every suffix | #105; pinned DHCP implementation | Zone-security and DHCP collision tests |
 
 Run command tests with `go test ./tests/acceptance -run '^TestNetworkDNSCommands$'`.
 They use a disposable HTTP API, fixture SOPS/dig processes, and real age encryption.
@@ -171,11 +171,15 @@ The command sets zone `update=Deny`. Technitium's internal DHCP updates bypass t
 RFC 2136 policy: the pinned source skips its existing-A check for reserved leases.
 The DHCP INFORM path can also overwrite a declared PTR from a scope with a different
 forward suffix. Accordingly, this DNS-only stage rejects every enabled scope with
-DNS updates, regardless of suffix or dynamic-overwrite policy. A disabled scope
-staged to publish under `home` is also rejected; an unrelated disabled factory
-sample scope can remain. #107 must establish and
-prove safe lease-name ownership before allowing those updates; this command never
-creates, enables or edits a DHCP scope. The fixture test proves the fail-closed gate,
+DNS updates, regardless of suffix or dynamic-overwrite policy. Expiry maintenance
+also removes matching A/PTR records from disabled scopes that retain leases. The
+command therefore reads the complete lease inventory and permits a DNS-updating
+scope only when it is disabled and lease-free. The empty factory scope can remain
+unchanged. An unavailable lease inventory fails closed. Scope status and leases
+remain part of the exact plan: enabling a DNS publisher or introducing a retained
+lease invalidates approval and blocks subsequent apply/verify. #107 must establish
+and prove safe lease-name ownership before allowing those updates; this command
+never creates, enables or edits a DHCP scope. The fixture test proves the fail-closed gate,
 not a live hostile-client packet exchange.
 
 For a routine rollback, revert the relevant policy change, generate a fresh plan
