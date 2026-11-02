@@ -57,3 +57,12 @@ operator's local sudo session. Reboot, removal/reinstall recovery and the full 2
 soak passed; see the [Pi commissioning record](docs/secondary-commissioning.md) for
 redacted evidence and operator-approved exceptions. Run staging command checks with
 `go test ./tests/acceptance -run '^TestNetworkSecondaryDeployment$'`.
+
+## Git-owned local DNS
+
+Use the [declared DNS procedure](docs/declared-dns.md) for #105's redacted
+read/plan/apply/verify command. The Site's `network.json` refers to Hosts while SOPS
+supplies addresses. Alias additions/updates may apply routinely; protected changes
+require the exact current plan and a verified fresh paired backup. Unknown live
+records are reported and preserved. This DNS-only stage keeps Bell DHCP and
+rejects unsafe Technitium lease-name updates.
