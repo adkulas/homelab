@@ -72,6 +72,16 @@ Keep the age identity recoverable independently of homelab. Use the
 [paired backup procedure](backup-restore.md) before later protected changes involving
 both DNS Stack Instances. Keep the CA's custody and recovery procedure separate.
 
+After commissioning, the operator replaced the generated administrator login with
+an operator-selected username and password using the private local prompt. The
+prompt verifies a fresh administrator login and saves the current credentials in
+`operator-login.age` in the laptop packet, encrypted to the Site recovery recipient.
+The initial backup and Host bootstrap password predate this change; they do not
+represent the current login. Preserve the encrypted credential recovery files and
+take a fresh service backup before relying on a backup for the current authentication
+state. Historical first-start helpers assume the bootstrap credentials and must not
+be rerun against the commissioned service.
+
 Use the private `ssh-config` in that packet for the pinned static-address SSH path.
 Container administration still requires password-based sudo. Inspect this project's
 status without re-running a first-start gate against occupied service ports:
