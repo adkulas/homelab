@@ -7,7 +7,18 @@ GitHub Container Registry identifies that digest as Profilarr `2.1.0`; the corre
 [Repository pin](../../services/media/versions.yaml)
 [Official container package](https://github.com/dictionarry-hub/profilarr/pkgs/container/profilarr)
 
-## Answer
+## November 2026 update
+
+Latest stable v2.3.1 still has only `GET /api/v1/arr`; supported Arr creation/profile-selection/sync endpoints remain unfinished.
+Upstream #308 was closed in favor of supported API work tracked in #401. The design interview for issue #84 approved the
+strict fresh-install exception and expanded policy bootstrap recorded in [ADR 0009](../adr/0009-bootstrap-fresh-profilarr-state.md).
+The recommendation below is historical and is superseded by that decision. Compatibility must use the actual migrated
+v2.3.1 image; its reference schema file does not exactly describe its migrated database.
+[Release](https://github.com/Dictionarry-Hub/profilarr/releases/tag/v2.3.1)
+[API contract](https://github.com/Dictionarry-Hub/profilarr/blob/v2.3.1/docs/api/v1/openapi.yaml)
+[API roadmap](https://github.com/Dictionarry-Hub/profilarr/issues/401)
+
+## Original August findings
 
 Yes. Profilarr 2.1.0 stores its application state in SQLite at `/config/data/profilarr.db`. Arr connections are rows in
 `arr_instances`, including name, type, internal URL, optional external URL, API key, tags, enabled state, library-refresh
@@ -36,7 +47,7 @@ an unsupported coupling to migration internals, not a stable interface.
 [Upstream restore safety rationale](https://github.com/Dictionarry-Hub/profilarr/blob/v2.1.0/src/lib/server/utils/backup/applyPending.ts#L1-L17)
 
 The lack of a supported bootstrap interface is explicit upstream. Profilarr 2.1.0's documented Arr API exposes only
-`GET /api/v1/arr/instances`; it has no create operation. Upstream issue #308 requests environment-variable Arr credential
+`GET /api/v1/arr`; it has no create operation. Upstream issue #308 requests environment-variable Arr credential
 and instance bootstrapping, describes UI setup as the current workflow, and remains open. The UI does expose a private
 connection-test route, but that does not turn the form action or database schema into a supported automation contract.
 [Documented Arr API](https://github.com/Dictionarry-Hub/profilarr/blob/v2.1.0/docs/api/v1/paths/arr.yaml#L1-L27)
@@ -45,7 +56,7 @@ connection-test route, but that does not turn the form action or database schema
 
 ## Recommendation
 
-Keep the guided one-time UI step and verify its result through the documented `GET /api/v1/arr/instances` endpoint. Back up
+Keep the guided one-time UI step and verify its result through the documented `GET /api/v1/arr` endpoint. Back up
 the complete, quiesced environment-specific `/config` state afterward. Do not implement direct SQLite mutation in
 `media-stack`: it would trade a visible one-time manual checkpoint for silent schema coupling, plaintext-secret handling,
 missed initialization side effects, and upgrade risk.

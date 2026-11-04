@@ -5,18 +5,31 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 )
 
 func TestApplyStartsQBittorrentOnlyAfterHealthyGluetunWithRuntimeSecrets(t *testing.T) {
 	testApplyFlow(t, false)
 }
+
+func TestApplyBootstrapsFreshProfilarr(t *testing.T) { testApplyFlow(t, false, "fresh-profilarr") }
+
+func TestApplyRequiresZeroDownloadDelay(t *testing.T) { testApplyFlow(t, false, "delay-drift") }
+
+func TestApplyRequiresOriginalMovieAudio(t *testing.T) {
+	testApplyFlow(t, false, "movie-language-drift")
+}
+
+func TestApplyRequiresOptional4KMovieProfile(t *testing.T) { testApplyFlow(t, false, "missing-4k") }
 
 func TestApplyBootstrapsCompanionsUsingChosenCredentials(t *testing.T) { testApplyFlow(t, true) }
 
@@ -32,6 +45,16 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 		scenario = scenarios[0]
 	}
 
+	liveProfilarr := strings.Contains(scenario, "-live")
+	fault := strings.TrimPrefix(scenario, "fresh-profilarr-live-")
+	if fault == scenario {
+		fault = ""
+	}
+	freshProfilarr := strings.HasPrefix(scenario, "fresh-profilarr")
+	profilarrURL, profilarrID, realDocker := "", "", ""
+	if liveProfilarr {
+		profilarrURL, profilarrID, realDocker = pinnedProfilarrFixture(t)
+	}
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
 	preferences := map[string]any{}
@@ -48,6 +71,7 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 	movieQualityProfiles := []map[string]any{
 		{
 			"name":              "HD Bluray + WEB",
+			"language":          map[string]any{"id": -2, "name": "Original"},
 			"upgradeAllowed":    true,
 			"cutoff":            7,
 			"minFormatScore":    0,
@@ -64,10 +88,37 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 			},
 		},
 	}
+	if scenario != "missing-4k" {
+		movieQualityProfiles = append(movieQualityProfiles, map[string]any{
+			"name": "Remux 2160p (Alternative)", "language": map[string]any{"id": -2, "name": "Original"}, "upgradeAllowed": true, "cutoff": 19, "minFormatScore": 0, "cutoffFormatScore": 10000,
+			"items": []any{
+				map[string]any{"quality": map[string]any{"id": 19, "name": "Remux-2160p"}, "allowed": true},
+				map[string]any{"quality": map[string]any{"id": 101, "name": "Bluray-2160p"}, "allowed": true},
+				map[string]any{"name": "WEB 2160p", "allowed": true, "items": []any{}},
+				map[string]any{"quality": map[string]any{"id": 103, "name": "Remux-1080p"}, "allowed": true},
+				map[string]any{"quality": map[string]any{"id": 104, "name": "Bluray-1080p"}, "allowed": true},
+				map[string]any{"name": "WEB 1080p", "allowed": true, "items": []any{}},
+				map[string]any{"quality": map[string]any{"id": 106, "name": "HDTV-1080p"}, "allowed": true},
+				map[string]any{"quality": map[string]any{"id": 107, "name": "Bluray-720p"}, "allowed": true},
+				map[string]any{"name": "WEB 720p", "allowed": true, "items": []any{}},
+				map[string]any{"quality": map[string]any{"id": 109, "name": "HDTV-720p"}, "allowed": true},
+				map[string]any{"quality": map[string]any{"id": 110, "name": "Bluray-576p"}, "allowed": true},
+				map[string]any{"quality": map[string]any{"id": 111, "name": "Bluray-480p"}, "allowed": true},
+				map[string]any{"name": "WEB 480p", "allowed": true, "items": []any{}},
+				map[string]any{"quality": map[string]any{"id": 113, "name": "DVD"}, "allowed": true},
+				map[string]any{"quality": map[string]any{"id": 114, "name": "SDTV"}, "allowed": true},
+			},
+			"formatItems": []any{map[string]any{"format": 104, "score": 1950}, map[string]any{"format": 103, "score": -10000}},
+		})
+	}
+	if scenario == "movie-language-drift" {
+		movieQualityProfiles[0]["language"] = map[string]any{"id": 1, "name": "English"}
+	}
 	movieCustomFormats := []map[string]any{
 		{"id": 101, "name": "HD Bluray Tier 01"},
 		{"id": 102, "name": "WEB Tier 01"},
 		{"id": 103, "name": "BR-DISK"},
+		{"id": 104, "name": "Remux Tier 01"},
 	}
 	movieQualityDefinitions := []map[string]any{
 		{"quality": map[string]any{"name": "Bluray-1080p"}, "minSize": 50.8, "maxSize": nil, "preferredSize": 1999},
@@ -90,6 +141,10 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 		{"id": 1, "name": "Radarr", "type": "radarr", "url": "http://radarr:7878", "enabled": 1},
 		{"id": 2, "name": "Sonarr", "type": "sonarr", "url": "http://sonarr:8989", "enabled": 1},
 	}
+	if freshProfilarr {
+		profilarrInstances = []map[string]any{}
+	}
+	profilarrReady := filepath.Join(temporary, "profilarr-ready")
 	profilarrObservations := 0
 	var seriesRootFolders []map[string]any
 	var seriesDownloadClients []map[string]any
@@ -153,15 +208,36 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 		"downloadPropersAndRepacks": "doNotPrefer",
 		"enableMediaInfo":           true,
 	}
+	movieDelay := []map[string]any{{"id": float64(1), "torrentDelay": 600, "usenetDelay": 600}}
+	seriesDelay := []map[string]any{{"id": float64(1), "torrentDelay": 600, "usenetDelay": 600}}
+	if !liveProfilarr && scenario != "delay-drift" {
+		movieDelay[0]["torrentDelay"] = 0
+		movieDelay[0]["usenetDelay"] = 0
+		seriesDelay[0]["torrentDelay"] = 0
+		seriesDelay[0]["usenetDelay"] = 0
+	}
+	if liveProfilarr {
+		movieQualityProfiles = []map[string]any{}
+		seriesQualityProfiles = []map[string]any{}
+		movieCustomFormats = []map[string]any{}
+		seriesCustomFormats = []map[string]any{}
+		movieNaming = map[string]any{"id": 1}
+		seriesNaming = map[string]any{"id": 1}
+		movieMediaManagement = map[string]any{"id": 1}
+		seriesMediaManagement = map[string]any{"id": 1}
+	}
 	qbittorrentCredentialsInstalled := false
-	sonarrAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	sonarrAPI := applyArrServer(t, liveProfilarr, 8989, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("X-Api-Key") != "fixture-sonarr-api-key" {
 			http.Error(writer, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
+		if (liveProfilarr || request.URL.Path == "/api/v3/delayprofile") && acceptProfilarrMutation(writer, request, &seriesQualityProfiles, &seriesCustomFormats, &seriesQualityDefinitions, &seriesNaming, &seriesMediaManagement, &seriesDelay) {
+			return
+		}
 		switch request.Method + " " + request.URL.Path {
 		case "GET /api/v3/system/status":
-			_ = json.NewEncoder(writer).Encode(map[string]string{"appName": "Sonarr"})
+			_ = json.NewEncoder(writer).Encode(map[string]string{"appName": "Sonarr", "version": "4.0.19.2979"})
 		case "GET /api/v3/qualityprofile":
 			seriesPolicyObservations["qualityprofile"]++
 			_ = json.NewEncoder(writer).Encode(seriesQualityProfiles)
@@ -196,7 +272,42 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 		}
 	}))
 	defer sonarrAPI.Close()
-	api := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	var interruptOnce sync.Once
+	api := applyArrServer(t, liveProfilarr, 7878, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if liveProfilarr && fault == "interrupted" && request.URL.Path == "/api/v1/status" {
+			interruptOnce.Do(func() {
+				data, err := os.ReadFile(filepath.Join(temporary, "operation-pid"))
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+				if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+					t.Error(err)
+				}
+			})
+			http.Error(writer, "interrupted", http.StatusServiceUnavailable)
+			return
+		}
+		if liveProfilarr && fault == "verification" && request.URL.Path == "/api/v1/status" {
+			_ = json.NewEncoder(writer).Encode(map[string]any{"arrs": []any{map[string]any{"type": "radarr", "sync": map[string]any{"qualityProfiles": map[string]any{"status": "failed"}}}, map[string]any{"type": "sonarr"}}})
+			return
+		}
+		if liveProfilarr && (request.URL.Path == "/api/v1/arr" || request.URL.Path == "/api/v1/status" || request.URL.Path == "/api/v1/health") {
+			target, _ := url.Parse(profilarrURL)
+			httputil.NewSingleHostReverseProxy(target).ServeHTTP(writer, request)
+			return
+		}
+		if request.URL.Path == "/api/v1/health" {
+			_ = json.NewEncoder(writer).Encode(map[string]string{"status": "healthy"})
+			return
+		}
+		if request.URL.Path == "/api/v1/status" {
+			_ = json.NewEncoder(writer).Encode(map[string]any{"arrs": []any{
+				map[string]any{"type": "radarr", "sync": map[string]any{"qualityProfiles": map[string]any{"status": "idle", "lastSyncedAt": "2026-11-03T00:00:00Z"}, "delayProfiles": map[string]any{"status": "idle", "lastSyncedAt": "2026-11-03T00:00:00Z"}, "mediaManagement": map[string]any{"status": "idle", "lastSyncedAt": "2026-11-03T00:00:00Z"}}},
+				map[string]any{"type": "sonarr", "sync": map[string]any{"qualityProfiles": map[string]any{"status": "idle", "lastSyncedAt": "2026-11-03T00:00:00Z"}, "delayProfiles": map[string]any{"status": "idle", "lastSyncedAt": "2026-11-03T00:00:00Z"}, "mediaManagement": map[string]any{"status": "idle", "lastSyncedAt": "2026-11-03T00:00:00Z"}}}}})
+			return
+		}
 		if request.URL.Path == "/api/v1/arr" {
 			profilarrObservations++
 			if profilarrObservations == 1 {
@@ -206,6 +317,11 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 			if request.Header.Get("X-Api-Key") != "fixture-profilarr-api-key-32-characters" {
 				http.Error(writer, "Unauthorized", http.StatusUnauthorized)
 				return
+			}
+			if freshProfilarr && len(profilarrInstances) == 0 {
+				if _, err := os.Stat(profilarrReady); err == nil {
+					profilarrInstances = []map[string]any{{"type": "radarr", "url": "http://radarr:7878", "enabled": 1}, {"type": "sonarr", "url": "http://sonarr:8989", "enabled": 1}}
+				}
 			}
 			_ = json.NewEncoder(writer).Encode(profilarrInstances)
 			return
@@ -242,9 +358,12 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 				http.Error(writer, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
+			if (liveProfilarr || request.URL.Path == "/api/v3/delayprofile") && acceptProfilarrMutation(writer, request, &movieQualityProfiles, &movieCustomFormats, &movieQualityDefinitions, &movieNaming, &movieMediaManagement, &movieDelay) {
+				return
+			}
 			switch request.Method + " " + request.URL.Path {
 			case "GET /api/v3/system/status":
-				_ = json.NewEncoder(writer).Encode(map[string]string{"appName": "Radarr"})
+				_ = json.NewEncoder(writer).Encode(map[string]string{"appName": "Radarr", "version": "6.3.0.10514"})
 			case "GET /api/v3/rootfolder":
 				_ = json.NewEncoder(writer).Encode(rootFolders)
 			case "POST /api/v3/rootfolder":
@@ -361,8 +480,32 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 	var seerrRadarr []map[string]any
 	var seerrSonarr []map[string]any
 	seerrWrites := 0
+	viewerPermissions := 32 | 128
+	movieOnlyPermissions := 262144
+	restrictedPermissions := 0
 	seerrAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.Method + " " + request.URL.Path {
+		case "GET /api/v1/user":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"pageInfo": map[string]int{"results": 4}, "results": []any{map[string]int{"id": 1, "permissions": 2}, map[string]int{"id": 2, "permissions": viewerPermissions}, map[string]int{"id": 3, "permissions": movieOnlyPermissions}, map[string]int{"id": 4, "permissions": restrictedPermissions}}})
+		case "POST /api/v1/user/3/settings/permissions":
+			var body struct {
+				Permissions int `json:"permissions"`
+			}
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			movieOnlyPermissions = body.Permissions
+			seerrWrites++
+			_ = json.NewEncoder(writer).Encode(body)
+		case "POST /api/v1/user/4/settings/permissions":
+			t.Error("restricted user must not gain profile-choice permissions")
+			writer.WriteHeader(http.StatusForbidden)
+		case "POST /api/v1/user/2/settings/permissions":
+			var body struct {
+				Permissions int `json:"permissions"`
+			}
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			viewerPermissions = body.Permissions
+			seerrWrites++
+			_ = json.NewEncoder(writer).Encode(body)
 		case "GET /api/v1/settings/public":
 			_ = json.NewEncoder(writer).Encode(map[string]any{"initialized": seerrInitialized, "mediaServerType": seerrMain["mediaServerType"]})
 		case "POST /api/v1/auth/jellyfin":
@@ -471,6 +614,9 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 		t.Fatal(err)
 	}
 	declared := strings.Replace(string(readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml"))), "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
+	if freshProfilarr {
+		declared = strings.Replace(declared, "/mnt/backups/media/staging", filepath.Join(temporary, "backups"), 1)
+	}
 	declared = strings.Replace(declared, "radarr: 17878", "radarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "prowlarr: 19696", "prowlarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "profilarr: 16868", "profilarr: "+apiURL.Port(), 1)
@@ -521,12 +667,41 @@ EOF
 	if bootstrap {
 		installBootstrapSOPSFixture(t, binDirectory, filepath.Join(temporary, "secrets", "staging.sops.yaml"))
 	}
+	if liveProfilarr && fault != "" {
+		installProfilarrFault(t, filepath.Join(binDirectory, "profilarr-fault"))
+	}
 	dockerLog := filepath.Join(temporary, "docker-arguments")
 	composeCapture := filepath.Join(temporary, "compose.yaml")
 	healthCount := filepath.Join(temporary, "health-count")
 	topologyReady := filepath.Join(temporary, "topology-ready")
 	writeFile(t, filepath.Join(binDirectory, "docker"), []byte(`#!/bin/sh
+  if [ -n "$APPLY_REAL_PROFILARR" ]; then
+    if [ "$1" = start ] && [ "$APPLY_PROFILARR_FAULT" = restart ]; then exit 1; fi
+    if [ "$1" = start ] && [ "$APPLY_PROFILARR_FAULT" = interrupted ]; then printf '%s\n' "$PPID" > "$APPLY_PROFILARR_PID"; fi
+    case "$*" in
+      "compose -f - ps --all -q profilarr") cat >/dev/null; printf '%s\n' "$APPLY_REAL_PROFILARR"; exit 0 ;;
+      "compose -f - up -d profilarr") cat >/dev/null; "$APPLY_REAL_DOCKER" start "$APPLY_REAL_PROFILARR" >/dev/null; exit $? ;;
+      "inspect $APPLY_REAL_PROFILARR"|"stop --time 30 $APPLY_REAL_PROFILARR"|"start $APPLY_REAL_PROFILARR"|"image inspect --format "*|"ps --filter volume="*|"rm -f media-stack-profilarr-bootstrap-"*) exec "$APPLY_REAL_DOCKER" "$@" ;;
+    esac
+    if [ "$1" = run ]; then
+      printf '%s\n' 'helper invocation' >> "$APPLY_DOCKER_LOG"
+      if [ -n "$APPLY_PROFILARR_FAULT" ]; then exec "$APPLY_PROFILARR_HELPER" "$@"; fi
+      exec "$APPLY_REAL_DOCKER" "$@"
+    fi
+  fi
+  if [ "$1" = run ]; then
+    payload=$(cat)
+    case "$payload" in *'"mode":"bootstrap"'*) touch "$APPLY_PROFILARR_READY" ;; esac
+    printf '%s\n' 'helper invocation' >> "$APPLY_DOCKER_LOG"
+    printf '%s\n' '{"code":"ok"}'
+    exit 0
+  fi
 	printf '%s\n' "$*" >> "$APPLY_DOCKER_LOG"
+  case "$*" in
+    "inspect fixture-profilarr-id") printf '%s\n' '[{"Image":"fixture-image","Config":{"Image":"ghcr.io/dictionarry-hub/profilarr@sha256:352e42dec74ecfd68d13bb198fbc6d9346e3a8c55003026e1814e59319a2176d"},"State":{"Running":false,"Pid":0,"Status":"exited"},"Mounts":[{"Destination":"/config","Type":"volume","Name":"fixture-profilarr-config"}]}]'; exit 0 ;;
+    "image inspect --format {{.Id}} "*) printf '%s\n' 'fixture-image'; exit 0 ;;
+    "stop --time 30 fixture-profilarr-id"|"start fixture-profilarr-id"|"ps --filter volume=fixture-profilarr-config --format {{.ID}}") exit 0 ;;
+  esac
 	case "$*" in
 	  "compose -f - config --hash *")
 	    cat >/dev/null
@@ -591,6 +766,7 @@ EOF
 	  "compose -f - exec -T sonarr cat /config/config.xml") printf '<Config><ApiKey>fixture-sonarr-api-key</ApiKey></Config>\n'; exit 0 ;;
 	  "compose -f - up -d prowlarr") exit 0 ;;
 	  "compose -f - exec -T prowlarr cat /config/config.xml") printf '<Config><ApiKey>fixture-prowlarr-api-key</ApiKey></Config>\n'; exit 0 ;;
+	  "compose -f - ps --all -q profilarr") printf 'fixture-profilarr-id\n'; exit 0 ;;
 	  "compose -f - up -d profilarr") exit 0 ;;
 	  "compose -f - up -d jellyfin") exit 0 ;;
 	  "compose -f - up -d seerr") touch "$APPLY_TOPOLOGY_READY"; exit 0 ;;
@@ -614,6 +790,13 @@ EOF
 		"APPLY_COMPOSE_CAPTURE="+composeCapture,
 		"APPLY_HEALTH_COUNT="+healthCount,
 		"APPLY_TOPOLOGY_READY="+topologyReady,
+		"APPLY_PROFILARR_READY="+profilarrReady,
+		"APPLY_REAL_PROFILARR="+profilarrID,
+		"APPLY_REAL_DOCKER="+realDocker,
+		"APPLY_PROFILARR_FAULT="+fault,
+		"APPLY_PROFILARR_HELPER="+filepath.Join(binDirectory, "profilarr-fault"),
+		"APPLY_PROFILARR_ATOMIC="+filepath.Join(temporary, "atomic"),
+		"APPLY_PROFILARR_PID="+filepath.Join(temporary, "operation-pid"),
 	)
 	initialPlan := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)
 	initialPlan.Dir = command.Dir
@@ -654,7 +837,38 @@ EOF
 	}
 	secretsBeforeFailure := readFile(t, filepath.Join(temporary, "secrets/staging.sops.yaml"))
 	output, err := command.CombinedOutput()
-	if scenario != "" {
+	if liveProfilarr && fault != "" {
+		verifyProfilarrFault(t, fault, profilarrID, realDocker, temporary, filepath.Join(temporary, "backups", "profilarr-bootstrap", "media-staging"), output, err, seerrInitialized)
+		return
+	}
+	if scenario == "delay-drift" {
+		if err == nil || !strings.Contains(string(output), "zero-delay") {
+			t.Fatalf("delay drift must block apply: %v\n%s", err, output)
+		}
+		if seerrInitialized {
+			t.Fatal("delay drift continued downstream")
+		}
+		return
+	}
+	if scenario == "movie-language-drift" {
+		if err == nil || !strings.Contains(string(output), "original language") {
+			t.Fatalf("original-audio drift must block apply: %v\n%s", err, output)
+		}
+		if seerrInitialized {
+			t.Fatal("language drift continued downstream")
+		}
+		return
+	}
+	if scenario == "missing-4k" {
+		if err == nil || !strings.Contains(string(output), "Remux 2160p (Alternative)") {
+			t.Fatalf("missing optional movie profile must block downstream apply: %v\n%s", err, output)
+		}
+		if seerrInitialized {
+			t.Fatal("policy failure continued to downstream setup")
+		}
+		return
+	}
+	if bootstrap && scenario != "" {
 		if err == nil {
 			t.Fatal("bootstrap unexpectedly succeeded")
 		}
@@ -713,11 +927,11 @@ EOF
 	dockerLines := strings.Split(strings.TrimSpace(string(readFile(t, dockerLog))), "\n")
 	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - ps -q qbittorrent\ninspect --format {{.State.StartedAt}} fixture-qbittorrent-id\ncompose -f - logs --no-color --since 2026-08-28T12:34:56.123456789Z qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr\ncompose -f - up -d jellyfin\ncompose -f - up -d seerr"
 	wantDocker += "\ncompose -f - up -d houndarr cleanuparr"
-	if got := strings.Join(dockerLines, "\n"); got != wantDocker {
+	if got := strings.Join(dockerLines, "\n"); !freshProfilarr && got != wantDocker {
 		t.Errorf("Docker invocation = %q", got)
 	}
 	rendered := string(readFile(t, composeCapture))
-	for _, secret := range []string{"apply-service-user", "apply-service-password", "fixture-profilarr-api-key-32-characters", "fixture-jellyfin-password", "fixture-qbittorrent-password", "chosen-hound-password", "chosen-clean-password", "fixture-cleanuparr-key"} {
+	for _, secret := range []string{"apply-service-user", "apply-service-password", "fixture-profilarr-api-key-32-characters", "fixture-jellyfin-password", "fixture-qbittorrent-password", "fixture-radarr-api-key", "fixture-sonarr-api-key", "chosen-hound-password", "chosen-clean-password", "fixture-cleanuparr-key"} {
 		if strings.Contains(rendered, secret) || strings.Contains(string(output), secret) {
 			t.Errorf("apply exposed secret %q\noutput: %s\nCompose: %s", secret, output, rendered)
 		}
@@ -804,8 +1018,14 @@ EOF
 	if jellyfinPolicy["EnableContentDeletion"] != false || jellyfinPolicyWrites != 1 {
 		t.Errorf("apply did not disable destructive Jellyfin deletion: policy=%v writes=%d", jellyfinPolicy, jellyfinPolicyWrites)
 	}
-	if !seerrInitialized || seerrMain["localLogin"] != true || seerrMain["mediaServerLogin"] != true || seerrMain["newPlexLogin"] != true || seerrMain["defaultPermissions"] != float64(32) {
+	if !seerrInitialized || seerrMain["localLogin"] != true || seerrMain["mediaServerLogin"] != true || seerrMain["newPlexLogin"] != true || seerrMain["defaultPermissions"] != float64(8224) {
 		t.Errorf("apply did not reconcile Seerr authentication: initialized=%t main=%v", seerrInitialized, seerrMain)
+	}
+	if movieOnlyPermissions != 270336 || restrictedPermissions != 0 {
+		t.Error("profile choices must preserve movie-only and restricted request access")
+	}
+	if viewerPermissions != 8352 {
+		t.Errorf("household profile choice must preserve other permissions: %d", viewerPermissions)
 	}
 	if seerrLocalPassword != "fixture-jellyfin-password" {
 		t.Error("apply did not preserve an emergency local Seerr administrator")
@@ -826,16 +1046,16 @@ EOF
 		destination["isDefault"] != true || destination["is4k"] != false || destination["enableSeasonFolders"] != true || destination["preventSearch"] != true {
 		t.Errorf("Seerr Sonarr destination = %v", destination)
 	}
-	if profilarrObservations != 2 {
+	if !freshProfilarr && profilarrObservations != 2 {
 		t.Errorf("apply observed Profilarr connections %d times, want startup retry plus successful verification", profilarrObservations)
 	}
 	for observation, count := range moviePolicyObservations {
-		if count != 1 {
+		if !freshProfilarr && count != 1 {
 			t.Errorf("apply observed Radarr %s %d times, want once", observation, count)
 		}
 	}
 	for observation, count := range seriesPolicyObservations {
-		if count != 1 {
+		if !freshProfilarr && count != 1 {
 			t.Errorf("apply observed Sonarr %s %d times, want once", observation, count)
 		}
 	}
@@ -908,6 +1128,15 @@ EOF
 
 	// Ownership drift must converge symmetrically across both scheduling controls
 	// and Seerr, while Houndarr's unsupported settings writes remain guided.
+	if liveProfilarr {
+		if strings.Count(string(readFile(t, dockerLog)), "helper invocation") != 3 {
+			t.Fatal("repeated apply performed private database operations")
+		}
+		if movieDelay[0]["torrentDelay"] != float64(0) || seriesDelay[0]["torrentDelay"] != float64(0) {
+			t.Fatal("Profilarr did not synchronize zero-delay policy")
+		}
+		return
+	}
 	companions.documents["seeker"]["proactiveSearchEnabled"] = true
 	companions.documents["seeker"]["instances"].([]any)[0].(map[string]any)["enabled"] = true
 	seerrSonarr[0]["preventSearch"] = false
@@ -1025,7 +1254,7 @@ EOF
 	if err == nil {
 		t.Fatalf("apply accepted an incomplete Profilarr bootstrap: %s", thirdOutput)
 	}
-	for _, want := range []string{"manual action required", "http://127.0.0.1:" + apiURL.Port(), "http://radarr:7878", "http://sonarr:8989", "rerun media-stack apply"} {
+	for _, want := range []string{"PROFILARR_NON_FRESH_STATE", "guided Profilarr setup"} {
 		if !strings.Contains(string(thirdOutput), want) {
 			t.Errorf("incomplete Profilarr guidance = %q, want %q", thirdOutput, want)
 		}

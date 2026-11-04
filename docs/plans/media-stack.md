@@ -147,7 +147,7 @@ The proposed command contracts, safety artifacts, and Declared Configuration sch
 ──────────────────────────  ──────────────────────────────────────────────────────────────────────────────────────────────────
  Cleanuparr                  Bad-release queue removal, blocklisting, and replacement searches through Sonarr
 ──────────────────────────  ──────────────────────────────────────────────────────────────────────────────────────────────────
- Human through the wizard    Credentials and the first Profilarr connections; the CLI bootstraps companion accounts
+ Human through the wizard    Credentials and guided recovery; the CLI bootstraps fresh Profilarr state and companion accounts
 
 Declared Configuration uses stable semantic identities. Reconciliation gets current state, creates missing resources, updates
 drifted resources, and does nothing when state already matches. Unknown resources are reported by default. Pruning requires an
@@ -161,8 +161,10 @@ Apply in two phases:
 2. Collect supported bootstrap credentials, reconcile supported APIs, guide unavoidable UI actions, and verify convergence.
 
 A brand-new Profilarr v2 instance cannot link Sonarr or Radarr through a documented API, environment variable, configuration
-import, or CLI. Accept one guided UI step independently in each environment. Afterward, back up that environment's complete,
-quiesced Profilarr /config state. Do not use undocumented endpoints or direct SQLite writes.
+import, or CLI. ADR 0009 permits a digest/schema-gated one-time compatibility adapter for demonstrably fresh state, including
+pinned policy selections. Existing state remains owned by Profilarr. Unsupported or partial state retains guided recovery.
+Back up each Environment's complete, quiesced Profilarr /config state. Do not use private browser endpoints or ongoing SQLite
+reconciliation.
 
 Environment-specific Profilarr state is not interchangeable because it embeds Arr URLs, keys, schedules, and mappings. Track
 the missing API capability so the exception can be removed when Profilarr exposes a stable interface.
@@ -174,7 +176,7 @@ Use one Sonarr and one Radarr per environment. Profilarr applies pinned TRaSH-de
 - 1080p-focused movies;
 - WEB 1080p-focused series;
 - upgrades until the selected cutoff;
-- no initial 4K, anime-specific, or remux-heavy profiles; and
+- optional Remux 2160p (Alternative) movies selected through Seerr Advanced Requests; anime is deferred; and
 - reviewed, documented local deviations.
 
 This is deliberately described as TRaSH-derived: Profilarr is not currently listed as an officially supported TRaSH
@@ -235,7 +237,7 @@ credentials and tightly controlled generated environment files where they do not
 
 The wizard handles environment selection, data and backup roots, declared runtime UID and GID, project and port allocation,
 age identity checks, secret capture, NordVPN OpenVPN service credentials, directory and volume creation, Compose launch, API
-bootstrap, reconciliation, health checks, and the manual Profilarr connection step. It confirms before pruning, restoring,
+bootstrap, reconciliation, health checks, and fresh Profilarr initialization and guided recovery. It confirms before pruning, restoring,
 replacing state, or destroying resources. Gluetun owns NordVPN endpoint discovery from semantic server filters; the CLI does
 not require a Nord access token or query Nord's API.
 
@@ -301,7 +303,7 @@ notification hooks. A full observability stack is deferred.
 4. Establish isolated Production and Staging topology.
 5. Add Gluetun and qBittorrent with fail-closed verification.
 6. Add Sonarr, Radarr, and Prowlarr reconciliation.
-7. Add Profilarr, pinned TRaSH-derived policy, and its guided bootstrap exception.
+7. Add Profilarr, pinned TRaSH-derived policy, and its reviewed one-time compatibility adapter.
 8. Add Jellyfin and Seerr, then Houndarr/Cleanuparr with separate search ownership and automatic first-run setup.
 9. Complete plan/apply idempotence and integration verification.
 10. Add volume backups, restore, retention, and Restore Drills.

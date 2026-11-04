@@ -18,6 +18,8 @@ func TestReconcileAuthenticationKeepsJellyfinAndEmergencyLocalSignInAvailable(t 
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.Method + " " + request.URL.Path {
+		case "GET /api/v1/user":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"pageInfo": map[string]int{"results": 0}, "results": []any{}})
 		case "GET /api/v1/settings/public":
 			mediaServerType := 4
 			if jellyfinConfigured {
@@ -81,7 +83,7 @@ func TestReconcileAuthenticationKeepsJellyfinAndEmergencyLocalSignInAvailable(t 
 	if err := client.ReconcileAuthentication(context.Background(), credentials); err != nil {
 		t.Fatalf("reconcile Seerr authentication: %v", err)
 	}
-	if !initialized || !main.LocalLogin || !main.MediaServerLogin || !main.NewJellyfinLogin || main.DefaultPermissions != requestPermission {
+	if !initialized || !main.LocalLogin || !main.MediaServerLogin || !main.NewJellyfinLogin || main.DefaultPermissions != householdPermissions {
 		t.Fatalf("Seerr main settings = %#v, initialized=%t", main, initialized)
 	}
 	if localPassword != credentials.Password {

@@ -6,7 +6,7 @@ independent Production and Staging Environments so changes can be proven before 
 
 > [!IMPORTANT]
 > This stack is being implemented incrementally. `init`, `doctor`, the current Compose-rendering form of `plan`, the
-> VPN-confined qBittorrent, Radarr Movie Library, Sonarr Series Library, Prowlarr Movie and Series Library discovery, guided Profilarr connections, authenticated Jellyfin Movie and Series Library reconciliation, Seerr household authentication and Movie and Series Library request routing, and automatic Houndarr/Cleanuparr first-run setup and series automation phases of `apply`; VPN-focused
+> VPN-confined qBittorrent, Radarr Movie Library, Sonarr Series Library, Prowlarr Movie and Series Library discovery, automatic fresh Profilarr connections and policy, authenticated Jellyfin Movie and Series Library reconciliation, Seerr household authentication and Movie and Series Library request routing, and automatic Houndarr/Cleanuparr first-run setup and series automation phases of `apply`; VPN-focused
 > `verify --suite full` and read-only companion configuration/activity diagnostics through `verify --suite companions`; legal movie and series request-to-playback proofs through `verify --suite promotion`; and verified application-state archives through `backup` are available now.
 > Ordinary matching-Environment state replacement and isolated Production-to-Staging Restore Drill execution through `restore` are also available. The other verification suites,
 > Verification Artifacts, and `destroy` remain planned. Ubuntu is the authoritative implementation and
@@ -153,7 +153,7 @@ media-stack init \
 ```
 
 Initialization also asks for a unique, high-entropy Profilarr API key of at least 32 characters and distinct Jellyfin administrator credentials for the selected Environment. The Profilarr key lets the CLI use
-Profilarr's documented API to verify the one-time guided Radarr and Sonarr connections; use a different value for each
+Profilarr's documented API to verify Environment-specific Radarr and Sonarr connections; use a different value for each
 Environment. Companion usernames/passwords are operator-selected, encrypted by init, and used for automatic first-run setup during apply; see the [companion setup flow](#installation-and-automatic-first-run). The Jellyfin credentials bootstrap or authenticate the selected Environment through its supported API and are used for Movie and Series Library playback verification. Initialization writes the reviewable Declared Configuration and `secrets/staging.sops.yaml`; it never starts containers. It
 also creates only the selected Staging Environment layout:
 
@@ -525,7 +525,7 @@ reviewable, verifiable change and invalidates evidence created for older digests
 | Docker Compose | Images, containers, networks, ports, health checks, mounts, volumes, lifecycle, and logging |
 | `media-stack` CLI | Root folders, qBittorrent settings/categories, download clients, indexers, application links, Jellyfin Movie and Series Libraries, destructive-deletion policy, and general settings |
 | Profilarr | Sonarr/Radarr quality profiles, custom formats, quality definitions, naming, upgrades, and media-management policy |
-| Human through guided setup | Credentials and the first Profilarr connections |
+| Human through guided setup | Credentials, unsupported-version setup, and ambiguous-state recovery |
 
 Keeping one writer per configuration domain prevents reconciliation loops. In particular, Recyclarr is excluded because it
 would compete with Profilarr for the same Sonarr and Radarr policy.
@@ -582,21 +582,49 @@ waits boundedly for health, starts and reconciles qBittorrent in Gluetun's netwo
 and reconciles their Movie Library and Series Library contracts through supported APIs. It then prepares Prowlarr discovery,
 starts Profilarr, and verifies its connections through `GET /api/v1/arr/instances`. It starts Jellyfin, completes first-run
 setup when needed, authenticates, creates both Libraries, and disables destructive deletion. Finally, it starts Seerr and
-uses Seerr's supported API to enable new household Jellyfin sign-in with request-only default permission, keep local sign-in
+uses Seerr's supported API to enable new household Jellyfin sign-in with request and Advanced Requests default permissions, keep local sign-in
 enabled, set the Jellyfin administrator's local password, verify both login paths, and configure the selected Environment's
 Radarr service as the default non-4K Movie Library request destination using the pinned Profilarr profile, shared root, and
 automatic search. Repeated apply makes no policy writes after convergence.
 
-On the first run, `apply` reports `manual action required` until the operator opens the selected Environment's Profilarr UI
-and adds exactly these enabled connections:
+On a fresh Profilarr v2.3.1 volume, `apply` automatically initializes Radarr at `http://radarr:7878` and Sonarr at
+`http://sonarr:8989`, using their discovered API keys. The one-time compatibility adapter in [ADR 0009](../../docs/adr/0009-bootstrap-fresh-profilarr-state.md)
+requires the exact pinned image, migrated schema, and pristine application state. It replaces only the untouched upstream
+auto-linked policy source with the reviewed pinned TRaSH PCD, with automatic source pulls disabled. Existing connections
+bypass the adapter; it never repairs or updates existing private state.
 
-- Radarr at `http://radarr:7878`, using Radarr's API key from **Settings > General**.
-- Sonarr at `http://sonarr:8989`, using Sonarr's API key from **Settings > General**.
+Profilarr synchronizes **HD Bluray + WEB** movies, optional **Remux 2160p (Alternative)** movies, and **WEB-1080p** series,
+with original audio, upstream size limits, Jellyfin naming, Default media settings, and zero download delay. Synchronization
+runs immediately and daily at 04:00 in the Environment timezone. Successful public connection/status API checks and Arr
+policy readback gate downstream setup. Anime is deferred. Users may select the optional movie profile through Seerr's
+Advanced Requests controls; ordinary requests default to HD. Existing household requesters gain that permission while
+retaining other permissions. It also exposes available server/folder/tag choices. Upgrading an already downloaded movie
+requires an administrator profile change and search in Radarr; this setup keeps one copy.
 
-Save and test both connections in Profilarr, then rerun the same `media-stack apply` command. The rerun verifies their types,
-enabled state, and internal service URLs through Profilarr's documented API and continues without relying on private UI
-routes or direct database access. Perform this checklist independently in Production and Staging because their application
-state and credentials are isolated.
+Before mutation, the adapter stops Profilarr, proves the volume has no running container owner, and archives the complete
+`/config` state including SQLite sidecars. Archives are private `0600` files owned by the operator beneath
+`<backupRoot>/profilarr-bootstrap/<projectName>/`. Secrets travel through stdin and bound parameters, never temporary
+payload files or command arguments. Initialization is transactional. A failure before policy verification restores the full
+archive, leaves Profilarr stopped, and retains the archive; already-synchronized Arr changes are not automatically reversed.
+
+SIGINT/SIGTERM cancel the operation and run bounded recovery. A hard interruption leaves `pending.json`; `apply` refuses to start Profilarr until supervised recovery. Keep the selected
+Environment stopped, inspect the recorded archive and container identity, and restore that complete archive to the selected
+Profilarr config volume. If recovery succeeds, remove `pending.json` and any stale `bootstrap.lock`, then rerun `apply`.
+Do not clear the journal merely to bypass it. A `PROFILARR_ROLLBACK_FAILURE` retains both failed state and archive for review.
+
+Stable diagnostics distinguish `PROFILARR_UNSUPPORTED_VERSION`, `PROFILARR_UNSUPPORTED_SCHEMA`,
+`PROFILARR_NON_FRESH_STATE`, `PROFILARR_MIGRATION_FAILURE`, `PROFILARR_MUTATION_FAILURE`,
+`PROFILARR_RESTART_FAILURE`, `PROFILARR_VERIFICATION_FAILURE`, `PROFILARR_ROLLBACK_FAILURE`, and
+`PROFILARR_RECOVERY_REQUIRED`. Unsupported releases retain the guided UI remedy: add and test the two internal connections,
+link the reviewed policy source and selections, run sync, and rerun `apply`. Partial or customized state must be reviewed or
+restored; the adapter will not merge it. Production and Staging state and archives remain independent.
+
+Run the real pinned-container acceptance and recovery cases against disposable volumes with:
+
+```bash
+MEDIA_STACK_LIVE_PROFILARR=1 go test ./tests/acceptance \
+  -run '^TestDisposablePinnedProfilarr' -count=1 -timeout=15m
+```
 
 The complete apply order will be:
 
@@ -608,7 +636,7 @@ flowchart TD
     Start --> Ready[Wait for health and supported APIs]
     Ready --> QB[Reconcile qBittorrent]
     QB --> Arr[Reconcile Radarr, Sonarr, and Prowlarr]
-    Arr --> Profile[Guide and verify Profilarr connections]
+    Arr --> Profile[Bootstrap fresh Profilarr connections and policy]
     Profile --> Policy[Allow Profilarr to apply policy]
     Policy --> Frontend[Reconcile Jellyfin and Seerr]
     Frontend --> Converge[Verify convergence]
@@ -911,7 +939,7 @@ then removes the gate and encrypted copy; a failed apply remains safely gated fo
 | `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
 | `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
 | `media-stack plan --environment production|staging [--config path]` | Available, configuration observation | Reports ordered create, update, restart, guide, and retained-unknown observations as YAML comments, followed by rendered Compose YAML. It compares complete Compose service hashes; inventories project containers, networks, and volumes; and reuses the application reconciliation contracts behind a mutation-blocking HTTP boundary. If an observation dependency is unavailable, that subject is explicitly deferred. Use it before `apply` to inspect Declared Configuration drift or pipe the complete output to `docker compose config`. Saved Plan Artifacts remain a later planner phase. |
-| `media-stack apply --environment production|staging [--config path]` | Available through series automation | Uses the selected Environment's OpenVPN, Profilarr, Jellyfin, and stable qBittorrent credentials without printing them; reconciles qBittorrent, Radarr, Sonarr, Prowlarr, Profilarr, and Jellyfin, then starts Seerr, enables new Jellyfin users with request-only default permission, preserves the Jellyfin administrator as an emergency local Seerr administrator, and converges the default non-4K Radarr and Sonarr destinations by resolving the selected Environment's pinned profile identities. When `seriesAutomation` is declared, it also bootstraps Houndarr and Cleanuparr accounts, persists the Cleanuparr API key encrypted, verifies Houndarr policy, and reconciles Cleanuparr recovery. Enabled automation disables Seerr grouped series searches. See the [companion setup flow](#installation-and-automatic-first-run). A pending Restore Drill gate refuses apply; after confirmation, the next successful apply uses those credentials and clears the gate. An incomplete Profilarr connection still prints the exact UI checklist and exits `1`. |
+| `media-stack apply --environment production|staging [--config path]` | Available through series automation | Uses the selected Environment's OpenVPN, Profilarr, Jellyfin, and stable qBittorrent credentials without printing them; reconciles qBittorrent, Radarr, Sonarr, Prowlarr, Profilarr, and Jellyfin, then starts Seerr, enables new Jellyfin users with request and Advanced Requests default permissions, preserves the Jellyfin administrator as an emergency local Seerr administrator, and converges the default non-4K Radarr and Sonarr destinations by resolving the selected Environment's pinned profile identities. When `seriesAutomation` is declared, it also bootstraps Houndarr and Cleanuparr accounts, persists the Cleanuparr API key encrypted, verifies Houndarr policy, and reconciles Cleanuparr recovery. Enabled automation disables Seerr grouped series searches. See the [companion setup flow](#installation-and-automatic-first-run). A pending Restore Drill gate refuses apply; after confirmation, the next successful apply uses those credentials and clears the gate. Fresh compatible Profilarr state is bootstrapped automatically; partial or unsupported state exits `1` with a stable recovery diagnostic. |
 | `media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--now RFC3339] [--output human|json]` | Available | Stops only running services with mutable named volumes, archives each volume through a read-only Docker mount, resumes those services, independently verifies every checksum, atomically publishes the selected Environment manifest last, then expires unprotected archives according to `backupRetention`. Use `--protect` for an archive that retention must preserve and `--now` only to fix the clock for deterministic verification. |
 | `media-stack restore --environment production|staging --backup manifest.json [--config path] [--confirm] [--as-restore-drill --credentials path] [--output human|json]` | Available | Validates complete compatible application-state coverage and checksums and persists the exact preview. Matching-Environment confirmation performs transactional replacement and restart. Restore Drill confirmation restores Production into Staging while preserving Profilarr, applying rotated runtime credentials, leaving acquisition and integrations stopped, and starting only Jellyfin. Both modes create a protected safety backup and operation journal and roll back on failure. |
 | `media-stack restore --environment staging --as-restore-drill --credentials path --confirm-integrations [--config path] [--output human|json]` | Available | Confirms reconnection only when the encrypted credential document matches the completed Restore Drill. The next successful `apply` uses those credentials, including qBittorrent authentication, and clears the durable gate; failures remain gated and retryable. |
