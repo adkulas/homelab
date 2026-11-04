@@ -85,3 +85,8 @@ with PyYAML 6 (`python3-yaml` on Ubuntu, or the pinned
 HTTP and SOPS/dig fixtures and do not contact household DNS. See the
 [declared DNS runbook](services/network/docs/declared-dns.md) for the real operator
 prerequisites, exact-plan approval, backup gate and live commissioning checks.
+
+The same `TestNetworkDNSCommands` check covers the read-only DNS Cluster observer
+and catalog-aware declared-DNS reconciliation. See the
+[DNS Cluster procedure](services/network/docs/dns-cluster.md) for supervised live
+join, filtering, outage and promotion evidence; fixtures do not commission the Site.

@@ -21,6 +21,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 VERSION = (ROOT / 'services/network/technitium.env').read_text().split('@')[0].rsplit(':', 1)[1]
+CLUSTER_DOMAIN = 'cluster.home'
+CLUSTER_CATALOG = 'cluster-catalog.' + CLUSTER_DOMAIN
 FIELDS = {'A': 'ipAddress', 'CNAME': 'cname', 'PTR': 'ptrName', 'NS': 'nameServer'}
 
 
@@ -102,15 +104,20 @@ class Api:
             urllib.request.ProxyHandler({}), NoRedirect(),
             urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile=connection.get('caFile'))))
 
-    def call(self, path, values=None):
+    def call(self, path, values=None, export=False):
         request = urllib.request.Request(self.base + path,
             data=urllib.parse.urlencode(values or {}).encode(),
             headers={'Authorization': 'Bearer ' + self.token,
                      'Content-Type': 'application/x-www-form-urlencoded'})
         with self.opener.open(request, timeout=30) as reply:
+            content_type = reply.headers.get_content_type()
             body = reply.read(4 * 1024 * 1024 + 1)
         if len(body) > 4 * 1024 * 1024:
             raise ValueError('API response exceeds limit')
+        if export:
+            if content_type != 'text/plain':
+                raise ValueError('API export failed')
+            return sorted(set(body.decode().splitlines()))
         result = json.loads(body)
         if result.get('status') != 'ok':
             raise ValueError('API rejected operation')
@@ -229,7 +236,10 @@ def load_declaration(site):
         record('soa:' + label, zone, zone, 'SOA', [dict(soa,
             primaryNameServer=primary + '.home', responsiblePerson='hostmaster.home')])
     return {'site': str(site), 'zones': ['home', reverse], 'records': records, 'primary': primary_id,
-            'resolver': addresses[primary], 'sources': sources}
+            'resolver': addresses[primary], 'sources': sources,
+            'members': {role: {'instance': identity, 'host': instances[identity]['host'],
+                              'resolver': addresses[instances[identity]['host']]}
+                        for role, identity in (('primary', primary_id), ('secondary', secondary_id))}}
 
 
 def normalize(record):
@@ -302,6 +312,18 @@ def configuration(value, field=None):
     return value
 
 
+def cluster_members(desired):
+    return {member['host'] + '.' + CLUSTER_DOMAIN: role.capitalize()
+            for role, member in desired['members'].items()}
+
+
+def cluster_matches(cluster, members):
+    nodes = cluster['clusterNodes']
+    return (cluster['clusterInitialized'] and cluster.get('clusterDomain') == CLUSTER_DOMAIN
+            and len(nodes) == len(members)
+            and {node['name']: node['type'] for node in nodes} == members)
+
+
 def make_plan(api, desired, previous, live):
     changes = []
     blockers = []
@@ -312,6 +334,19 @@ def make_plan(api, desired, previous, live):
             member['type'] == 'Primary' and member['state'] == 'Self'
             for member in cluster['clusterNodes']):
         blockers.append('DNS_ENDPOINT_NOT_PRIMARY')
+    if cluster['clusterInitialized']:
+        expected = cluster_members(desired)
+        if not cluster_matches(cluster, expected):
+            blockers.append('DNS_CLUSTER_MEMBERSHIP_MISMATCH')
+        for record in desired['records']:
+            if record['type'] == 'NS':
+                record['values'] = [{'nameServer': domain} for domain in sorted(expected)]
+            elif record['type'] == 'SOA':
+                record['values'][0]['primaryNameServer'] = (
+                    desired['members']['primary']['host'] + '.' + CLUSTER_DOMAIN)
+        for zone in desired['zones']:
+            if live['zones'].get(zone, {}).get('options', {}).get('catalog') != CLUSTER_CATALOG:
+                blockers.append('DNS_CLUSTER_CATALOG_REQUIRED')
     known = {record_identity(item) for item in desired['records']}
     unknown = []
     for zone in desired['zones']:
@@ -336,6 +371,9 @@ def make_plan(api, desired, previous, live):
                 blockers.append('DNS_NAME_COLLISION')
         current = current_records(live, record)
         if matching(current, record):
+            continue
+        if cluster['clusterInitialized'] and record['type'] == 'NS':
+            blockers.append('DNS_CLUSTER_AUTHORITY_MISMATCH')
             continue
         protected = not record['id'].startswith('alias:')
         # Claiming an existing manual record is never a routine alias update.

@@ -66,3 +66,7 @@ supplies addresses. Alias additions/updates may apply routinely; protected chang
 require the exact current plan and a verified fresh paired backup. Unknown live
 records are reported and preserved. This DNS-only stage keeps Bell DHCP and
 rejects unsafe Technitium lease-name updates.
+
+Use the [Site DNS Cluster procedure](docs/dns-cluster.md) for supervised join,
+filtering synchronization, read-only health checks and one-Host outage/promotion
+drills. Live #106 commissioning evidence remains pending.
