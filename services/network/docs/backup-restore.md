@@ -119,8 +119,8 @@ python3 services/network/backup/backup.py gate \
 
 Proceed only on exit 0. This decrypts and verifies both nodes and rejects stale or
 future-dated evidence. A filename, prior success report, or failed new capture is
-not approval to continue. Future exact-plan DHCP/DNS/upgrade commands must invoke
-this gate immediately before mutation; those commands belong to later tickets.
+not approval to continue. The [DNS exact-plan command](declared-dns.md) invokes this gate immediately before
+protected mutation. Future DHCP/upgrade commands must invoke it too.
 Routine polling must not have the recovery identity, backup tokens, or restore
 confirmation. Errors return nonzero with a redacted message and require stopping.
 

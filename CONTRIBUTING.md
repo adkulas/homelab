@@ -77,3 +77,11 @@ scenarios.
 
 See the [series automation runbook](services/media/README.md#episode-searching-and-queue-recovery)
 for bootstrap, tuning, upstream safety limits and Staging recovery evidence.
+
+Declared DNS command checks run with
+`go test ./tests/acceptance -run '^TestNetworkDNSCommands$'`. They require Python 3
+with PyYAML 6 (`python3-yaml` on Ubuntu, or the pinned
+`services/network/dns/requirements.txt`), age and age-keygen. The tests use isolated
+HTTP and SOPS/dig fixtures and do not contact household DNS. See the
+[declared DNS runbook](services/network/docs/declared-dns.md) for the real operator
+prerequisites, exact-plan approval, backup gate and live commissioning checks.
