@@ -13,8 +13,13 @@ import (
 )
 
 const (
-	administratorPermission = 2
-	requestPermission       = 32
+	administratorPermission    = 2
+	requestPermission          = 32
+	advancedRequestPermission  = 8192
+	movieRequestPermission     = 262144
+	seriesRequestPermission    = 524288
+	ordinaryRequestPermissions = requestPermission | movieRequestPermission | seriesRequestPermission
+	householdPermissions       = requestPermission | advancedRequestPermission
 )
 
 type Credentials struct {
@@ -227,11 +232,11 @@ func (client *Client) ReconcileAuthentication(ctx context.Context, credentials C
 	if err := client.doJSON(ctx, http.MethodGet, "/api/v1/settings/main", nil, &main); err != nil {
 		return fmt.Errorf("observe Seerr authentication policy: %w", err)
 	}
-	if !main.LocalLogin || !main.MediaServerLogin || !main.NewJellyfinLogin || main.DefaultPermissions != requestPermission {
+	if !main.LocalLogin || !main.MediaServerLogin || !main.NewJellyfinLogin || main.DefaultPermissions != householdPermissions {
 		main.LocalLogin = true
 		main.MediaServerLogin = true
 		main.NewJellyfinLogin = true
-		main.DefaultPermissions = requestPermission
+		main.DefaultPermissions = householdPermissions
 		if err := client.doJSON(ctx, http.MethodPost, "/api/v1/settings/main", main, nil); err != nil {
 			return fmt.Errorf("reconcile Seerr authentication policy: %w", err)
 		}
@@ -256,7 +261,7 @@ func (client *Client) ReconcileAuthentication(ctx context.Context, credentials C
 			return fmt.Errorf("complete Seerr initialization: %w", err)
 		}
 	}
-	return nil
+	return client.reconcileHouseholdProfileChoices(ctx)
 }
 
 func (client *Client) VerifyJellyfinAuthentication(ctx context.Context, credentials Credentials) error {
@@ -458,4 +463,38 @@ func (client *Client) VerifySonarrSearchOwnership(ctx context.Context, credentia
 		return fmt.Errorf("Seerr must route to the Environment-local default Sonarr with automatic search matching series automation ownership")
 	}
 	return nil
+}
+
+// reconcileHouseholdProfileChoices preserves every existing permission and only
+// adds profile selection for users already allowed to request ordinary media.
+func (client *Client) reconcileHouseholdProfileChoices(ctx context.Context) error {
+	for skip := 0; ; {
+		var page struct {
+			PageInfo struct {
+				Results int `json:"results"`
+			} `json:"pageInfo"`
+			Results []struct {
+				ID          int `json:"id"`
+				Permissions int `json:"permissions"`
+			} `json:"results"`
+		}
+		if err := client.doJSON(ctx, http.MethodGet, fmt.Sprintf("/api/v1/user?take=100&skip=%d", skip), nil, &page); err != nil {
+			return fmt.Errorf("observe Seerr household permissions: %w", err)
+		}
+		for _, user := range page.Results {
+			if user.ID == 1 || user.Permissions&administratorPermission != 0 || user.Permissions&ordinaryRequestPermissions == 0 || user.Permissions&advancedRequestPermission != 0 {
+				continue
+			}
+			if err := client.doJSON(ctx, http.MethodPost, fmt.Sprintf("/api/v1/user/%d/settings/permissions", user.ID), map[string]int{"permissions": user.Permissions | advancedRequestPermission}, nil); err != nil {
+				return fmt.Errorf("enable Seerr household profile choice: %w", err)
+			}
+		}
+		skip += len(page.Results)
+		if skip >= page.PageInfo.Results {
+			return nil
+		}
+		if len(page.Results) == 0 {
+			return fmt.Errorf("observe Seerr household permissions: incomplete user page")
+		}
+	}
 }

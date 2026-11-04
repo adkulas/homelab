@@ -19,6 +19,7 @@ type MoviePolicy struct {
 	APIVersion         string                   `yaml:"apiVersion"`
 	Kind               string                   `yaml:"kind"`
 	Source             MoviePolicySource        `yaml:"source"`
+	AdditionalProfiles []MovieQualityProfile    `yaml:"additionalProfiles"`
 	Profile            MovieQualityProfile      `yaml:"profile"`
 	QualityDefinitions []MovieQualityDefinition `yaml:"qualityDefinitions"`
 	Naming             MovieNamingPolicy        `yaml:"naming"`
@@ -33,6 +34,7 @@ type MoviePolicySource struct {
 }
 
 type MovieQualityProfile struct {
+	Language                      string              `yaml:"language"`
 	Name                          string              `yaml:"name"`
 	UpgradesAllowed               bool                `yaml:"upgradesAllowed"`
 	UpgradeUntilQuality           string              `yaml:"upgradeUntilQuality"`
@@ -96,6 +98,9 @@ func LoadMoviePolicy(path, pinnedRevision string) (MoviePolicy, error) {
 }
 
 type observedQualityProfile struct {
+	Language *struct {
+		ID int `json:"id"`
+	} `json:"language"`
 	Name              string                       `json:"name"`
 	UpgradeAllowed    bool                         `json:"upgradeAllowed"`
 	Cutoff            int                          `json:"cutoff"`
@@ -146,40 +151,46 @@ func (client *Client) VerifyMoviePolicy(ctx context.Context, policy MoviePolicy)
 	}
 
 	var drift []string
-	var profile *observedQualityProfile
-	for index := range profiles {
-		if profiles[index].Name == policy.Profile.Name {
-			profile = &profiles[index]
-			break
-		}
-	}
-	if profile == nil {
-		drift = append(drift, fmt.Sprintf("quality profile %q is missing", policy.Profile.Name))
-	} else {
-		if profile.UpgradeAllowed != policy.Profile.UpgradesAllowed ||
-			profile.MinFormatScore != policy.Profile.MinimumCustomFormatScore ||
-			profile.CutoffFormatScore != policy.Profile.UpgradeUntilCustomFormatScore {
-			drift = append(drift, fmt.Sprintf("quality profile %q upgrade contract differs", policy.Profile.Name))
-		}
-		if cutoffQuality(profile.Items, profile.Cutoff) != policy.Profile.UpgradeUntilQuality {
-			drift = append(drift, fmt.Sprintf("quality profile %q cutoff differs", policy.Profile.Name))
-		}
-		if got, want := allowedQualityNames(profile.Items), sortedCopy(policy.Profile.AllowedQualities); !reflect.DeepEqual(got, want) {
-			drift = append(drift, fmt.Sprintf("quality profile %q allowed qualities differ", policy.Profile.Name))
-		}
-		formatNames := make(map[int]string, len(formats))
-		for _, format := range formats {
-			formatNames[format.ID] = format.Name
-		}
-		scores := make(map[string]int, len(profile.FormatItems))
-		for _, item := range profile.FormatItems {
-			scores[formatNames[item.Format]] = item.Score
-		}
-		for _, expected := range policy.Profile.CustomFormats {
-			if score, ok := scores[expected.Name]; !ok || score != expected.Score {
-				drift = append(drift, fmt.Sprintf("custom format %q score differs", expected.Name))
+	for _, expectedProfile := range append([]MovieQualityProfile{policy.Profile}, policy.AdditionalProfiles...) {
+		var profile *observedQualityProfile
+		for index := range profiles {
+			if profiles[index].Name == expectedProfile.Name {
+				profile = &profiles[index]
+				break
 			}
 		}
+		if profile == nil {
+			drift = append(drift, fmt.Sprintf("quality profile %q is missing", expectedProfile.Name))
+		} else {
+			if expectedProfile.Language == "Original" && (profile.Language == nil || profile.Language.ID != -2) {
+				drift = append(drift, fmt.Sprintf("quality profile %q original language differs", expectedProfile.Name))
+			}
+			if profile.UpgradeAllowed != expectedProfile.UpgradesAllowed ||
+				profile.MinFormatScore != expectedProfile.MinimumCustomFormatScore ||
+				profile.CutoffFormatScore != expectedProfile.UpgradeUntilCustomFormatScore {
+				drift = append(drift, fmt.Sprintf("quality profile %q upgrade contract differs", expectedProfile.Name))
+			}
+			if cutoffQuality(profile.Items, profile.Cutoff) != expectedProfile.UpgradeUntilQuality {
+				drift = append(drift, fmt.Sprintf("quality profile %q cutoff differs", expectedProfile.Name))
+			}
+			if got, want := allowedQualityNames(profile.Items), sortedCopy(expectedProfile.AllowedQualities); !reflect.DeepEqual(got, want) {
+				drift = append(drift, fmt.Sprintf("quality profile %q allowed qualities differ", expectedProfile.Name))
+			}
+			formatNames := make(map[int]string, len(formats))
+			for _, format := range formats {
+				formatNames[format.ID] = format.Name
+			}
+			scores := make(map[string]int, len(profile.FormatItems))
+			for _, item := range profile.FormatItems {
+				scores[formatNames[item.Format]] = item.Score
+			}
+			for _, expected := range expectedProfile.CustomFormats {
+				if score, ok := scores[expected.Name]; !ok || score != expected.Score {
+					drift = append(drift, fmt.Sprintf("custom format %q score differs", expected.Name))
+				}
+			}
+		}
+
 	}
 
 	definitionsByName := make(map[string]arrquality.Definition, len(definitions))

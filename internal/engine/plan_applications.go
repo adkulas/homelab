@@ -12,6 +12,7 @@ import (
 
 	"github.com/adkulas/homelab/internal/config"
 	"github.com/adkulas/homelab/internal/jellyfin"
+	"github.com/adkulas/homelab/internal/profilarr"
 	"github.com/adkulas/homelab/internal/prowlarr"
 	"github.com/adkulas/homelab/internal/qbittorrent"
 	"github.com/adkulas/homelab/internal/radarr"
@@ -124,11 +125,15 @@ func observeApplications(ctx context.Context, request PlanRequest, plan Plan) []
 	}
 
 	profilarrAddress := "http://" + environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Profilarr)
-	complete, _, profilarrErr := observeProfilarrBootstrap(ctx, profilarrAddress, secrets.ProfilarrKey)
+	connections, _, profilarrErr := profilarr.Observe(ctx, profilarrAddress, secrets.ProfilarrKey)
 	if profilarrErr != nil {
 		actions = append(actions, deferredApplication("profilarr", profilarrErr)...)
-	} else if !complete {
-		actions = append(actions, PlanAction{Kind: planActionGuide, Subject: "profilarr", Explanation: "declared Radarr and Sonarr connections require guided reconciliation"})
+	} else if !profilarr.Complete(connections) {
+		if len(connections) == 0 && versions.Images["profilarr"] == profilarr.SupportedImage && versions.Policy.ProfilarrPCDRevision == profilarr.SupportedPolicy {
+			actions = append(actions, PlanAction{Kind: planActionUpdate, Subject: "profilarr", Explanation: "empty connections require one-time bootstrap after stopped-state compatibility and freshness checks"})
+		} else {
+			actions = append(actions, PlanAction{Kind: planActionGuide, Subject: "profilarr", Explanation: "unsupported or partial connections require guided recovery; existing state is preserved"})
+		}
 	}
 
 	jellyfinClient := jellyfin.New("http://"+environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Jellyfin), observationHTTPClient())

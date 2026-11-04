@@ -62,6 +62,11 @@ The router for `jellyfin.home`, for example, targets `homelab.home:8096`; `jelly
 `homelab.home:18096`. The qBittorrent routes target Gluetun's published Web UI ports, not a separate qBittorrent network.
 If qBittorrent's Host header validation is enabled, add `qbittorrent.home` to Production's server domains and
 `qbittorrent-staging.home` to Staging's server domains.
+
+Houndarr and Cleanuparr are administered through Host loopback ports and have no Traefik routes or DNS records.
+Production uses ports 8877 and 11011; Staging uses 18877 and 21011. Use the SSH tunnel described in the
+[Media Stack companion guide](../../services/media/README.md#installation-and-automatic-first-run) for remote access.
+
 Minecraft clients connect to `minecraft.home` on UDP port 19134, which Traefik forwards to `pc.home:19134`. Allow that UDP
 traffic from `homelab` through the PC firewall. UDP does not carry an HTTP hostname, so Minecraft has a dedicated Traefik
 entry point and port.

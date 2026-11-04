@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -19,6 +18,7 @@ import (
 	"github.com/adkulas/homelab/internal/companions"
 	"github.com/adkulas/homelab/internal/config"
 	"github.com/adkulas/homelab/internal/jellyfin"
+	"github.com/adkulas/homelab/internal/profilarr"
 	"github.com/adkulas/homelab/internal/prowlarr"
 	"github.com/adkulas/homelab/internal/qbittorrent"
 	"github.com/adkulas/homelab/internal/radarr"
@@ -162,10 +162,31 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 		return ApplyReport{}, fmt.Errorf("reconcile Prowlarr library discovery: %w", err)
 	}
 	profilarrAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Profilarr)
+	verifyDelays := func(ctx context.Context) error {
+		if err := profilarr.VerifyZeroDelay(ctx, "http://"+radarrAddress, apiKey); err != nil {
+			return err
+		}
+		return profilarr.VerifyZeroDelay(ctx, "http://"+sonarrAddress, sonarrAPIKey)
+	}
+	bootstrapDirectory := filepath.Join(environment.BackupRoot, "profilarr-bootstrap", environment.ProjectName)
+	if err := profilarr.CheckPending(bootstrapDirectory); err != nil {
+		return ApplyReport{}, err
+	}
 	if output, err := runDockerCompose(ctx, plan, "up", "-d", "profilarr"); err != nil {
 		return ApplyReport{}, fmt.Errorf("start Profilarr: %w: %s", err, redactCredentials(output, credentials))
 	}
-	if err := verifyProfilarrBootstrap(ctx, "http://"+profilarrAddress, secrets.ProfilarrKey); err != nil {
+	if err := ensureProfilarrPolicy(ctx, plan, profilarr.Request{
+		Image: versions.Images["profilarr"], Revision: versions.Policy.ProfilarrPCDRevision,
+		BackupDirectory: bootstrapDirectory, RadarrKey: apiKey, SonarrKey: sonarrAPIKey,
+	}, "http://"+profilarrAddress, secrets.ProfilarrKey, func(ctx context.Context) error {
+		if err := radarrClient.VerifyMoviePolicy(ctx, moviePolicy); err != nil {
+			return err
+		}
+		if err := sonarrClient.VerifySeriesPolicy(ctx, seriesPolicy); err != nil {
+			return err
+		}
+		return verifyDelays(ctx)
+	}); err != nil {
 		return ApplyReport{}, err
 	}
 	if err := radarrClient.VerifyMoviePolicy(ctx, moviePolicy); err != nil {
@@ -189,6 +210,9 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 			seriesPolicy.MediaManagement.Preset,
 			err,
 		)
+	}
+	if err := verifyDelays(ctx); err != nil {
+		return ApplyReport{}, fmt.Errorf("manual action required: open %s, synchronize the Default zero-delay profile for both Arr services, then rerun media-stack apply: %w", "http://"+profilarrAddress, err)
 	}
 	if output, err := runDockerCompose(ctx, plan, "up", "-d", "jellyfin"); err != nil {
 		return ApplyReport{}, fmt.Errorf("start Jellyfin: %w: %s", err, redactCredentials(output, credentials))
@@ -274,63 +298,9 @@ func waitForJellyfinLibraries(ctx context.Context, client *jellyfin.Client, cred
 	}
 }
 
-func verifyProfilarrBootstrap(ctx context.Context, baseURL, apiKey string) error {
-	deadline := time.NewTimer(120 * time.Second)
-	defer deadline.Stop()
-	for {
-		complete, retryable, err := observeProfilarrBootstrap(ctx, baseURL, apiKey)
-		if err == nil {
-			if complete {
-				return nil
-			}
-			return fmt.Errorf("manual action required: open %s and add enabled Radarr and Sonarr connections using http://radarr:7878 and http://sonarr:8989; use each application's API key from Settings > General, save and test both connections, then rerun media-stack apply", baseURL)
-		}
-		if !retryable {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-deadline.C:
-			return fmt.Errorf("Profilarr API did not become ready within 2m: %w", err)
-		case <-time.After(2 * time.Second):
-		}
-	}
-}
-
 func observeProfilarrBootstrap(ctx context.Context, baseURL, apiKey string) (bool, bool, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/api/v1/arr", nil)
-	if err != nil {
-		return false, false, fmt.Errorf("prepare Profilarr connection verification: %w", err)
-	}
-	request.Header.Set("X-Api-Key", apiKey)
-	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
-	if err != nil {
-		return false, true, fmt.Errorf("verify Profilarr connections through its documented API: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return false, response.StatusCode >= 500, fmt.Errorf("verify Profilarr connections through its documented API: HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
-	}
-	var instances []struct {
-		Type    string `json:"type"`
-		URL     string `json:"url"`
-		Enabled int    `json:"enabled"`
-	}
-	if err := json.NewDecoder(response.Body).Decode(&instances); err != nil {
-		return false, false, fmt.Errorf("decode Profilarr connections: %w", err)
-	}
-	want := map[string]string{"radarr": "http://radarr:7878", "sonarr": "http://sonarr:8989"}
-	for _, instance := range instances {
-		if instance.Enabled == 1 && instance.URL == want[instance.Type] {
-			delete(want, instance.Type)
-		}
-	}
-	if len(want) == 0 {
-		return true, false, nil
-	}
-	return false, false, nil
+	connections, retry, err := profilarr.Observe(ctx, baseURL, apiKey)
+	return profilarr.Complete(connections), retry, err
 }
 
 func waitForRadarrAPIKey(ctx context.Context, plan Plan, timeout time.Duration) (string, error) {
