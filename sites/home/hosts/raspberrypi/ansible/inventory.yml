@@ -1,0 +1,6 @@
+all:
+  children:
+    raspberrypi:
+      hosts:
+        rasp-pi:
+          ansible_user: adam

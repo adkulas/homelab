@@ -1,0 +1,5 @@
+# Override with a private --extra-vars @/absolute/path/pi.yml file.
+pi_action: base
+pi_bundle_source: ''
+pi_configuration_archive: ''
+pi_configuration_sha256: ''

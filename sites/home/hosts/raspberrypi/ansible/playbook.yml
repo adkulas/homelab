@@ -1,0 +1,126 @@
+---
+- name: Prepare the Raspberry Pi DNS Host
+  hosts: raspberrypi
+  become: true
+  serial: 1
+  vars_files: [vars.yml]
+  pre_tasks:
+    - name: Require the piloted Host and a known operation
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Debian'
+          - ansible_facts.distribution_major_version == '13'
+          - ansible_facts.architecture == 'aarch64'
+          - pi_action in ['base', 'install', 'configure', 'restore']
+        fail_msg: This playbook supports the piloted Debian 13 ARM64 Pi only.
+
+    - name: Require an explicitly selected installation bundle
+      ansible.builtin.assert:
+        that:
+          - pi_bundle_source.startswith('/')
+        fail_msg: Supply the reviewed native.py stage output directory on the controller.
+      when: pi_action == 'install'
+
+    - name: Require the exact approved configuration archive
+      ansible.builtin.assert:
+        that:
+          - pi_configuration_archive.startswith('/')
+          - pi_configuration_sha256 is match('^[a-f0-9]{64}$')
+        fail_msg: Supply a private controller archive and its reviewed SHA-256.
+      when: pi_action in ['configure', 'restore']
+
+  tasks:
+    - name: Install reviewed native runtime and administration dependencies
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - python3
+          - libicu76
+          - libssl3t64
+          - libstdc++6
+          - zlib1g
+          - nftables
+          - dnsutils
+          - git
+          - iproute2
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create a private provisioning workspace
+      ansible.builtin.file:
+        path: /var/lib/pi-provision
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Install the reviewed fresh-state bundle
+      when: pi_action == 'install'
+      block:
+        - name: Inspect existing installation
+          ansible.builtin.stat:
+            path: /opt/technitium-pi
+          register: pi_installed
+
+        - name: Require fresh state instead of silently skipping an upgrade
+          ansible.builtin.assert:
+            that: not pi_installed.stat.exists
+            fail_msg: Installation already exists. Use configure or restore; upgrades require separate review.
+
+        - name: Transfer the staged checksum-verified native bundle
+          ansible.builtin.copy:
+            src: '{{ pi_bundle_source }}/'
+            dest: /var/lib/pi-provision/bundle/
+            owner: root
+            group: root
+            mode: preserve
+          no_log: true
+          diff: false
+
+        - name: Run the existing stopped-service installer
+          ansible.builtin.command:
+            argv: [bash, /var/lib/pi-provision/bundle/install.sh]
+          when: not ansible_check_mode
+          changed_when: true
+
+    - name: Apply an exact offline configuration or recovery export
+      when: pi_action in ['configure', 'restore']
+      block:
+        - name: Transfer the private configuration archive
+          ansible.builtin.copy:
+            src: '{{ pi_configuration_archive }}'
+            dest: /var/lib/pi-provision/configuration.tar.gz
+            owner: root
+            group: root
+            mode: '0600'
+          no_log: true
+          diff: false
+
+        - name: Install the configuration application helper
+          ansible.builtin.copy:
+            src: apply_configuration.py
+            dest: /var/lib/pi-provision/apply_configuration.py
+            owner: root
+            group: root
+            mode: '0700'
+
+        - name: Validate and replace stopped configuration while retaining rollback files
+          ansible.builtin.command:
+            argv:
+              - python3
+              - /var/lib/pi-provision/apply_configuration.py
+              - /var/lib/pi-provision/configuration.tar.gz
+              - '{{ pi_configuration_sha256 }}'
+          register: pi_configuration_result
+          changed_when: "'applied-stopped' in pi_configuration_result.stdout"
+          when: not ansible_check_mode
+          no_log: true
+
+    - name: Report remaining supervised checks
+      ansible.builtin.debug:
+        msg: >-
+          Host preparation complete. Check mode does not execute installation or configuration import.
+          DNS first start/restart, credentials, HTTPS, static addressing and live acceptance follow
+          services/network/docs/secondary-dns.md. Configuration apply leaves DNS stopped and disabled.
