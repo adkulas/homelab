@@ -16,6 +16,8 @@ Use `set +x; umask 077`. All uppercase paths below must be absolute paths outsid
 on private storage. Keep the recovery packet on both the Pi and recovery PC. Do not
 publish addresses, MACs, profiles, firewall content, certificates' private keys or logs.
 
+For controller-driven provisioning, see the [Pi Ansible playbook](../../../sites/home/hosts/raspberrypi/ansible/README.md). It reuses this installer and supports offline configuration replacement and recovery; the supervised gates below still apply.
+
 ## Behavior and evidence
 
 | Public seam | Required behavior and source | Observable evidence |
