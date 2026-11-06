@@ -80,7 +80,9 @@ def health(desired, peers):
     for key in ('allowed', 'blocked'):
         if primary[key] != secondary[key]:
             issues.append('policy:' + key)
-    age = (now - instant(secondary['cluster']['configLastSynced'])).total_seconds()
+    secondary_self = next(node for node in secondary['cluster']['clusterNodes']
+                          if node['state'] == 'Self' and node['type'] == 'Secondary')
+    age = (now - instant(secondary_self['configLastSynced'])).total_seconds()
     if not 0 <= age <= 1800:
         issues.append('secondary:config-age')
     for index, zone in enumerate(desired['zones']):

@@ -315,10 +315,13 @@ with urllib.request.urlopen(os.environ['FIXTURE_URL'] + '/resolve?' + query) as 
         for role, host in (('primary', 'homelab'), ('secondary', 'raspberrypi')):
             cluster = {'clusterInitialized': True, 'clusterDomain': 'cluster.home',
                 'dnsServerDomain': host + '.cluster.home',
-                'configLastSynced': now.isoformat(), 'clusterNodes': [
+                'clusterNodes': [
                     {'name': name + '.cluster.home', 'type': kind,
                      'state': 'Self' if name == host else 'Connected'}
                     for name, kind in (('homelab', 'Primary'), ('raspberrypi', 'Secondary'))]}
+            if role == 'secondary':
+                next(node for node in cluster['clusterNodes'] if node['state'] == 'Self')[
+                    'configLastSynced'] = now.isoformat()
             zones = []
             responses = {'admin/cluster/state': cluster,
                 'settings/get': {'version': '15.6.2', 'enableBlocking': True,
@@ -433,8 +436,9 @@ with urllib.request.urlopen(os.environ['FIXTURE_URL'] + '/resolve?' + query) as 
                     change(self.health[role])
                     self.assertEqual(self.health_cli(success=False)['status'], 'degraded')
         self.health = copy.deepcopy(original)
-        self.health['secondary']['admin/cluster/state']['configLastSynced'] = (
-            datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        next(node for node in self.health['secondary']['admin/cluster/state']['clusterNodes']
+             if node['state'] == 'Self')['configLastSynced'] = (
+                 datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         self.assertIn('secondary:config-age', self.health_cli(success=False)['issues'])
         for zone in ('home', '2.0.192.in-addr.arpa'):
             self.health = copy.deepcopy(original)

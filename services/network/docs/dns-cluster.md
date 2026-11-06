@@ -146,7 +146,9 @@ configuration sync age above 1800 seconds and remaining local-zone lifetime at o
 below 259200 seconds. ACL order remains significant. Equal empty filtering lists
 are permitted, but blocking must be enabled; prove actual filtering below.
 
-`configAgeSeconds` measures the Pi's last complete configuration sync.
+`configAgeSeconds` measures the Pi's last complete configuration sync. Its timestamp
+is read from the `Secondary`/`Self` entry in `clusterNodes`, as emitted by the
+[pinned state serializer](https://github.com/TechnitiumSoftware/DnsServer/blob/v15.6.2/DnsServerCore/WebServiceClusterApi.cs).
 `remainingSeconds` is derived from the secondary zone's reported expiry deadline;
 `refreshAgeSeconds` is SOA expiry minus remaining lifetime. A successful refresh
 without a changed serial resets this deadline without transferring new records.
