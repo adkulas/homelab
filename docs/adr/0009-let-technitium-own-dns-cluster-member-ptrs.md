@@ -1,0 +1,3 @@
+# Let Technitium own DNS Cluster member PTRs
+
+Technitium owns the PTR records for the two DNS Cluster members while the Cluster is initialized: their targets are the cluster node names and their TTLs follow the cluster's address records, which must match the Site Inventory. Node metadata updates after restarts and certificate changes regenerate these records, so Git-owned `.home` PTR targets would create competing writers; the DNS tools instead verify member PTRs and block on drift, with repair through a separately approved Technitium node-metadata update. Git retains ownership of `.home` Host A records, service aliases, other Hosts' PTRs and local SOA policy; leaving the Cluster and returning member PTRs to Git requires a protected exact plan.

@@ -10,7 +10,8 @@ import sys
 import yaml
 
 from dns import (Api, CLUSTER_CATALOG, CLUSTER_DOMAIN, VERSION, cluster_matches,
-                 cluster_members, decode_json, load_declaration, matching, normalize, private_path)
+                 cluster_members, cluster_ptr_records, decode_json, load_declaration,
+                 matching, normalize, private_path)
 
 # Pinned v15.6.2 settings/get fields that affect this DNS-only deployment.
 POLICY_FIELDS = (
@@ -37,7 +38,7 @@ def observe(api, zones):
         'blocked': api.call('blocked/export', export=True),
         'zones': {zone['name']: zone for zone in api.call('zones/list')['zones']},
         'records': {zone: api.call('zones/records/get', {
-            'zone': zone, 'domain': zone, 'listZone': 'true'})['records'] for zone in zones},
+            'zone': zone, 'domain': zone, 'listZone': 'true'})['records'] for zone in [*zones, CLUSTER_DOMAIN]},
         'options': {zone: api.call('zones/options/get', {'zone': zone}) for zone in zones},
     }
 
@@ -85,6 +86,13 @@ def health(desired, peers):
     age = (now - instant(secondary_self['configLastSynced'])).total_seconds()
     if not 0 <= age <= 1800:
         issues.append('secondary:config-age')
+    member_ptrs = {}
+    for role, peer in peers.items():
+        try:
+            member_ptrs[role] = cluster_ptr_records(desired, peer['records'][CLUSTER_DOMAIN])
+        except (ValueError, KeyError):
+            member_ptrs[role] = {}
+            issues.append(role + ':cluster-addresses')
     for index, zone in enumerate(desired['zones']):
         label = 'home' if index == 0 else 'reverse'
         for role, peer in peers.items():
@@ -95,12 +103,14 @@ def health(desired, peers):
                     or (role == 'primary' and options['update'] != 'Deny')):
                 issues.append(role + ':' + label + ':zone-policy')
             for record in desired['records']:
+                record = member_ptrs[role].get(record['id'], record)
                 if record['zone'] != zone or record['type'] in ('NS', 'SOA'):
                     continue
                 current = [item for item in peer['records'][zone]
                            if item['name'] == record['name'] and item['type'] == record['type']]
                 if not matching(current, record):
-                    issues.append(role + ':' + label + ':declared-records')
+                    kind = 'cluster-ptrs' if record['id'] in member_ptrs[role] else 'declared-records'
+                    issues.append(role + ':' + label + ':' + kind)
         left = sorted(json.dumps(normalize(item), sort_keys=True) for item in primary['records'][zone])
         right = sorted(json.dumps(normalize(item), sort_keys=True) for item in secondary['records'][zone])
         if left != right or primary['zones'][zone]['soaSerial'] != secondary['zones'][zone]['soaSerial']:

@@ -10,7 +10,7 @@ install an automatic cluster mutation command.
 | Public seam | Required behavior | Source of truth | Observable evidence |
 | --- | --- | --- | --- |
 | Technitium console join | Two Host-assigned members, local and reverse zones in the cluster catalog, trusted direct HTTPS | #106; Site Inventory; pinned cluster API | Private before/after snapshot and live commissioning checks below |
-| Declared-DNS CLI | Preserve generated two-member NS and clustered SOA MNAME; retain Git-owned SOA timers, Host A/PTR and aliases; fail closed on wrong membership or catalog | #105/#106; ADR-0007; pinned cluster manager | Catalog join/alias regression test; protected post-join PTR repair plan |
+| Declared-DNS CLI | Preserve generated two-member NS and clustered SOA MNAME; retain Git-owned SOA timers, Host A, other Host PTRs and aliases; verify cluster-owned member PTRs; fail closed on wrong membership or catalog | #105/#106; ADR-0007; pinned cluster manager | Catalog alias lifecycle, member PTR ownership, address-source and retirement regression tests |
 | `cluster.py` | Read both Hosts directly; compare declared records, full local record sets/serials, filtering and relevant resolver policy; expose sync age and remaining secondary lifetime | #106; pinned API | Isolated CLI acceptance checks for healthy and symmetric divergent states |
 | Operator outage drill | Either survivor answers local/PTR, filtered and fresh external queries; fence former primary before promotion before the 72-hour margin | #106; supported promotion API | Timestamped live results; pending until measured |
 | Every operation | Pi DHCP disabled; no simultaneous service restart | #106; ADR-0007 | Read-only observer rejects enabled scopes; supervised service order and DHCP packet capture |
@@ -30,16 +30,33 @@ particularly `UpdateClusterRecordsFor`, `AddClusterPrimaryZoneRecordsFor` and
 
 The Site Inventory owns placement and normal primary/secondary roles. Technitium
 owns `cluster.home`, `cluster-catalog.cluster.home`, node identity, certificates,
-catalog membership, generated NS and SOA MNAME. Git continues to own local Host
-A/PTR, aliases, SOA timers and contact, TTL and the no-client-update policy. The DNS
-CLI derives expected cluster names from the declared Hosts, refuses unexpected
-membership and catalog drift, and blocks rather than rewrites generated NS drift.
-An unchanged joined Site still produces an empty declared-DNS plan.
+catalog membership, generated NS, SOA MNAME and **both DNS members' PTR records**.
+Git owns the `.home` Host A records, service aliases, other Hosts' PTRs, SOA timers
+and contact, ordinary record TTL and the no-client-update policy. This ownership
+boundary is recorded in [ADR-0009](../../../docs/adr/0009-let-technitium-own-dns-cluster-member-ptrs.md).
 
-Joining or updating a node can replace its PTR with its `.cluster.home` name.
-After each such operation, use the existing exact-plan/backup path to restore the
-Git-owned `.home` PTR. Do not change ownership silently or permit repeated competing
-writers. Pause other console/API writers throughout the change window.
+A member PTR targets its `.cluster.home` identity and uses the TTL of its cluster A
+record. Before trusting that source, both tools require one enabled, non-expiring A
+record whose address matches the member's Site Inventory address and whose TTL is
+valid. They reject missing, disabled, foreign-address and malformed sources. The
+observer checks each Host's own source independently. `.home` A answers and aliases
+remain unchanged, and nonmember PTRs keep the Git-declared target and TTL.
+
+Joining, restarting or updating a member can regenerate its PTR. The DNS CLI verifies
+these records and blocks on member PTR drift; it never adds, overwrites, re-enables
+or deletes them. Do not restore `.home` member PTRs from Git. After a fresh paired
+backup and exact change review, use Technitium's supported **Update Node IP Addresses**
+action with the same verified declared address to refresh that member's metadata;
+this updates cluster DNS metadata, not Host networking. Verify both resolvers and
+repeat the plan. Investigate an invalid cluster address source before any refresh.
+
+The private journal marks observed member PTRs with `owner: technitium-cluster`.
+An empty apply can migrate an older journal after live verification without a DNS
+write. Historical cluster-owned records that are no longer declared are reported as
+unknown rather than deleted by Git; they can block retired-zone deletion until the
+operator resolves their ownership. Leaving the Cluster and returning member PTRs
+to Git produces protected changes requiring a fresh exact plan. Pause unrelated
+console/API writers throughout every change window.
 
 Cluster synchronization overwrites the Pi's Allowed, Blocked, Apps, shared Settings
 and Administration configuration, including users, permissions and API tokens.
@@ -71,7 +88,7 @@ there are also no catch-all Forwarder zones or DNS Apps redirecting external que
 4. Write a private exact change sheet: current commit and snapshot digests, the two
    instance/Host identities and verified addresses, direct HTTPS peer origin,
    `cluster.home`, catalog name, the exact home/reverse zones, filtering policy
-   being copied, SOA refresh/retry/expiry, and the post-join PTR repair. Include Pi
+   being copied, SOA refresh/retry/expiry, and the member PTR ownership handoff. Include Pi
    overwrite effects, console credential recovery and rollback steps. The operator
    approves this sheet before mutation, per ADR-0007. Immediately re-read the
    snapshots before each phase; any changed input or state invalidates that phase's
@@ -104,11 +121,13 @@ rejects stale plan IDs and gates protected record changes with the paired backup
    policy, without opening transfers globally. Verify both become Secondary zones
    on the Pi and their NS sets include exactly both cluster names. Confirm SOA
    expiry is the declared 604800 seconds (seven days), refresh 900 and retry 300.
-5. Run the declared-DNS `plan`. Generated clustered NS and SOA MNAME must not be
-   proposed for replacement. Any PTR changes must match the reviewed node PTR
-   effects. Capture a new paired backup, review and approve the exact current
-   protected plan, apply, verify and repeat plan. Expect no changes. Keep the
-   canonical ownership journal; do not discard it to hide drift.
+5. Run the declared-DNS `plan`. Generated clustered NS, SOA MNAME and member PTRs
+   must not be proposed for Git replacement. On a member PTR blocker, review and
+   apply the supported metadata refresh described above under its own exact plan
+   and fresh paired backup. Then verify, repeat plan and expect no changes. An
+   empty apply records the observed PTR ownership in the canonical journal without
+   changing DNS. Keep that journal; do not discard it to hide drift.
+
 6. In the primary console review the exact intended filtering policy (Allowed,
    Blocked, block-list URLs, blocking response and bypass lists) and relevant shared
    resolver settings. Use the supported secondary Resync Cluster action if needed;
@@ -140,7 +159,8 @@ only and is unsuitable for the Site.
 
 The observer compares Allowed/Blocked exports, the blocking settings, recursion
 policy/ACL, DNSSEC validation, minimum SOA timers, forwarders and proxy, plus the
-complete local record sets and serials. It checks declared A/CNAME/PTR against Git,
+complete local record sets and serials. It checks declared A/CNAME and nonmember
+PTRs against Git, and member PTRs against validated cluster address records,
 member identity/roles, catalog membership and cluster-zone availability. It rejects
 configuration sync age above 1800 seconds and remaining local-zone lifetime at or
 below 259200 seconds. ACL order remains significant. Equal empty filtering lists
@@ -235,8 +255,9 @@ Do not restore an old cluster backup into an active unfenced peer.
 A permanent role reversal requires a separate reviewed Site Inventory change and
 new correctly bound ownership journal migration. For a drill that restores normal
 roles, use a planned graceful promotion of the caught-up homelab secondary, then
-rejoin the Pi as secondary; keep only one active primary throughout. Review and
-repair generated PTR effects, verify declared DNS and the two-member observer,
+rejoin the Pi as secondary; keep only one active primary throughout. Verify generated
+member PTRs against cluster identities and address-record TTLs, refresh metadata
+under a new approved plan if needed, and verify declared DNS and the two-member observer,
 and resume reconciliation only when the normal Site roles and exact plan agree.
 Never restart both Hosts together. If promotion or rejoin fails, keep the stale
 Host fenced and use the one surviving resolver plus the recovery packet; do not

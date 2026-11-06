@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[3]
 VERSION = (ROOT / 'services/network/technitium.env').read_text().split('@')[0].rsplit(':', 1)[1]
 CLUSTER_DOMAIN = 'cluster.home'
 CLUSTER_CATALOG = 'cluster-catalog.' + CLUSTER_DOMAIN
+CLUSTER_PTR_OWNER = 'technitium-cluster'
 FIELDS = {'A': 'ipAddress', 'CNAME': 'cname', 'PTR': 'ptrName', 'NS': 'nameServer'}
 
 
@@ -324,6 +325,27 @@ def cluster_matches(cluster, members):
             and {node['name']: node['type'] for node in nodes} == members)
 
 
+def cluster_ptr_records(desired, records):
+    """Expected member PTRs follow the cluster's validated address records."""
+    declared = {record['id']: record for record in desired['records']}
+    result = {}
+    for member in desired['members'].values():
+        domain = member['host'] + '.' + CLUSTER_DOMAIN
+        addresses = [record for record in records
+                     if record['name'].lower().rstrip('.') == domain and record['type'] == 'A']
+        if len(addresses) != 1:
+            raise ValueError('cluster member requires one address record')
+        address = normalize(addresses[0])
+        if (address['data'] != {'ipAddress': member['resolver']} or address['disabled']
+                or address['expiryTtl'] or type(address['ttl']) is not int
+                or not 0 < address['ttl'] <= 2147483647):
+            raise ValueError('cluster address differs from Site membership')
+        identity = 'ptr:' + member['host']
+        result[identity] = dict(declared[identity], ttl=address['ttl'],
+                                values=[{'ptrName': domain}], owner=CLUSTER_PTR_OWNER)
+    return result
+
+
 def make_plan(api, desired, previous, live):
     changes = []
     blockers = []
@@ -338,7 +360,17 @@ def make_plan(api, desired, previous, live):
         expected = cluster_members(desired)
         if not cluster_matches(cluster, expected):
             blockers.append('DNS_CLUSTER_MEMBERSHIP_MISMATCH')
+        ptrs = {}
+        source = live['zones'].get(CLUSTER_DOMAIN, {})
+        try:
+            if source.get('type') != 'Primary' or source.get('disabled', True):
+                raise ValueError('cluster address zone unavailable')
+            ptrs = cluster_ptr_records(desired, source['records'])
+        except (ValueError, KeyError):
+            blockers.append('DNS_CLUSTER_ADDRESS_MISMATCH')
         for record in desired['records']:
+            if record['id'] in ptrs:
+                record.update(ptrs[record['id']])
             if record['type'] == 'NS':
                 record['values'] = [{'nameServer': domain} for domain in sorted(expected)]
             elif record['type'] == 'SOA':
@@ -362,7 +394,8 @@ def make_plan(api, desired, previous, live):
         retained_leases = any(lease['scope'] == scope['name'] for lease in live['leases'])
         if scope.get('dnsUpdates', False) and (scope['enabled'] or retained_leases):
             blockers.append('DHCP_DNS_UPDATES_REQUIRE_COLLISION_PROTECTION')
-    previous_keys = {record_identity(item) for item in previous.get('records', [])}
+    previous_keys = {record_identity(item) for item in previous.get('records', [])
+                     if item.get('owner') != CLUSTER_PTR_OWNER}
     for record in desired['records']:
         for other in live['zones'].get(record['zone'], {}).get('records', []):
             if (other['name'].lower().rstrip('.') == record['name']
@@ -371,6 +404,10 @@ def make_plan(api, desired, previous, live):
                 blockers.append('DNS_NAME_COLLISION')
         current = current_records(live, record)
         if matching(current, record):
+            continue
+        if cluster['clusterInitialized'] and record['id'] in {
+                'ptr:' + member['host'] for member in desired['members'].values()}:
+            blockers.append('DNS_CLUSTER_PTR_MISMATCH')
             continue
         if cluster['clusterInitialized'] and record['type'] == 'NS':
             blockers.append('DNS_CLUSTER_AUTHORITY_MISMATCH')
@@ -386,6 +423,8 @@ def make_plan(api, desired, previous, live):
                         'valueChanged': sorted(encode(normalize(item)['data']) for item in current)
                                         != sorted(map(encode, record['values']))})
     for record in previous.get('records', []):
+        if record.get('owner') == CLUSTER_PTR_OWNER:
+            continue
         key = record_identity(record)
         if key not in known and record['zone'] in desired['zones'] and current_records(live, record):
             changes.append({'id': record['id'], 'action': 'delete', 'protected': True,
@@ -512,6 +551,10 @@ def load_context(args, state):
         raise ValueError('only the primary DNS Stack Instance may reconcile')
     api = Api(connection, args.isolated)
     previous = decode_json(state.read_text()) if state.exists() else {}
+    for record in previous.get('records', []):
+        if 'owner' in record and (record['owner'] != CLUSTER_PTR_OWNER or record['type'] != 'PTR'
+                                  or not record['id'].startswith('ptr:')):
+            raise ValueError('unsupported journal record ownership')
     if state.exists() and previous.get('binding') != state_binding(desired, connection):
         raise ValueError('ownership journal belongs to another Site or endpoint')
     return desired, api, previous

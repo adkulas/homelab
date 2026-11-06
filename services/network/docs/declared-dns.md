@@ -53,8 +53,12 @@ approval fingerprint. After [the DNS Cluster join](dns-cluster.md), the command
 expects the two declared Hosts' generated clustered NS and SOA MNAME, retains
 Git-owned SOA timers and checks catalog membership. Unexpected membership, lost
 catalog membership and generated NS drift block apply. It never rewrites generated
-NS drift. Join and node updates can change Host PTRs: review and repair those via
-a fresh protected exact plan after the cluster operation. Cluster join, filtering,
+NS drift. Technitium owns both DNS members' PTRs while clustered: their targets
+and TTLs follow validated cluster A records. Member PTR drift blocks apply rather
+than triggering a Git repair; use a separately approved supported node-metadata
+refresh. The journal marks these observed records `owner: technitium-cluster` and
+never prunes them. `.home` A records, aliases and other Hosts' PTRs remain Git-owned.
+See [ADR-0009](../../../docs/adr/0009-let-technitium-own-dns-cluster-member-ptrs.md). Cluster join, filtering,
 health observation, outage, promotion and rejoin follow the linked procedure.
 
 An ownership journal outside Git records the last successfully verified zones and
