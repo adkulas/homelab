@@ -48,10 +48,18 @@ same value as `hostmaster@home`. Reconciliation normalizes that representation
 before comparing records.
 
 `cluster.home` and its descendants are reserved for Technitium. Alias declarations
-cannot claim them. Existing cluster records/configuration are observed and included
-in the approval fingerprint; the command never writes them. Cluster initialization,
-catalog membership and Technitium-owned clustered NS/SOA integration belong to #106.
-Do not join a catalog and then force this pre-cluster policy over its generated NS/SOA.
+cannot claim them. Cluster records/configuration are observed and included in the
+approval fingerprint. After [the DNS Cluster join](dns-cluster.md), the command
+expects the two declared Hosts' generated clustered NS and SOA MNAME, retains
+Git-owned SOA timers and checks catalog membership. Unexpected membership, lost
+catalog membership and generated NS drift block apply. It never rewrites generated
+NS drift. Technitium owns both DNS members' PTRs while clustered: their targets
+and TTLs follow validated cluster A records. Member PTR drift blocks apply rather
+than triggering a Git repair; use a separately approved supported node-metadata
+refresh. The journal marks these observed records `owner: technitium-cluster` and
+never prunes them. `.home` A records, aliases and other Hosts' PTRs remain Git-owned.
+See [ADR-0010](../../../docs/adr/0010-let-technitium-own-dns-cluster-member-ptrs.md). Cluster join, filtering,
+health observation, outage, promotion and rejoin follow the linked procedure.
 
 An ownership journal outside Git records the last successfully verified zones and
 record sets. It is mode 0600, bound to the Site path, primary instance and API origin,

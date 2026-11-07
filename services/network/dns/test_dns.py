@@ -280,6 +280,363 @@ with urllib.request.urlopen(os.environ['FIXTURE_URL'] + '/resolve?' + query) as 
         plan = self.cli('plan')
         self.cli('apply', '--plan', plan['plan'])
 
+    def joined_cluster_fixture(self):
+        self.bootstrap()
+        self.cluster = {'clusterInitialized': True, 'clusterDomain': 'cluster.home',
+            'dnsServerDomain': 'homelab.cluster.home', 'clusterNodes': [
+                {'name': 'homelab.cluster.home', 'type': 'Primary', 'state': 'Self'},
+                {'name': 'raspberrypi.cluster.home', 'type': 'Secondary', 'state': 'Connected'}]}
+        for zone in self.zones.values():
+            zone['options']['catalog'] = 'cluster-catalog.cluster.home'
+            ns = next(record for record in zone['records'] if record['type'] == 'NS')
+            ns['rData']['nameServer'] = 'homelab.cluster.home'
+            secondary = copy.deepcopy(ns)
+            secondary['rData']['nameServer'] = 'raspberrypi.cluster.home'
+            zone['records'].append(secondary)
+            next(record for record in zone['records'] if record['type'] == 'SOA')[
+                'rData']['primaryNameServer'] = 'homelab.cluster.home'
+        targets = {'homelab.home': 'homelab.cluster.home',
+                   'raspberrypi.home': 'raspberrypi.cluster.home'}
+        for zone in self.zones.values():
+            for record in zone['records']:
+                if record['type'] == 'PTR' and record['rData']['ptrName'] in targets:
+                    record['rData']['ptrName'] = targets[record['rData']['ptrName']]
+                    record['ttl'] = 3600
+        self.zones['cluster.home'] = {'options': {'update': 'Deny'}, 'records': [
+            {'name': 'homelab.cluster.home', 'type': 'A', 'ttl': 3600,
+             'rData': {'ipAddress': '192.0.2.10'}},
+            {'name': 'raspberrypi.cluster.home', 'type': 'A', 'ttl': 3600,
+             'rData': {'ipAddress': '192.0.2.11'}}]}
+
+    def test_cluster_catalog_preserves_generated_authority_and_allows_alias_updates(self):
+        self.joined_cluster_fixture()
+        self.assertEqual(self.cli('plan')['changes'], [])
+        self.policy['spec']['aliases']['sonarr.home'] = 'homelab'
+        self.write_policy()
+        count = len(self.writes)
+        self.cli('apply')
+        self.assertEqual(self.cli('verify')['status'], 'verified')
+        self.assertFalse(any(values.get('type') in ('NS', 'SOA', 'PTR')
+                             for _, values in self.writes[count:]))
+        journal = json.loads(self.state.read_text())
+        self.assertEqual({record.get('owner') for record in journal['records']
+                          if record['type'] == 'PTR'}, {'technitium-cluster'})
+        self.zones['home']['options']['catalog'] = ''
+        self.assertIn('DNS_CLUSTER_CATALOG_REQUIRED', self.cli('plan')['blockers'])
+        self.cli('apply', success=False)
+
+    def test_cluster_member_ptr_drift_blocks_apply_without_git_repair(self):
+        self.joined_cluster_fixture()
+        self.cli('apply')
+        original = copy.deepcopy(self.zones)
+        count = len(self.writes)
+        for host in ('homelab', 'raspberrypi'):
+            for kind in ('target', 'ttl', 'disabled', 'missing'):
+                with self.subTest(host=host, drift=kind):
+                    self.zones = copy.deepcopy(original)
+                    reverse = self.zones['2.0.192.in-addr.arpa']['records']
+                    record = next(item for item in reverse if item['type'] == 'PTR'
+                                  and item['rData']['ptrName'] == host + '.cluster.home')
+                    if kind == 'target':
+                        record['rData']['ptrName'] = host + '.home'
+                    elif kind == 'ttl':
+                        record['ttl'] = 300
+                    elif kind == 'disabled':
+                        record['disabled'] = True
+                    else:
+                        reverse.remove(record)
+                    plan = self.cli('plan')
+                    self.assertIn('DNS_CLUSTER_PTR_MISMATCH', plan['blockers'])
+                    self.assertFalse(any(change['id'].startswith('ptr:') for change in plan['changes']))
+                    self.cli('apply', success=False)
+                    self.assertEqual(len(self.writes), count)
+
+    def test_cluster_member_ptr_source_must_match_site_addresses(self):
+        self.joined_cluster_fixture()
+        original = copy.deepcopy(self.zones)
+        count = len(self.writes)
+        for host in ('homelab', 'raspberrypi'):
+            for kind in ('address', 'disabled', 'missing', 'expiry', 'ttl'):
+                with self.subTest(host=host, invalid=kind):
+                    self.zones = copy.deepcopy(original)
+                    addresses = self.zones['cluster.home']['records']
+                    record = next(item for item in addresses if item['name'] == host + '.cluster.home')
+                    if kind == 'address':
+                        record['rData']['ipAddress'] = '192.0.2.99'
+                    elif kind == 'disabled':
+                        record['disabled'] = True
+                    elif kind == 'missing':
+                        addresses.remove(record)
+                    elif kind == 'expiry':
+                        record['expiryTtl'] = 60
+                    else:
+                        record['ttl'] = 0
+                    plan = self.cli('plan')
+                    self.assertIn('DNS_CLUSTER_ADDRESS_MISMATCH', plan['blockers'])
+                    self.assertFalse(any(change['id'].startswith('ptr:') for change in plan['changes']))
+                    self.cli('apply', success=False)
+                    self.assertEqual(len(self.writes), count)
+
+    def test_cluster_member_ptr_ttl_follows_its_cluster_address_record(self):
+        self.joined_cluster_fixture()
+        self.zones['cluster.home']['records'][0]['ttl'] = 7200
+        ptr = next(item for item in self.zones['2.0.192.in-addr.arpa']['records']
+                   if item['type'] == 'PTR' and item['rData']['ptrName'] == 'homelab.cluster.home')
+        ptr['ttl'] = 7200
+        count = len(self.writes)
+        self.assertEqual(self.cli('plan')['changes'], [])
+        self.cli('apply')
+        self.assertEqual(len(self.writes), count)
+        self.assertEqual(self.cli('verify')['status'], 'verified')
+
+    def test_other_host_ptr_remains_git_owned_in_a_cluster(self):
+        site = self.site / 'site.yaml'
+        site.write_text(site.read_text().replace('hosts/raspberrypi.yaml]',
+            'hosts/raspberrypi.yaml, hosts/printer.yaml]'))
+        (self.site / 'hosts/printer.yaml').write_text(
+            'apiVersion: homelab.site/v1alpha1\nkind: Host\nmetadata: {name: printer}\n'
+            'spec: {networkAddress: printer-address}\n')
+        self.values['spec']['values'].append({'id': 'printer-address', 'value': '192.0.2.12'})
+        self.joined_cluster_fixture()
+        record = next(item for item in self.zones['2.0.192.in-addr.arpa']['records']
+                      if item['type'] == 'PTR' and item['rData']['ptrName'] == 'printer.home')
+        self.assertEqual(record['ttl'], 300)
+        record['rData']['ptrName'] = 'wrong.home'
+        plan = self.cli('plan')
+        self.assertEqual([change['id'] for change in plan['changes']], ['ptr:printer'])
+        self.assertTrue(plan['protected'])
+        self.cli('apply', '--plan', plan['plan'])
+        self.assertEqual(self.cli('verify')['status'], 'verified')
+        saved = next(item for item in json.loads(self.state.read_text())['records']
+                     if item['id'] == 'ptr:printer')
+        self.assertNotIn('owner', saved)
+
+    def test_retired_cluster_owned_ptr_is_reported_without_git_deletion(self):
+        self.joined_cluster_fixture()
+        self.cli('apply')
+        unknown = {'name': '99.2.0.192.in-addr.arpa', 'type': 'PTR', 'ttl': 3600,
+                   'rData': {'ptrName': 'retired.cluster.home'}}
+        self.zones['2.0.192.in-addr.arpa']['records'].append(unknown)
+        saved = json.loads(self.state.read_text())
+        saved['records'].append({'id': 'ptr:retired', 'zone': '2.0.192.in-addr.arpa',
+            'name': unknown['name'], 'type': 'PTR', 'ttl': 3600,
+            'values': [{'ptrName': 'retired.cluster.home'}], 'owner': 'technitium-cluster'})
+        self.state.write_text(json.dumps(saved))
+        count = len(self.writes)
+        plan = self.cli('plan')
+        self.assertEqual(plan['changes'], [])
+        self.assertTrue(any(item['type'] == 'PTR' for item in plan['unknown']))
+        self.cli('apply')
+        self.assertEqual(len(self.writes), count)
+        self.assertIn(unknown, self.zones['2.0.192.in-addr.arpa']['records'])
+
+    def test_journal_rejects_unknown_or_misapplied_cluster_ptr_ownership(self):
+        self.joined_cluster_fixture()
+        self.cli('apply')
+        original = json.loads(self.state.read_text())
+        count = len(self.writes)
+        for invalid in ('unknown-owner', 'wrong-record-type'):
+            saved = copy.deepcopy(original)
+            record = next(item for item in saved['records'] if item['id'] == 'ptr:homelab')
+            if invalid == 'unknown-owner':
+                record['owner'] = 'unknown-owner'
+            else:
+                record['type'] = 'A'
+            self.state.write_text(json.dumps(saved))
+            self.cli('plan', success=False)
+            self.cli('apply', success=False)
+            self.assertEqual(len(self.writes), count)
+
+    def cluster_health_fixture(self):
+        self.bootstrap()
+        now = datetime.now(timezone.utc)
+        self.health = {}
+        self.health_connections = {}
+        for role, host in (('primary', 'homelab'), ('secondary', 'raspberrypi')):
+            cluster = {'clusterInitialized': True, 'clusterDomain': 'cluster.home',
+                'dnsServerDomain': host + '.cluster.home',
+                'clusterNodes': [
+                    {'name': name + '.cluster.home', 'type': kind,
+                     'state': 'Self' if name == host else 'Connected'}
+                    for name, kind in (('homelab', 'Primary'), ('raspberrypi', 'Secondary'))]}
+            if role == 'secondary':
+                next(node for node in cluster['clusterNodes'] if node['state'] == 'Self')[
+                    'configLastSynced'] = now.isoformat()
+            zones = []
+            responses = {'admin/cluster/state': cluster,
+                'settings/get': {'version': '15.6.2', 'enableBlocking': True,
+                    'allowTxtBlockingReport': True, 'blockingType': 'NxDomain',
+                    'blockingAnswerTtl': 30, 'blockingBypassList': [],
+                    'customBlockingAddresses': [], 'blockListUrls': [],
+                    'blockListUpdateIntervalHours': 24, 'recursion': 'AllowOnlyForPrivateNetworks',
+                    'recursionNetworkACL': [], 'dnssecValidation': True,
+                    'minSoaRefresh': 300, 'minSoaRetry': 300, 'forwarders': [],
+                    'proxy': None},
+                'dhcp/scopes/list': {'scopes': []},
+                'allowed/export': '', 'blocked/export': 'blocked.example\n'}
+            for zone_name, zone in self.zones.items():
+                records = copy.deepcopy(zone['records'])
+                ns = next(record for record in records if record['type'] == 'NS')
+                ns['rData']['nameServer'] = 'homelab.cluster.home'
+                other = copy.deepcopy(ns)
+                other['rData']['nameServer'] = 'raspberrypi.cluster.home'
+                records.append(other)
+                next(record for record in records if record['type'] == 'SOA')[
+                    'rData']['primaryNameServer'] = 'homelab.cluster.home'
+                zones.append({'name': zone_name, 'type': role.capitalize(),
+                    'disabled': False, 'soaSerial': 1, 'isExpired': False, 'syncFailed': False,
+                    'expiry': (now + timedelta(days=7)).isoformat()})
+                responses['records:' + zone_name] = {'records': records}
+                responses['options:' + zone_name] = {'catalog': 'cluster-catalog.cluster.home',
+                                                     'update': 'Deny'}
+            zones.extend({'name': domain, 'type': kind, 'disabled': False,
+                          'isExpired': False, 'syncFailed': False}
+                         for domain, kind in (
+                             ('cluster.home', 'Primary' if role == 'primary' else 'Secondary'),
+                             ('cluster-catalog.cluster.home', 'Catalog' if role == 'primary' else 'SecondaryCatalog')))
+            responses['records:cluster.home'] = {'records': [
+                {'name': 'homelab.cluster.home', 'type': 'A', 'ttl': 3600,
+                 'rData': {'ipAddress': '192.0.2.10'}},
+                {'name': 'raspberrypi.cluster.home', 'type': 'A', 'ttl': 3600,
+                 'rData': {'ipAddress': '192.0.2.11'}}]}
+            for zone_name in ('home', '2.0.192.in-addr.arpa'):
+                for record in responses['records:' + zone_name]['records']:
+                    if record['type'] == 'PTR':
+                        record['rData']['ptrName'] = {
+                            'homelab.home': 'homelab.cluster.home',
+                            'raspberrypi.home': 'raspberrypi.cluster.home'}[record['rData']['ptrName']]
+                        record['ttl'] = 3600
+            responses['zones/list'] = {'zones': zones}
+            self.health[role] = responses
+            test = self
+
+            def handler_for(peer):
+                class Handler(BaseHTTPRequestHandler):
+                    def log_message(self, *args):
+                        pass
+
+                    def do_POST(self):
+                        path = self.path.removeprefix('/api/')
+                        values = parse_qs(self.rfile.read(int(self.headers['Content-Length'])).decode())
+                        if path == 'zones/records/get':
+                            path = 'records:' + values['zone'][0]
+                        elif path == 'zones/options/get':
+                            path = 'options:' + values['zone'][0]
+                        result = test.health[peer].get(path)
+                        if result is None:
+                            self.send_error(500)
+                            return
+                        self.send_response(200)
+                        export = path.endswith('/export')
+                        self.send_header('Content-Type', 'text/plain' if export else 'application/json')
+                        self.end_headers()
+                        self.wfile.write(result.encode() if export else json.dumps(
+                            {'status': 'ok', 'response': result}).encode())
+                return Handler
+
+            server = ThreadingHTTPServer(('127.0.0.1', 0), handler_for(role))
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            self.addCleanup(server.server_close)
+            self.addCleanup(server.shutdown)
+            connection = self.root / (role + '.json')
+            connection.write_text(json.dumps({'instance': host + '-dns',
+                'url': f'http://127.0.0.1:{server.server_port}', 'tokenFile': str(self.token)}))
+            connection.chmod(0o600)
+            self.health_connections[role] = str(connection)
+
+    def health_cli(self, success=True):
+        env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
+                   FIXTURE_VALUES=json.dumps(self.values), FIXTURE_URL=self.url)
+        result = subprocess.run(['python3', '-B', str(CLI.with_name('cluster.py')),
+            '--site', str(self.site), '--primary-connection', self.health_connections['primary'],
+            '--secondary-connection', self.health_connections['secondary'], '--isolated'],
+            env=env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0 if success else 1, result.stderr)
+        for secret in ('192.0.2.', '2.0.192.in-addr', 'fixture-token', 'blocked.example'):
+            self.assertNotIn(secret, result.stdout + result.stderr)
+        return json.loads(result.stdout)
+
+    def test_cluster_health_reports_matching_policy_and_secondary_deadlines(self):
+        self.cluster_health_fixture()
+        result = self.health_cli()
+        self.assertEqual(result['status'], 'healthy')
+        self.assertEqual(result['issues'], [])
+        self.assertLess(result['configAgeSeconds'], 30)
+        self.assertEqual(len(result['zones']), 2)
+        self.assertGreater(result['zones'][0]['remainingSeconds'], 259200)
+        self.assertLess(result['zones'][0]['refreshAgeSeconds'], 30)
+        self.assertEqual(self.health_cli()['status'], 'healthy')
+
+    def test_cluster_health_rejects_divergence_and_unsafe_state_on_either_host(self):
+        self.cluster_health_fixture()
+        original = copy.deepcopy(self.health)
+        for role in ('primary', 'secondary'):
+            for change in (
+                lambda peer: peer['settings/get'].update(blockingType='AnyAddress'),
+                lambda peer: peer['settings/get'].update(version='16.0'),
+                lambda peer: peer['settings/get'].update(forwarders=['192.0.2.11']),
+                lambda peer: peer['dhcp/scopes/list']['scopes'].append({'enabled': True}),
+                lambda peer: peer['admin/cluster/state'].update(dnsServerDomain='unexpected.home'),
+                lambda peer: peer.update({'blocked/export': 'different.private.example\n'}),
+                lambda peer: peer.update({'allowed/export': 'different.private.example\n'}),
+                lambda peer: peer['zones/list']['zones'][0].update(soaSerial=99),
+                lambda peer: peer['records:home']['records'][0]['rData'].update(ipAddress='192.0.2.99'),
+                lambda peer: peer['options:home'].update(catalog=''),
+            ):
+                with self.subTest(role=role, change=change):
+                    self.health = copy.deepcopy(original)
+                    change(self.health[role])
+                    self.assertEqual(self.health_cli(success=False)['status'], 'degraded')
+        self.health = copy.deepcopy(original)
+        next(node for node in self.health['secondary']['admin/cluster/state']['clusterNodes']
+             if node['state'] == 'Self')['configLastSynced'] = (
+                 datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        self.assertIn('secondary:config-age', self.health_cli(success=False)['issues'])
+        for zone in ('home', '2.0.192.in-addr.arpa'):
+            self.health = copy.deepcopy(original)
+            summary = next(item for item in self.health['secondary']['zones/list']['zones']
+                           if item['name'] == zone)
+            summary['expiry'] = (datetime.now(timezone.utc) + timedelta(hours=71)).isoformat()
+            self.assertTrue(any('expiry-margin' in issue
+                                for issue in self.health_cli(success=False)['issues']))
+        self.health = copy.deepcopy(original)
+        del self.health['secondary']['settings/get']['blockListUrls']
+        self.assertEqual(self.health_cli(success=False)['status'], 'unavailable')
+
+    def test_cluster_health_reports_member_ptr_or_address_drift_on_either_host(self):
+        self.cluster_health_fixture()
+        original = copy.deepcopy(self.health)
+        for role in ('primary', 'secondary'):
+            for host in ('homelab', 'raspberrypi'):
+                with self.subTest(role=role, member=host):
+                    self.health = copy.deepcopy(original)
+                    ptr = next(item for item in self.health[role]['records:2.0.192.in-addr.arpa']['records']
+                               if item['type'] == 'PTR' and item['rData']['ptrName'] == host + '.cluster.home')
+                    ptr['rData']['ptrName'] = host + '.home'
+                    self.assertIn(role + ':reverse:cluster-ptrs', self.health_cli(success=False)['issues'])
+                    self.health = copy.deepcopy(original)
+                    address = next(item for item in self.health[role]['records:cluster.home']['records']
+                                   if item['name'] == host + '.cluster.home')
+                    address['rData']['ipAddress'] = '192.0.2.99'
+                    self.assertIn(role + ':cluster-addresses', self.health_cli(success=False)['issues'])
+
+    def test_cluster_health_requires_active_filtering(self):
+        self.cluster_health_fixture()
+        for peer in self.health.values():
+            peer['settings/get']['enableBlocking'] = False
+        self.assertIn('primary:filtering-disabled', self.health_cli(success=False)['issues'])
+
+    def test_cluster_health_requires_healthy_catalog_and_cluster_zones(self):
+        self.cluster_health_fixture()
+        for role in ('primary', 'secondary'):
+            for domain in ('cluster.home', 'cluster-catalog.cluster.home'):
+                with self.subTest(role=role, domain=domain):
+                    zone = next(item for item in self.health[role]['zones/list']['zones']
+                                if item['name'] == domain)
+                    zone['disabled'] = True
+                    self.assertIn(role + ':cluster-zones', self.health_cli(success=False)['issues'])
+                    zone['disabled'] = False
+
     def test_reverse_zone_change_requires_exact_plan_and_removes_only_owned_zone(self):
         self.bootstrap()
         self.values['spec']['values'][0]['value'] = '198.51.100.0/24'

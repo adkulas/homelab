@@ -187,10 +187,11 @@ if appropriate, return the test client to its previous DNS, and use step 6 for a
 ## 8. Declare local DNS and join the DNS Cluster — administrator PC
 
 **Prerequisites:** Both HTTPS checks, a verified paired backup (step 12), and #105's exact
-plan workflow plus #106's reviewed cluster join/promotion procedure. Bell still owns DHCP.
+plan workflow plus the [reviewed cluster join/promotion procedure](dns-cluster.md). Bell still owns DHCP.
 
 **Action (gates #105/#106):** Use #105's read/diff path to review `home`, reverse zones,
-fixed Host A/PTR records and service aliases against the Site declarations. Run the backup
+fixed Host A records, nonmember PTRs and service aliases against the Site declarations;
+verify DNS-member PTRs against their cluster identities and address-record TTLs. Run the backup
 gate from step 12 before protected apply. Apply the exact current plan; reject a stale
 plan. Report unknown records for operator review. Use #106's supported console procedure
 to initialize the primary and join the Pi over trusted direct HTTPS using `cluster.home`;
