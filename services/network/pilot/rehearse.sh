@@ -2,7 +2,7 @@
 # Shared lifecycle for disposable single-script Technitium rehearsals.
 set -euo pipefail
 case "${1:-}" in
-  https_check.py|backup_check.py) ;;
+  https_check.py|backup_check.py|staged_dhcp_check.py) ;;
   *) echo "Choose a supported rehearsal" >&2; exit 64 ;;
 esac
 cd "$(dirname "$0")/../../.."

@@ -54,7 +54,8 @@ def count_offer_sources():
         raise RuntimeError("isolated client did not observe exactly one DHCP offer source")
 
 
-def main():
+def main(staged=False):
+    scope_name = "home" if staged else SCOPE
     password_path = os.environ.get("PILOT_PASSWORD_FILE")
     if not password_path:
         raise RuntimeError("PILOT_PASSWORD_FILE is required")
@@ -103,11 +104,11 @@ def main():
     if not token:
         raise RuntimeError("Technitium login did not return a token")
     scopes = api("dhcp/scopes/list", {})["response"]["scopes"]
-    if any(scope["name"] == SCOPE for scope in scopes):
+    if any(scope["name"] == scope_name for scope in scopes):
         raise RuntimeError("pilot scope already exists; start with fresh pilot volumes")
 
     values = {
-        "name": SCOPE,
+        "name": scope_name,
         "startingAddress": address(20), "endingAddress": address(120),
         "subnetMask": str(subnet.netmask), "routerAddress": gateway,
         "leaseTimeDays": 0, "leaseTimeHours": 0, "leaseTimeMinutes": 1,
@@ -119,16 +120,35 @@ def main():
     }
     created = False
     try:
-        api("dhcp/scopes/set", values)
-        created = True
-        api("dhcp/scopes/disable", {"name": SCOPE})
-        scope = api("dhcp/scopes/get", {"name": SCOPE})["response"]
+        if staged:
+            sys.path.insert(0, os.path.abspath("services/network/dhcp"))
+            import dhcp
+            scope = dict(values, dnsServers=[primary, secondary], domainSearchList=["home"],
+                leaseTimeDays=0, leaseTimeHours=0, leaseTimeMinutes=1,
+                useThisDnsServer=False, dnsUpdates=True, dnsOverwriteForDynamicLease=False,
+                allowOnlyReservedLeases=False, blockLocallyAdministeredMacAddresses=False,
+                ignoreClientIdentifierOption=True,
+                exclusions=[{"startingAddress": address(20), "endingAddress": address(99)}],
+                reservedLeases=[{"hostName": "pilot-reserved", "hardwareAddress": "02-52-00-00-00-30",
+                                 "address": address(30), "comments": "pilot"}])
+            archive = dhcp.stage_scope(scope)
+            transport = dhcp.backup.Api(f"http://{primary}:5380", token, isolated=True)
+            created = True
+            dhcp.import_scope(transport, archive)
+            if any(item["enabled"] for item in api("dhcp/scopes/list", {})["response"]["scopes"]):
+                raise RuntimeError("imported scope was enabled before isolated handoff")
+            print("disabled staged scope imported without a target set or enable call")
+        else:
+            created = True
+            api("dhcp/scopes/set", values)
+            api("dhcp/scopes/disable", {"name": scope_name})
+        scope = api("dhcp/scopes/get", {"name": scope_name})["response"]
         if (scope["useThisDnsServer"] or scope["dnsServers"] != [primary, secondary]
                 or scope["domainName"] != "home" or len(scope["exclusions"]) != 1
                 or len(scope["reservedLeases"]) != 1):
             raise RuntimeError("Technitium did not retain the intended test options")
         print("pilot scope: reservation exclusion, two DNS endpoints, and home suffix retained")
-        api("dhcp/scopes/enable", {"name": SCOPE})
+        api("dhcp/scopes/enable", {"name": scope_name})
         for kind, mac, expected, hostname in [
             ("reserved", "02:52:00:00:00:30", address(30), "pilot-reserved"),
             ("dynamic", "02:53:00:00:00:31", address(100), "pilot-dynamic"),
@@ -161,7 +181,7 @@ def main():
                     raise RuntimeError(f"{kind} lease A/PTR did not reach the secondary")
                 print(f"{kind} client: A/PTR records served by secondary")
         api("dhcp/leases/remove", {
-            "name": SCOPE, "hardwareAddress": "02:53:00:00:00:31",
+            "name": scope_name, "hardwareAddress": "02:53:00:00:00:31",
         })
         dynamic_reverse = ipaddress.ip_address(address(100)).reverse_pointer
         for attempt in range(45):
@@ -208,8 +228,8 @@ def main():
     finally:
         if created:
             try:
-                api("dhcp/scopes/disable", {"name": SCOPE})
-                api("dhcp/scopes/delete", {"name": SCOPE})
+                api("dhcp/scopes/disable", {"name": scope_name})
+                api("dhcp/scopes/delete", {"name": scope_name})
             except Exception:
                 subprocess.run(COMPOSE + ["stop", "primary"], check=False, capture_output=True)
                 raise
