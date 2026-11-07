@@ -6,6 +6,7 @@ source:
   manifestVersion: 1.0.37
 profile:
   name: HD Bluray + WEB
+  language: Original
   upgradesAllowed: true
   upgradeUntilQuality: Bluray-1080p
   minimumCustomFormatScore: 0
@@ -21,6 +22,34 @@ profile:
       score: 1700
     - name: BR-DISK
       score: -10000
+additionalProfiles:
+  - name: Remux 2160p (Alternative)
+    language: Original
+    upgradesAllowed: true
+    upgradeUntilQuality: Remux-2160p
+    minimumCustomFormatScore: 0
+    upgradeUntilCustomFormatScore: 10000
+    allowedQualities:
+      - Remux-2160p
+      - Bluray-2160p
+      - WEB 2160p
+      - Remux-1080p
+      - Bluray-1080p
+      - WEB 1080p
+      - HDTV-1080p
+      - Bluray-720p
+      - WEB 720p
+      - HDTV-720p
+      - Bluray-576p
+      - Bluray-480p
+      - WEB 480p
+      - DVD
+      - SDTV
+    customFormats:
+      - name: Remux Tier 01
+        score: 1950
+      - name: BR-DISK
+        score: -10000
 qualityDefinitions:
   - quality: Bluray-1080p
     minimum: 51
@@ -43,4 +72,4 @@ mediaManagement:
   enableMediaInfo: true
 deviations:
   - Select the Jellyfin TMDB naming preset because Jellyfin is the Media Stack playback service.
-  - Sync only the HD Bluray + WEB profile; UHD, remux-heavy, anime, and language-specific profiles are excluded from the first milestone.
+  - Default requests use HD Bluray + WEB; Advanced Requests may select Remux 2160p (Alternative). Anime is deferred.

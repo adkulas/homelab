@@ -114,7 +114,7 @@ media-stack config describe --service sonarr --output json
 
 `config describe` is the authoritative discovery surface for the
 [Service Configuration Contract](service-configuration-contract.md). Without a filter it describes Gluetun, qBittorrent,
-Prowlarr, Sonarr, Radarr, Profilarr, Jellyfin, and Seerr. Filtered output is self-contained and explains how every in-scope
+Prowlarr, Sonarr, Radarr, Profilarr, Jellyfin, Seerr, Houndarr, and Cleanuparr. Filtered output is self-contained and explains how every in-scope
 setting is controlled and how an operator may change it. The command is deterministic, needs no Environment, performs no
 Docker or application calls, never decrypts secrets, and emits no resolved values.
 
@@ -125,6 +125,7 @@ Configuration. Upstream settings absent from a service's contract are explicitly
 
 ```text
 media-stack init --environment staging
+media-stack init --environment staging --companions
 media-stack init --environment production --non-interactive --answers answers.yaml
 ```
 
@@ -191,7 +192,9 @@ validate prerequisites
 → reconcile Prowlarr links and Public Torrent Sources
 → guide and verify the Profilarr connection
 → allow Profilarr to apply its owned policy
-→ reconcile Jellyfin and Seerr
+→ reconcile Jellyfin and Seerr, disabling grouped series searches when series automation is enabled
+→ bootstrap declared Houndarr/Cleanuparr accounts and persist Cleanuparr API key in SOPS
+→ verify Houndarr episode-search policy and reconcile Cleanuparr queue recovery
 → verify convergence
 ```
 
@@ -243,8 +246,9 @@ interface is needed before that part can be drilled safely.
 ### `verify`
 
 ```text
-media-stack verify --environment staging [--suite smoke|full|promotion|restore-drill]
+media-stack verify --environment staging [--suite smoke|full|promotion|restore-drill|companions]
 media-stack verify --environment staging --suite promotion --legal-fixture fixtures/legal-movie.yaml
+media-stack verify --environment production --suite companions --output json
 ```
 
 - `smoke`: rendered schema, isolation, health, interface readiness, LAN reachability, and internal service-name resolution,
@@ -253,6 +257,8 @@ media-stack verify --environment staging --suite promotion --legal-fixture fixtu
   egress, and fail-closed behavior.
 - `promotion`: full plus required legal acquisition, hardlink import, discovery, and playback checks.
 - `restore-drill`: recovered state, isolation, rotated credentials, disabled acquisition, and gated integrations.
+- `companions`: read-only Houndarr/Cleanuparr policy, search ownership, and recent activity diagnostics in either Environment.
+  Controlled recovery evidence uses `--recovery-fixture` in disposable Staging; see the companion runbook.
 
 Disruptive checks restore perturbed state. Legal acquisition requires an explicit repository fixture. Success emits a
 content-addressed Verification Artifact binding environment, configuration and version digests, apply result, suites,
@@ -317,8 +323,25 @@ spec:
         profilarr: 6868
         jellyfin: 8096
         seerr: 5055
+        houndarr: 8877
+        cleanuparr: 11011
       secretsFile: secrets/production.sops.yaml
       hardwareTranscoding: auto
+      seriesAutomation:
+        enabled: true
+        search:
+          batchSize: 12
+          intervalMinutes: 30
+          hourlyCap: 12
+          cooldownDays: 1
+          releaseGraceHours: 6
+          allowedWindow: "06:00-00:00"
+          queueLimit: 2
+        recovery:
+          intervalMinutes: 5
+          strikes: 12
+          minimumSpeedKiB: 100
+          maximumRemainingHours: 24
       requirePromotionEvidence: true
 
     staging:
@@ -333,8 +356,25 @@ spec:
         profilarr: 16868
         jellyfin: 18096
         seerr: 15055
+        houndarr: 18877
+        cleanuparr: 21011
       secretsFile: secrets/staging.sops.yaml
       hardwareTranscoding: auto
+      seriesAutomation:
+        enabled: true
+        search:
+          batchSize: 12
+          intervalMinutes: 30
+          hourlyCap: 12
+          cooldownDays: 1
+          releaseGraceHours: 6
+          allowedWindow: "06:00-00:00"
+          queueLimit: 2
+        recovery:
+          intervalMinutes: 5
+          strikes: 12
+          minimumSpeedKiB: 100
+          maximumRemainingHours: 24
 
   acquisition:
     vpn:
@@ -372,6 +412,12 @@ spec:
       series: fixtures/legal-series.yaml
 ```
 
+Houndarr and Cleanuparr ports bind to `127.0.0.1` regardless of `lanBindAddress`; they have no Traefik routes.
+Declaring `seriesAutomation` includes both services and their state volumes. Set `enabled: false`, disable the Houndarr
+instance in its UI, and rerun apply to disable automation while retaining state. Omitting the declaration preserves legacy
+configuration compatibility but does not stop existing containers. See the
+[companion runbook](../../services/media/README.md#installation-and-automatic-first-run) for migration and policy ownership.
+
 Deliberately derive instead of configure:
 
 - `/data/torrents/movies`, `/data/torrents/series`, `/data/media/movies`, and `/data/media/series`;
@@ -406,6 +452,8 @@ images:
   profilarr: ghcr.io/dictionarry-hub/profilarr@sha256:<digest>
   jellyfin: jellyfin/jellyfin@sha256:<digest>
   seerr: ghcr.io/seerr-team/seerr@sha256:<digest>
+  houndarr: ghcr.io/av1155/houndarr@sha256:<digest>
+  cleanuparr: ghcr.io/cleanuparr/cleanuparr@sha256:<digest>
 
 policy:
   profilarrPcdRevision: <commit-or-content-digest>
@@ -430,10 +478,20 @@ jellyfin:
 qbittorrent:
   username: <secret>
   password: <secret>
+houndarr:
+  username: <secret>
+  password: <secret>
+cleanuparr:
+  username: <secret>
+  password: <secret>
+  apiKey: <retrieved by apply and encrypted before queue recovery is configured>
 ```
 
-Generated API keys remain mutable application state covered by backups unless a documented supported interface permits stable
-creation and storage. The CLI does not scrape config files or databases to populate this document.
+`init` collects companion usernames/passwords when `seriesAutomation` is declared. For existing Environments,
+`init --companions` adds missing credentials while preserving existing secrets and recipients. Apply retrieves Cleanuparr's
+API key through its authenticated account API and persists it encrypted; a stored API key also supports existing accounts
+with two-factor authentication. Existing accounts are never reset. Plan and verify never create accounts or update SOPS.
+Other generated API keys remain mutable application state covered by backups unless a documented interface permits storage.
 
 NordVPN account email/password and access tokens are not part of this schema. The first milestone uses manual-setup OpenVPN
 service credentials. Gluetun owns endpoint selection and catalogue refresh; the CLI does not query Nord's API. WireGuard is

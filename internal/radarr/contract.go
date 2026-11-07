@@ -15,6 +15,7 @@ func ConfigurationContract() []contractmodel.Setting {
 	for _, item := range []struct{ id, name string }{
 		{"profile", "Movie quality profile"},
 		{"profile.customFormats", "Movie custom-format scores"},
+		{"additionalProfiles", "Optional movie quality profiles"},
 		{"qualityDefinitions", "Movie quality definitions"},
 		{"naming.renameMovies", "Rename movies"},
 		{"naming.standardMovieFormat", "Standard movie format"},
