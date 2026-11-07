@@ -90,3 +90,9 @@ The same `TestNetworkDNSCommands` check covers the read-only DNS Cluster observe
 and catalog-aware declared-DNS reconciliation. See the
 [DNS Cluster procedure](services/network/docs/dns-cluster.md) for supervised live
 join, filtering, outage and promotion evidence; fixtures do not commission the Site.
+
+Protected DHCP command checks run with
+`go test ./tests/acceptance -run '^TestNetworkDHCPCommands$'` using Python 3,
+PyYAML, age and age-keygen, without a Docker daemon. The optional pinned-image
+operator and isolated DHCP-client rehearsals are documented in the
+[disabled DHCP staging procedure](services/network/docs/declared-dhcp.md).

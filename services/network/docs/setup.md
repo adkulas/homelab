@@ -207,11 +207,11 @@ via step 12. Keep the other resolver available and Bell DHCP enabled. Never rest
 
 ## 9. Stage DHCP without household allocation — homelab
 
-**Prerequisites:** Step 8, fresh backup gate, isolated test path and #107's exact-plan scope
-staging procedure. **Gate #107:** Scope creation in the pilot enabled allocation immediately;
+**Prerequisites:** Step 8, fresh backup gate, isolated test path and the
+[protected disabled DHCP procedure](declared-dhcp.md). Scope creation in the pilot enabled allocation immediately;
 creating a household-connected scope and disabling it afterward is unsafe.
 
-**Action:** Follow #107's isolated stage/apply workflow. Review scope bounds/excluded
+**Action:** Follow the linked isolated stage/apply workflow. Review scope bounds/excluded
 reservation band, MAC reservations, retained Bell gateway, both resolver options and
 `home` suffix against the encrypted topology. Use explicit two-resolver options with
 `useThisDnsServer` false. Verify allocation disabled before connecting household broadcasts.

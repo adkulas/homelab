@@ -72,3 +72,9 @@ filtering synchronization, read-only health checks and one-Host outage/promotion
 drills. The [DNS Cluster commissioning record](docs/dns-cluster-commissioning.md)
 contains the completed live join, filtering and sequential outage evidence, plus
 the measured promotion deadlines and remaining drill limits.
+
+The [protected DHCP staging procedure](docs/declared-dhcp.md) provides redacted
+read/plan/apply/verify commands for the encrypted Site topology. Every scope or
+reservation change requires an exact plan and fresh paired backup. Scope creation
+runs in an internal disposable bridge; only a disabled scope is imported to the
+primary. Bell continues household DHCP until the separately supervised handoff.

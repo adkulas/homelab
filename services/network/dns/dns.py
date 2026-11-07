@@ -477,18 +477,22 @@ def state_binding(desired, connection):
             'url': connection['url'].rstrip('/')}
 
 
-def save_state(path, desired, connection):
-    descriptor, temporary = tempfile.mkstemp(prefix='.dns-', dir=path.parent)
+def save_private_json(path, payload):
+    descriptor, temporary = tempfile.mkstemp(prefix='.network-', dir=path.parent)
     try:
         with os.fdopen(descriptor, 'wb') as output:
-            output.write(encode({'binding': state_binding(desired, connection),
-                                 'zones': desired['zones'], 'records': desired['records']}))
+            output.write(encode(payload))
             output.flush()
             os.fsync(output.fileno())
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def save_state(path, desired, connection):
+    save_private_json(path, {'binding': state_binding(desired, connection),
+                             'zones': desired['zones'], 'records': desired['records']})
 
 
 def apply(api, desired, previous, live, plan, args, state):
