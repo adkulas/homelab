@@ -12,13 +12,14 @@ install an automatic cluster mutation command.
 | Technitium console join | Two Host-assigned members, local and reverse zones in the cluster catalog, trusted direct HTTPS | #106; Site Inventory; pinned cluster API | Private before/after snapshot and live commissioning checks below |
 | Declared-DNS CLI | Preserve generated two-member NS and clustered SOA MNAME; retain Git-owned SOA timers, Host A, other Host PTRs and aliases; verify cluster-owned member PTRs; fail closed on wrong membership or catalog | #105/#106; ADR-0007; pinned cluster manager | Catalog alias lifecycle, member PTR ownership, address-source and retirement regression tests |
 | `cluster.py` | Read both Hosts directly; compare declared records, full local record sets/serials, filtering and relevant resolver policy; expose sync age and remaining secondary lifetime | #106; pinned API | Isolated CLI acceptance checks for healthy and symmetric divergent states |
-| Operator outage drill | Either survivor answers local/PTR, filtered and fresh external queries; fence former primary before promotion before the 72-hour margin | #106; supported promotion API | Timestamped live results; pending until measured |
-| Every operation | Pi DHCP disabled; no simultaneous service restart | #106; ADR-0007 | Read-only observer rejects enabled scopes; supervised service order and DHCP packet capture |
+| Operator outage drill | Either survivor answers local/PTR, filtered and fresh external queries; fence former primary before promotion before the 72-hour margin | #106; supported promotion API | [Measured one-Host drill and documented promotion deadline](dns-cluster-commissioning.md) |
+| Every operation | Pi DHCP disabled; no simultaneous service restart | #106; ADR-0007 | Read-only observer rejects enabled scopes; measured sequential recovery and absent UDP 67 listeners |
 
 The repository tests run through `go test ./tests/acceptance -run
 '^TestNetworkDNSCommands$'`. They use isolated HTTP/process fixtures, not household
 DNS. They establish command behavior, not live join, TLS, filtering, outage survival
-or promotion success. No live #106 commissioning result is claimed by this document.
+or promotion success. The [commissioning record](dns-cluster-commissioning.md)
+separately records the completed live join, filtering and one-Host outage checks.
 
 ## Ownership and pinned behavior
 
@@ -248,8 +249,10 @@ Prepare a new exact rejoin plan: clear its obsolete cluster configuration throug
 the supported primary Delete Cluster action (force only for the isolated stale
 cluster), preserve/recover credentials and private data, and resolve conflicting
 standalone copies of catalog member zones while isolated. Back up before any
-reviewed deletion. Then join that Host to the Pi as a secondary through trusted
-HTTPS. Verify catalog synchronization and disable DHCP before exposing LAN DNS.
+reviewed deletion. Verify public Site CA trust from the joining service runtime, including inside a
+container, before joining that Host to the Pi as a secondary through trusted HTTPS.
+Administrator browser trust alone does not establish runtime trust; container
+recreation requires that trust to be checked again. Verify catalog synchronization and disable DHCP before exposing LAN DNS.
 Do not restore an old cluster backup into an active unfenced peer.
 
 A permanent role reversal requires a separate reviewed Site Inventory change and
@@ -263,12 +266,11 @@ Never restart both Hosts together. If promotion or rejoin fails, keep the stale
 Host fenced and use the one surviving resolver plus the recovery packet; do not
 attempt blind symmetric restores.
 
-## Commissioning evidence — pending
+## Commissioning evidence
 
-Store full evidence privately and add only a redacted measured summary here after
-execution. Required entries: operator/date and approved plan, commit, both release
-versions, TLS trust checks, catalog membership and serials, matching A/alias/PTR
-answers, filtering add/remove and list-content results, configuration and actual
-transfer ages, expiry/promotion deadlines, each outage's duration and fresh external
-answers, fence and promotion/rejoin results, Pi resources, DHCP capture and restored
-normal roles. Current repository fixtures are not substitutes for any live entry.
+The [redacted commissioning record](dns-cluster-commissioning.md) records the live
+join, matching answers, filtering add/remove checks, actual transfer timestamps,
+sequential service-stop drills, promotion deadlines and final healthy state. It
+also distinguishes the short outage checks from unexercised 72-hour endurance,
+physical Host power loss and role promotion/rejoin. Keep full sensitive output and
+future exact plans in private recovery storage.

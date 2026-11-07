@@ -69,4 +69,6 @@ rejects unsafe Technitium lease-name updates.
 
 Use the [Site DNS Cluster procedure](docs/dns-cluster.md) for supervised join,
 filtering synchronization, read-only health checks and one-Host outage/promotion
-drills. Live #106 commissioning evidence remains pending.
+drills. The [DNS Cluster commissioning record](docs/dns-cluster-commissioning.md)
+contains the completed live join, filtering and sequential outage evidence, plus
+the measured promotion deadlines and remaining drill limits.
