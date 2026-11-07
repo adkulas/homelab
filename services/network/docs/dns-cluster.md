@@ -34,7 +34,7 @@ owns `cluster.home`, `cluster-catalog.cluster.home`, node identity, certificates
 catalog membership, generated NS, SOA MNAME and **both DNS members' PTR records**.
 Git owns the `.home` Host A records, service aliases, other Hosts' PTRs, SOA timers
 and contact, ordinary record TTL and the no-client-update policy. This ownership
-boundary is recorded in [ADR-0009](../../../docs/adr/0009-let-technitium-own-dns-cluster-member-ptrs.md).
+boundary is recorded in [ADR-0010](../../../docs/adr/0010-let-technitium-own-dns-cluster-member-ptrs.md).
 
 A member PTR targets its `.cluster.home` identity and uses the TTL of its cluster A
 record. Before trusting that source, both tools require one enabled, non-expiring A

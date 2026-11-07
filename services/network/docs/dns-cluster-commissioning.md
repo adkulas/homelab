@@ -76,7 +76,7 @@ in `clusterNodes`; the code and HTTP fixture now use that shape.
 
 The first Pi restart exposed a competing PTR writer: Technitium regenerates member
 PTRs from cluster identities and address-record TTLs. The operator approved
-[ADR-0009](../../../docs/adr/0009-let-technitium-own-dns-cluster-member-ptrs.md).
+[ADR-0010](../../../docs/adr/0010-let-technitium-own-dns-cluster-member-ptrs.md).
 Both DNS member PTRs are now Technitium-owned and verified against validated
 cluster A records; Git retains `.home` A records, aliases and other Hosts' PTRs.
 A supported same-address metadata refresh migrated homelab's remaining PTR and an

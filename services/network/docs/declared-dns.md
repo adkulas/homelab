@@ -58,7 +58,7 @@ and TTLs follow validated cluster A records. Member PTR drift blocks apply rathe
 than triggering a Git repair; use a separately approved supported node-metadata
 refresh. The journal marks these observed records `owner: technitium-cluster` and
 never prunes them. `.home` A records, aliases and other Hosts' PTRs remain Git-owned.
-See [ADR-0009](../../../docs/adr/0009-let-technitium-own-dns-cluster-member-ptrs.md). Cluster join, filtering,
+See [ADR-0010](../../../docs/adr/0010-let-technitium-own-dns-cluster-member-ptrs.md). Cluster join, filtering,
 health observation, outage, promotion and rejoin follow the linked procedure.
 
 An ownership journal outside Git records the last successfully verified zones and
