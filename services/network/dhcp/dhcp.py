@@ -181,7 +181,7 @@ def plan_for(desired, api, previous, live):
     implementation = {str(path.relative_to(NETWORK)): hashlib.sha256(path.read_bytes()).hexdigest()
                       for path in (Path(__file__), NETWORK / 'dns/dns.py', NETWORK / 'backup/backup.py',
                                    NETWORK / 'technitium.env')}
-    identifier = api.fingerprint({'desired': desired, 'previous': previous, 'live': live,
+    identifier = api.fingerprint({'desired': desired, 'previous': previous, 'live': dns.configuration(live),
         'connection': api.connection, 'commit': commit, 'implementation': implementation})
     return {'plan': identifier, 'commit': commit, 'protected': bool(changes),
             'changes': changes, 'unknown': unknown, 'blockers': sorted(set(blockers))}

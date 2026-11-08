@@ -84,7 +84,9 @@ python3 services/network/dhcp/dhcp.py plan --site "$SITE" --connection "$CONNECT
 Expect verified allocation `disabled` and an empty second plan. Unchanged apply
 requires no backup or approval and sends no API writes. Every change requires
 approval, including reservation additions. Plan IDs bind Git HEAD, source hashes,
-resolved values, connection/token, implementation, ownership and live state.
+resolved values, connection/token, implementation, ownership and live configuration.
+Cluster heartbeat and synchronization timestamps are excluded; member identities,
+roles and connection states remain bound to approval.
 Changed input invalidates approval; re-plan after committing code or declarations.
 The command re-reads everything after backup verification and disposable staging,
 immediately before import. Stop independent console/API writers during apply.
