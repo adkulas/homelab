@@ -20,8 +20,9 @@ prerequisites or perform the supervised household handoff.
 
 Use the same mode-0600 private connection JSON and primary HTTPS origin/CA as
 [declared DNS](declared-dns.md). Use a **separate DHCP token** with Settings View,
-Administration View, DHCP View, and the permissions needed for scope-only backup
-and restore (Settings Modify and DHCP Modify/Delete in the pinned release).
+Administration View and DHCP View, plus Settings Delete for scope-only restore.
+Settings Delete is broad: the pinned API also permits settings backup/restore and
+cannot limit that permission to DHCP import.
 The scope-only restore API is a privileged mutation boundary. Do not give this token,
 the recovery identity, or a captured approved plan to a Git polling service.
 
@@ -84,7 +85,9 @@ python3 services/network/dhcp/dhcp.py plan --site "$SITE" --connection "$CONNECT
 Expect verified allocation `disabled` and an empty second plan. Unchanged apply
 requires no backup or approval and sends no API writes. Every change requires
 approval, including reservation additions. Plan IDs bind Git HEAD, source hashes,
-resolved values, connection/token, implementation, ownership and live state.
+resolved values, connection/token, implementation, ownership and live configuration.
+Cluster heartbeat and synchronization timestamps are excluded; member identities,
+roles and connection states remain bound to approval.
 Changed input invalidates approval; re-plan after committing code or declarations.
 The command re-reads everything after backup verification and disposable staging,
 immediately before import. Stop independent console/API writers during apply.
@@ -126,8 +129,9 @@ creation/replication/removal/expiry, and exactly one isolated offer source, then
 removes the scope and disposable services. It refuses existing pilot state. Docker,
 Compose, dig, OpenSSL and the pinned client/probe images are required.
 
-[Staging evidence](../dhcp/evidence.md) records the disposable results. Household
-application still requires validated private topology, commissioned primary and
+[Staging evidence](../dhcp/evidence.md) records the disposable results. The
+[commissioning record](dhcp-commissioning.md) records the home Site's completed
+disabled staging and household offer check. Any subsequent household application requires validated private topology, commissioned primary and
 secondary, fresh real paired backups, private console readback and a supervised
 packet check that Bell remains the only household DHCP responder. No household
 scope or network setting is changed by the repository tests.

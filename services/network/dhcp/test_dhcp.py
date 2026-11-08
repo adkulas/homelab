@@ -220,3 +220,22 @@ class DHCPTests(unittest.TestCase):
         self.assertEqual(plan['unknown'][0]['kind'], 'scope')
         self.cli('apply', '--plan', plan['plan'], success=False)
         self.assertEqual(self.writes, [])
+
+    def test_plan_approval_survives_cluster_timestamps_but_rejects_role_changes(self):
+        self.topology()
+        self.cluster = {'clusterInitialized': True, 'clusterDomain': 'cluster.home',
+            'dnsServerDomain': 'homelab.cluster.home', 'clusterNodes': [
+                {'name': 'homelab.cluster.home', 'type': 'Primary', 'state': 'Self'},
+                {'name': 'raspberrypi.cluster.home', 'type': 'Secondary', 'state': 'Connected',
+                 'lastSeen': '2026-11-07T15:00:00Z', 'configLastSynced': '2026-11-07T14:59:00Z'}]}
+        initial = self.cli('plan')
+        self.assertEqual(initial['blockers'], [])
+        self.cluster['clusterNodes'][1].update(lastSeen='2026-11-07T15:01:00Z',
+                                               configLastSynced='2026-11-07T15:00:00Z')
+        self.assertEqual(self.cli('plan')['plan'], initial['plan'])
+        self.cluster['clusterNodes'][1]['type'] = 'Primary'
+        changed = self.cli('plan')
+        self.assertNotEqual(changed['plan'], initial['plan'])
+        self.assertIn('DHCP_ENDPOINT_NOT_DECLARED_PRIMARY', changed['blockers'])
+        self.cli('apply', '--plan', initial['plan'], success=False)
+        self.assertEqual(self.writes, [])
