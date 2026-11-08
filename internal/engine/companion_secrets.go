@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 
 	"github.com/adkulas/homelab/internal/config"
 )
@@ -22,7 +23,16 @@ func selectedSecretPath(configPath string, environment config.Environment) strin
 
 // patchEncryptedSecrets edits an encrypted temporary copy. Secret values travel
 // only over stdin; plaintext is never written to disk or included in diagnostics.
-func patchEncryptedSecrets(ctx context.Context, path string, branches map[string]any) error {
+func patchEncryptedSecrets(ctx context.Context, path string, branches map[string]any, environments ...config.Environment) error {
+	var originalDocument environmentSecretDocument
+	if err := readSecretDocument(ctx, path, &originalDocument); err != nil {
+		return err
+	}
+	if len(environments) > 0 && environments[0].SecretScope != nil {
+		if _, err := decryptSelectedEnvironmentSecrets(ctx, "", environments[0]); err != nil {
+			return err
+		}
+	}
 	original, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read encrypted companion secrets: %w", err)
@@ -41,6 +51,9 @@ func patchEncryptedSecrets(ctx context.Context, path string, branches map[string
 		return err
 	}
 	for branch, value := range branches {
+		if branch != "houndarr" && branch != "cleanuparr" {
+			return fmt.Errorf("only companion credentials may be patched")
+		}
 		encoded, err := json.Marshal(value)
 		if err != nil {
 			return fmt.Errorf("encode companion secrets")
@@ -52,7 +65,14 @@ func patchEncryptedSecrets(ctx context.Context, path string, branches map[string
 			return fmt.Errorf("encrypt companion secrets with SOPS; original document preserved")
 		}
 	}
-	if _, err := decryptEnvironmentSecrets(ctx, tempPath); err != nil {
+	var updatedDocument environmentSecretDocument
+	if err := readSecretDocument(ctx, tempPath, &updatedDocument); err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(originalDocument.Scope, updatedDocument.Scope) {
+		return fmt.Errorf("credential patch changed ownership")
+	}
+	if _, err := environmentSecretsFromDocument(updatedDocument); err != nil {
 		return fmt.Errorf("validate updated companion SOPS document; original document preserved")
 	}
 	updated, err := os.ReadFile(tempPath)

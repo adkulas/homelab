@@ -24,7 +24,7 @@ jobs:
       - name: Validate rendered Compose
         run: |
           set -o pipefail
-          go run ./cmd/media-stack plan --environment staging | docker compose -f - config --quiet
+          go run ./cmd/media-stack plan --site example --instance media --environment staging | docker compose -f - config --quiet
       - run: go test ./...
 
   pinned-qbittorrent-contract:

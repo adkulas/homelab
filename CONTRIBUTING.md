@@ -8,7 +8,7 @@ Build the Go CLI from source and run it directly from the repo root:
 ```bash
 CGO_ENABLED=0 go build -o bin/media-stack ./cmd/media-stack
 CGO_ENABLED=0 go build -o bin/homelab ./cmd/homelab
-./bin/media-stack init --environment staging
+./bin/media-stack init --site home --instance media-homelab --environment staging
 ```
 
 If you want to use the launcher instead, `setup.sh` expects a published GitHub Release asset and will download the pinned
@@ -19,14 +19,14 @@ disposable storage probes, and a binary linked against the host's C library may 
 
 ## Recommended first loop
 
-1. Edit `services/media/media-stack.yaml` so the `production` and `staging` environments have absolute, non-overlapping
+1. Edit `sites/home/instances/media-homelab.yaml` so the `production` and `staging` environments have absolute, non-overlapping
    `dataRoot` values and distinct LAN ports.
 2. Build the CLI locally with `CGO_ENABLED=0 go build -o bin/media-stack ./cmd/media-stack`.
-3. Run `./bin/media-stack init --environment staging` and complete the prompts.
-4. Follow with `./bin/media-stack doctor --environment staging` and `./bin/media-stack plan --environment staging`.
+3. Run `./bin/media-stack init --site home --instance media-homelab --environment staging` and complete the prompts.
+4. Follow with `./bin/media-stack doctor --site home --instance media-homelab --environment staging` and `./bin/media-stack plan --site home --instance media-homelab --environment staging`.
 5. Run the full test suite with `./bin/media-stack test` or `go test ./...` before opening a pull request.
 
-For repository-wide read-only inventory work, validate and plan through the compiled `homelab` CLI:
+Validate and plan Site Inventory through the compiled `homelab` CLI. Operational Media Stack commands use the same explicit Site and instance selection:
 
 ```bash
 ./bin/homelab site validate --site example

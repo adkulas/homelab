@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -12,13 +13,13 @@ import (
 	"github.com/adkulas/homelab/internal/config"
 )
 
-func NewInteractiveInitRequest(workingDirectory, environment, configPath string, input io.Reader, output io.Writer) (InitRequest, error) {
-	request, err := NewInitRequest(workingDirectory, environment, configPath, ".interactive")
+func NewInteractiveInitRequest(workingDirectory, environment, configPath string, input io.Reader, output io.Writer, deployments ...*Deployment) (InitRequest, error) {
+	request, err := NewInitRequest(workingDirectory, environment, configPath, ".interactive", deployments...)
 	if err != nil {
 		return InitRequest{}, err
 	}
 	request.answersPath = ""
-	declared, err := config.Load(request.configPath)
+	declared, err := request.load()
 	if err != nil {
 		return InitRequest{}, err
 	}
@@ -42,6 +43,9 @@ func NewInteractiveInitRequest(workingDirectory, environment, configPath string,
 
 	reader := bufio.NewReader(input)
 	answers := answersFromDeclaredConfiguration(declared, environment)
+	if err := existingSiteVPN(context.Background(), declared.Spec.Environments[environment], &answers); err != nil {
+		return InitRequest{}, err
+	}
 	identityChanged := false
 	if answers.RuntimeUID <= 0 {
 		answers.RuntimeUID, err = promptNumericIdentity(reader, output, "Runtime UID for intended operator", os.Getuid())
@@ -113,11 +117,15 @@ func NewInteractiveInitRequest(workingDirectory, environment, configPath string,
 		if err != nil {
 			return InitRequest{}, err
 		}
-		answers.ServiceUsername, err = promptRequired(reader, output, "NordVPN OpenVPN service username: ")
+		if answers.ServiceUsername == "" {
+			answers.ServiceUsername, err = promptRequired(reader, output, "NordVPN OpenVPN service username: ")
+		}
 		if err != nil {
 			return InitRequest{}, err
 		}
-		answers.ServicePassword, err = promptRequired(reader, output, "NordVPN OpenVPN service password: ")
+		if answers.ServicePassword == "" {
+			answers.ServicePassword, err = promptRequired(reader, output, "NordVPN OpenVPN service password: ")
+		}
 		if err != nil {
 			return InitRequest{}, err
 		}

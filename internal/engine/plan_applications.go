@@ -59,7 +59,7 @@ func ObserveConfiguration(ctx context.Context, request PlanRequest, plan Plan) [
 }
 
 func observeApplications(ctx context.Context, request PlanRequest, plan Plan) []PlanAction {
-	declared, err := config.Load(request.configPath)
+	declared, err := request.load()
 	if err != nil {
 		return deferredApplication("applications", err)
 	}

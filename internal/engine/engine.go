@@ -23,6 +23,7 @@ type PlanRequest struct {
 	configPath   string
 	versionsPath string
 	declared     *config.MediaStack
+	deployment   *Deployment
 }
 
 func NewResolvedPlanRequest(repositoryRoot, environment string, declared config.MediaStack) PlanRequest {
@@ -51,7 +52,7 @@ type Engine interface {
 type localEngine struct{}
 
 func NewPlanRequest(workingDirectory, environment, configPath string) (PlanRequest, error) {
-	repositoryRoot, err := findRepositoryRoot(workingDirectory)
+	repositoryRoot, err := RepositoryRoot(workingDirectory)
 	if err != nil {
 		return PlanRequest{}, err
 	}
@@ -109,7 +110,7 @@ func (localEngine) Plan(ctx context.Context, request PlanRequest) (Plan, error) 
 		environment,
 		declared.Spec.Acquisition.VPN,
 		versions.Images,
-		runtimeSecretDirectory(environment.ProjectName),
+		environmentRuntimeSecretDirectory(environment),
 		transcoding,
 	)
 	if err != nil {
@@ -130,7 +131,11 @@ func (plan Plan) Compose() []byte {
 	return append([]byte(nil), plan.compose...)
 }
 
-func findRepositoryRoot(start string) (string, error) {
+// RepositoryRoot resolves the explicit repository override or nearest Git checkout.
+func RepositoryRoot(start string) (string, error) {
+	if root := os.Getenv("HOMELAB_REPOSITORY_ROOT"); root != "" {
+		return filepath.Abs(root)
+	}
 	current, err := filepath.Abs(start)
 	if err != nil {
 		return "", fmt.Errorf("resolve working directory: %w", err)
@@ -147,4 +152,17 @@ func findRepositoryRoot(start string) (string, error) {
 		}
 		current = parent
 	}
+}
+
+func environmentRuntimeSecretDirectory(environment config.Environment) string {
+	scope := environment.RuntimeScope
+	if scope == "" {
+		scope = environment.ProjectName
+	}
+	return runtimeSecretDirectory(scope)
+}
+
+func selectedSecretsAvailable(ctx context.Context, configPath string, environment config.Environment) bool {
+	_, err := decryptSelectedEnvironmentSecrets(ctx, configPath, environment)
+	return err == nil
 }

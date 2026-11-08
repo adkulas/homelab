@@ -16,8 +16,8 @@ func HoundarrConfigurationContract() []contractmodel.Setting {
 		contractmodel.Fixed("search.eligibility", "Eligible episodes", "monitored, aired, missing, not queued", "Houndarr evaluates Sonarr wanted episodes and skips queued or ineligible items.", "verify"),
 		contractmodel.Fixed("bootstrap", "Configuration mechanism", "automated first run through authenticated web forms", "Init encrypts operator-selected credentials. Apply creates the account and local Sonarr connection through supported CSRF-protected web forms, verifies settings while paused, then enables searches. Existing configured connections require guided correction of drift; databases are never edited.", "initialize", "reconcile", "verify"),
 		contractmodel.Fixed("queueFailureMode", "Unavailable queue inspection", "fail-open", "Upstream backpressure counts Sonarr queue rows once at cycle start and permits searches if queue inspection fails.", "verify"),
-		companionAdminCredential("admin.username", "Houndarr admin username", "selected Environment SOPS document#houndarr.username", "initialize", "reconcile", "verify"),
-		companionAdminCredential("admin.password", "Houndarr admin password", "selected Environment SOPS document#houndarr.password", "initialize", "reconcile", "verify"),
+		companionAdminCredential("admin.username", "Houndarr admin username", "selected Stack Instance Environment SOPS document#houndarr.username", "initialize", "reconcile", "verify"),
+		companionAdminCredential("admin.password", "Houndarr admin password", "selected Stack Instance Environment SOPS document#houndarr.password", "initialize", "reconcile", "verify"),
 		contractmodel.SensitiveDerived("sonarr.apiKey", "Sonarr connection credential", "selected Environment Sonarr /config/config.xml", "Apply supplies the existing Environment Sonarr credential through authenticated web forms on first run; Houndarr encrypts it in its state.", "Update in the selected Environment's Houndarr UI after rotating Sonarr's API key.", "initialize", "verify"),
 		contractmodel.Fixed("sonarr.url", "Environment-local Sonarr target", "http://sonarr:8989", "The companion must address Sonarr on its own Compose application network.", "initialize", "verify"),
 	}
@@ -40,12 +40,12 @@ func CleanuparrConfigurationContract() []contractmodel.Setting {
 		contractmodel.Fixed("recovery.resetOnProgress", "Reset stall and slow strikes on progress", true, "Transient progress resets stall and slow strikes; metadata and failed-import strikes are cumulative upstream.", "reconcile", "verify"),
 		contractmodel.Fixed("recovery.failedImportScope", "Failed-import release faults", "No video files were found; Not a valid video file", "Only release-specific import failures qualify; permissions and disk faults require operator repair.", "reconcile", "verify"),
 		contractmodel.Fixed("recovery.skipUnavailableClient", "Skip unavailable download client", true, "Missing-client failures do not add failed-import strikes; short peer or VPN outages are tolerated by strike thresholds, not a global outage detector.", "reconcile", "verify"),
-		companionAdminCredential("admin.username", "Cleanuparr admin username", "selected Environment SOPS document#cleanuparr.username", "initialize"),
-		companionAdminCredential("admin.password", "Cleanuparr admin password", "selected Environment SOPS document#cleanuparr.password", "initialize"),
-		contractmodel.SensitiveDerived("apiKey", "Cleanuparr API key", "authenticated Cleanuparr account API -> selected Environment SOPS document#cleanuparr.apiKey", "Apply retrieves the existing account API key and encrypts it before reconciling queue recovery; existing stored API keys are preserved.", "Rotate through Cleanuparr and update the selected Environment SOPS document. Existing accounts with two-factor authentication require a stored API key.", "initialize", "reconcile", "verify"),
+		companionAdminCredential("admin.username", "Cleanuparr admin username", "selected Stack Instance Environment SOPS document#cleanuparr.username", "initialize"),
+		companionAdminCredential("admin.password", "Cleanuparr admin password", "selected Stack Instance Environment SOPS document#cleanuparr.password", "initialize"),
+		contractmodel.SensitiveDerived("apiKey", "Cleanuparr API key", "authenticated Cleanuparr account API -> selected Stack Instance Environment SOPS document#cleanuparr.apiKey", "Apply retrieves the existing account API key and encrypts it before reconciling queue recovery; existing stored API keys are preserved.", "Rotate through Cleanuparr and update the selected Environment SOPS document. Existing accounts with two-factor authentication require a stored API key.", "initialize", "reconcile", "verify"),
 		contractmodel.SensitiveDerived("sonarr.apiKey", "Sonarr API key", "selected Environment Sonarr /config/config.xml", "Reconciliation reuses the selected Environment Sonarr credential without rendering it.", "Rotate Sonarr's key and rerun apply.", "reconcile"),
-		contractmodel.Secret("qbittorrent.username", "qBittorrent username", "selected Environment SOPS document#qbittorrent.username", "reconcile"),
-		contractmodel.Secret("qbittorrent.password", "qBittorrent password", "selected Environment SOPS document#qbittorrent.password", "reconcile"),
+		contractmodel.Secret("qbittorrent.username", "qBittorrent username", "selected Stack Instance Environment SOPS document#qbittorrent.username", "reconcile"),
+		contractmodel.Secret("qbittorrent.password", "qBittorrent password", "selected Stack Instance Environment SOPS document#qbittorrent.password", "reconcile"),
 		contractmodel.Fixed("sonarr.url", "Sonarr target", "http://sonarr:8989", "Only the selected Compose network's Sonarr is configured; other Arr instances are rejected.", "reconcile", "verify"),
 		contractmodel.Derived("qbittorrent.url", "qBittorrent target", "spec.environments.<environment>.ports.qbittorrent", "The internal qbittorrent alias uses the selected Environment port.", "reconcile", "verify"),
 		contractmodel.Fixed("search.intervalMinutes", "Replacement dispatch interval", 2, "The shortest supported Seeker interval dispatches queued replacement searches every two minutes plus upstream jitter.", "reconcile", "verify"),
@@ -68,7 +68,7 @@ func CleanuparrConfigurationContract() []contractmodel.Setting {
 }
 
 func policyField(id, name, typ string, lifecycle ...contractmodel.Lifecycle) contractmodel.Setting {
-	return contractmodel.Declared(id, name, "media-stack.yaml#spec.environments.<environment>.seriesAutomation."+id, typ, nil, "Change the selected Environment seriesAutomation policy, rerun apply, and follow any guided Houndarr corrections.", lifecycle...)
+	return contractmodel.Declared(id, name, "StackInstance#spec.media.environments.<environment>.seriesAutomation."+id, typ, nil, "Change the selected Environment seriesAutomation policy, rerun apply, and follow any guided Houndarr corrections.", lifecycle...)
 }
 
 func companionAdminCredential(id, name, source string, lifecycle ...contractmodel.Lifecycle) contractmodel.Setting {

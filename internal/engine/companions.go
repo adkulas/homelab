@@ -39,7 +39,7 @@ func bootstrapSeriesCompanions(ctx context.Context, configPath string, environme
 			return err
 		}
 		branch := map[string]string{"username": secrets.CleanuparrAdmin.Username, "password": secrets.CleanuparrAdmin.Password, "apiKey": key}
-		if err := patchEncryptedSecrets(ctx, selectedSecretPath(configPath, environment), map[string]any{"cleanuparr": branch}); err != nil {
+		if err := patchEncryptedSecrets(ctx, selectedSecretPath(configPath, environment), map[string]any{"cleanuparr": branch}, environment); err != nil {
 			return err
 		}
 		secrets.CleanuparrKey = key

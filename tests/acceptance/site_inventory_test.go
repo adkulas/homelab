@@ -51,7 +51,7 @@ func TestSiteNamesResolveFromOutsideRepository(t *testing.T) {
 }
 
 func TestSitePlanDelegatesToExistingMediaStackPlanner(t *testing.T) {
-	legacy := planCommand(t, "--environment", "staging")
+	legacy := planCommand(t, "--site", "example", "--instance", "media", "--environment", "staging")
 	legacyOutput, err := legacy.CombinedOutput()
 	if err != nil {
 		t.Fatalf("legacy media-stack plan failed: %v\n%s", err, legacyOutput)
@@ -310,6 +310,7 @@ func TestEquivalentResourcesAreValidOnDifferentHosts(t *testing.T) {
 	fixture.utilityHost = strings.Replace(fixture.mediaHost, "name: media", "name: utility", 1)
 	second := strings.Replace(fixture.mediaInstance, "name: media", "name: media-two", 1)
 	second = strings.Replace(second, "host: media", "host: utility", 1)
+	second = strings.ReplaceAll(second, "secrets/media/", "secrets/media-two/")
 	fixture.addInstance("media-two.yaml", second)
 	root := fixture.write(t)
 	command := homelabCommand(t, "site", "validate", "--site", "fixture")
@@ -667,6 +668,7 @@ func (fixture *siteFixture) addInstance(filename, contents string) {
 
 func secondMediaInstance(source string, distinctPorts, distinctStorage, distinctRuntime bool) string {
 	result := strings.Replace(source, "name: media", "name: media-two", 1)
+	result = strings.ReplaceAll(result, "secrets/media/", "secrets/media-two/")
 	result = strings.Replace(result, "projectName: media-", "projectName: media-two-", -1)
 	if distinctRuntime {
 		result = strings.Replace(result, "runtimeIdentity: example-media", "runtimeIdentity: example-media-two", 1)

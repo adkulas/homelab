@@ -20,6 +20,7 @@ type InitRequest struct {
 	answersPath    string
 	answers        *initAnswers
 	companionsOnly bool
+	deployment     *Deployment
 }
 
 type InitReport struct {
@@ -50,11 +51,11 @@ type initAnswers struct {
 	QBittorrentPassword     string                               `yaml:"qbittorrentPassword"`
 }
 
-func NewInitRequest(workingDirectory, environment, configPath, answersPath string) (InitRequest, error) {
+func NewInitRequest(workingDirectory, environment, configPath, answersPath string, deployments ...*Deployment) (InitRequest, error) {
 	if environment != "production" && environment != "staging" {
 		return InitRequest{}, fmt.Errorf("environment %q is not production or staging", environment)
 	}
-	repositoryRoot, err := findRepositoryRoot(workingDirectory)
+	repositoryRoot, err := RepositoryRoot(workingDirectory)
 	if err != nil {
 		return InitRequest{}, err
 	}
@@ -69,14 +70,18 @@ func NewInitRequest(workingDirectory, environment, configPath, answersPath strin
 	if !filepath.IsAbs(answersPath) {
 		answersPath = filepath.Join(workingDirectory, answersPath)
 	}
-	return InitRequest{environment: environment, configPath: configPath, answersPath: answersPath}, nil
+	request := InitRequest{environment: environment, configPath: configPath, answersPath: answersPath}
+	if len(deployments) > 0 {
+		request = request.WithDeployment(deployments[0])
+	}
+	return request, nil
 }
 
 func (localEngine) Init(ctx context.Context, request InitRequest) (InitReport, error) {
 	if err := ctx.Err(); err != nil {
 		return InitReport{}, err
 	}
-	declared, err := config.Load(request.configPath)
+	declared, err := request.load()
 	if err != nil {
 		return InitReport{}, err
 	}
@@ -96,7 +101,7 @@ func (localEngine) Init(ctx context.Context, request InitRequest) (InitReport, e
 	secretExists := false
 	if _, err := os.Stat(secretsPath); err == nil {
 		secretExists = true
-		if _, err := decryptEnvironmentSecrets(ctx, secretsPath); err != nil {
+		if _, err := decryptSelectedEnvironmentSecrets(ctx, request.configPath, environment); err != nil {
 			return InitReport{}, err
 		}
 		if configurationAlreadyComplete {
@@ -117,14 +122,22 @@ func (localEngine) Init(ctx context.Context, request InitRequest) (InitReport, e
 			return InitReport{}, err
 		}
 	}
+	if err := existingSiteVPN(ctx, environment, &answers); err != nil {
+		return InitReport{}, err
+	}
 	if answers.HardwareTranscoding == "" {
 		answers.HardwareTranscoding = environment.HardwareTranscoding
 	}
 	if err := validateInitAnswers(answers, !secretExists); err != nil {
 		return InitReport{}, err
 	}
+	if request.deployment != nil {
+		if err := validateScopedInitPolicy(declared, answers); err != nil {
+			return InitReport{}, err
+		}
+	}
 	if !secretExists {
-		if err := encryptSecrets(ctx, secretsPath, answers, environment.SeriesAutomation != nil); err != nil {
+		if err := encryptSecrets(ctx, secretsPath, answers, environment.SeriesAutomation != nil, environment); err != nil {
 			return InitReport{}, err
 		}
 	}
@@ -150,7 +163,7 @@ func (localEngine) Init(ctx context.Context, request InitRequest) (InitReport, e
 	}
 	environment.HardwareTranscoding = answers.HardwareTranscoding
 	declared.Spec.Environments[request.environment] = environment
-	if err := config.Write(request.configPath, declared); err != nil {
+	if err := request.save(declared); err != nil {
 		return InitReport{}, err
 	}
 	if err := provisionDataLayout(environment.DataRoot, answers.RuntimeUID, answers.RuntimeGID); err != nil {
@@ -203,7 +216,7 @@ func validateInitAnswers(answers initAnswers, requireSecrets bool) error {
 	return nil
 }
 
-func encryptSecrets(ctx context.Context, destination string, answers initAnswers, companionsRequired bool) error {
+func encryptSecrets(ctx context.Context, destination string, answers initAnswers, companionsRequired bool, environments ...config.Environment) error {
 	if err := validateCompanionAnswers(answers, companionsRequired); err != nil {
 		return err
 	}
@@ -219,6 +232,9 @@ func encryptSecrets(ctx context.Context, destination string, answers initAnswers
 	document.Jellyfin.Password = answers.JellyfinPassword
 	document.QBittorrent.Username = answers.QBittorrentUsername
 	document.QBittorrent.Password = answers.QBittorrentPassword
+	if len(environments) > 0 && environments[0].SecretScope != nil {
+		return encryptScopedCredentials(ctx, destination, environments[0], document, answers.AgeRecipient)
+	}
 	plain, err := yaml.Marshal(document)
 	if err != nil {
 		return fmt.Errorf("encode environment secrets: %w", err)

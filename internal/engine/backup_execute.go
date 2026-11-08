@@ -45,7 +45,7 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 	if err := ctx.Err(); err != nil {
 		return BackupReport{}, err
 	}
-	declared, err := config.Load(request.plan.configPath)
+	declared, err := request.plan.load()
 	if err != nil {
 		return BackupReport{}, err
 	}
@@ -53,7 +53,7 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 		return BackupReport{}, err
 	}
 	environment := declared.Spec.Environments[request.plan.environment]
-	configContents, err := os.ReadFile(request.plan.configPath)
+	configContents, err := request.plan.configurationBytes()
 	if err != nil {
 		return BackupReport{}, fmt.Errorf("read Declared Configuration: %w", err)
 	}
@@ -158,6 +158,7 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 	}
 
 	report = BackupReport{
+		Scope:              environment.SecretScope,
 		SchemaVersion:      backupSchemaVersion,
 		CLIContractVersion: backupCLIContractVersion,
 		ID:                 id,

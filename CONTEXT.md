@@ -23,6 +23,7 @@ _Avoid_: App, Site, Compose project
 
 **Stack Instance**:
 A Site-owned use of one Stack, assigned to exactly one Host with its own placement-dependent inputs and runtime identity.
+Application credentials belong to the Stack Instance and its Environments and follow it when its Host assignment changes.
 _Avoid_: Deployment, Host stack
 
 **DNS Cluster**:

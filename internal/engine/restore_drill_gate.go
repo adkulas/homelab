@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/adkulas/homelab/internal/config"
 	"os"
 	"path/filepath"
 )
@@ -86,7 +87,7 @@ func confirmRestoreDrillGate(backupRoot, projectName string, encryptedCredential
 	return writeRestoreDrillGateState(gatePath, gate)
 }
 
-func restoreDrillSecretsForApply(ctx context.Context, backupRoot, projectName string) (environmentSecrets, bool, error) {
+func restoreDrillSecretsForApply(ctx context.Context, backupRoot, projectName string, environments ...config.Environment) (environmentSecrets, bool, error) {
 	gate, credentialsPath, err := readRestoreDrillGate(backupRoot, projectName)
 	if os.IsNotExist(err) {
 		return environmentSecrets{}, false, nil
@@ -97,7 +98,12 @@ func restoreDrillSecretsForApply(ctx context.Context, backupRoot, projectName st
 	if !gate.Confirmed {
 		return environmentSecrets{}, false, fmt.Errorf("Restore Drill integrations require explicit confirmation with media-stack restore --confirm-integrations")
 	}
-	secrets, err := decryptEnvironmentSecrets(ctx, credentialsPath)
+	var secrets environmentSecrets
+	if len(environments) > 0 {
+		secrets, err = decryptRestoreCredentials(ctx, credentialsPath, environments[0])
+	} else {
+		secrets, err = decryptEnvironmentSecrets(ctx, credentialsPath)
+	}
 	if err != nil {
 		return environmentSecrets{}, false, fmt.Errorf("decrypt confirmed Restore Drill credentials: %w", err)
 	}

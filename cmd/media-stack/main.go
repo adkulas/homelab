@@ -16,7 +16,9 @@ import (
 	"github.com/adkulas/homelab/internal/storageprobe"
 )
 
-const usage = `usage:
+const usage = `Operational commands require --site NAME --instance NAME (or an explicit standalone --config PATH).
+usage:
+  media-stack migrate-secrets --site name --instance name --legacy-config path
   media-stack config describe [--service name] [--output human|json]
   media-stack init --environment production|staging [--config path] --non-interactive --answers path
   media-stack doctor --environment production|staging [--config path] [--output human|json]
@@ -60,6 +62,8 @@ func run(ctx context.Context, arguments []string) error {
 		return fmt.Errorf("%s", usage)
 	}
 	switch arguments[0] {
+	case "migrate-secrets":
+		return runMigrateSecrets(ctx, arguments[1:])
 	case "config":
 		return runConfig(arguments[1:])
 	case "init":
@@ -91,7 +95,8 @@ func runVerify(ctx context.Context, arguments []string) error {
 	flags := flag.NewFlagSet("verify", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	environmentName := flags.String("environment", "", "Production or Staging Environment")
-	configPath := flags.String("config", "", "Declared Configuration path")
+	configPath := flags.String("config", "", "Explicit standalone Declared Configuration path")
+	selection := deploymentFlags(flags)
 	suite := flags.String("suite", "full", "verification suite")
 	output := flags.String("output", "human", "human or json")
 	legalFixture := flags.String("legal-fixture", "", "legal movie fixture for Promotion verification")
@@ -122,10 +127,15 @@ func runVerify(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("locate working directory: %w", err)
 	}
+	deployment, err := selection.resolve(ctx, workingDirectory, *environmentName, *configPath)
+	if err != nil {
+		return err
+	}
 	request, err := engine.NewVerifyRequest(workingDirectory, *environmentName, *configPath, *suite, *legalFixture, *legalSeriesFixture, *recoveryFixture)
 	if err != nil {
 		return err
 	}
+	request = request.WithDeployment(deployment)
 	report, err := engine.New().Verify(ctx, request)
 	if err != nil {
 		return operationalFailure{cause: err}
@@ -155,7 +165,8 @@ func runBackup(ctx context.Context, arguments []string) error {
 	flags := flag.NewFlagSet("backup", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	environmentName := flags.String("environment", "", "Production or Staging Environment")
-	configPath := flags.String("config", "", "Declared Configuration path")
+	configPath := flags.String("config", "", "Explicit standalone Declared Configuration path")
+	selection := deploymentFlags(flags)
 	label := flags.String("label", "", "optional backup label")
 	protect := flags.Bool("protect", false, "protect backup from retention")
 	nowValue := flags.String("now", "", "backup and retention time in RFC3339")
@@ -181,10 +192,15 @@ func runBackup(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("locate working directory: %w", err)
 	}
+	deployment, err := selection.resolve(ctx, workingDirectory, *environmentName, *configPath)
+	if err != nil {
+		return err
+	}
 	request, err := engine.NewBackupRequest(workingDirectory, *environmentName, *configPath, *label, *protect, now)
 	if err != nil {
 		return err
 	}
+	request = request.WithDeployment(deployment)
 	report, err := engine.New().Backup(ctx, request)
 	if err != nil {
 		return operationalFailure{cause: err}
@@ -202,7 +218,8 @@ func runRestore(ctx context.Context, arguments []string) error {
 	flags := flag.NewFlagSet("restore", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	environmentName := flags.String("environment", "", "Production or Staging Environment")
-	configPath := flags.String("config", "", "Declared Configuration path")
+	configPath := flags.String("config", "", "Explicit standalone Declared Configuration path")
+	selection := deploymentFlags(flags)
 	backupPath := flags.String("backup", "", "backup manifest path")
 	confirm := flags.Bool("confirm", false, "confirm the restore preview")
 	asRestoreDrill := flags.Bool("as-restore-drill", false, "permit production-to-staging drill restores")
@@ -225,10 +242,15 @@ func runRestore(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("locate working directory: %w", err)
 	}
+	deployment, err := selection.resolve(ctx, workingDirectory, *environmentName, *configPath)
+	if err != nil {
+		return err
+	}
 	request, err := engine.NewRestoreRequest(workingDirectory, *environmentName, *configPath, *backupPath, *credentialsPath, *confirm, *asRestoreDrill, *confirmIntegrations)
 	if err != nil {
 		return err
 	}
+	request = request.WithDeployment(deployment)
 	report, err := engine.New().Restore(ctx, request)
 	writeReport := func() error {
 		if *output != "json" {
@@ -272,7 +294,8 @@ func runApply(ctx context.Context, arguments []string) error {
 	flags := flag.NewFlagSet("apply", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	environmentName := flags.String("environment", "", "Production or Staging Environment")
-	configPath := flags.String("config", "", "Declared Configuration path")
+	configPath := flags.String("config", "", "Explicit standalone Declared Configuration path")
+	selection := deploymentFlags(flags)
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -283,10 +306,15 @@ func runApply(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("locate working directory: %w", err)
 	}
+	deployment, err := selection.resolve(ctx, workingDirectory, *environmentName, *configPath)
+	if err != nil {
+		return err
+	}
 	request, err := engine.NewApplyRequest(workingDirectory, *environmentName, *configPath)
 	if err != nil {
 		return err
 	}
+	request = request.WithDeployment(deployment)
 	report, err := engine.New().Apply(ctx, request)
 	if err != nil {
 		return operationalFailure{cause: err}
@@ -301,7 +329,8 @@ func runPromote(ctx context.Context, arguments []string) error {
 	flags := flag.NewFlagSet("promote", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	environmentName := flags.String("environment", "", "Production Environment")
-	configPath := flags.String("config", "", "Declared Configuration path")
+	configPath := flags.String("config", "", "Explicit standalone Declared Configuration path")
+	selection := deploymentFlags(flags)
 	verificationPath := flags.String("verification", "", "verification artifact path")
 	backupPath := flags.String("backup", "", "backup manifest path")
 	output := flags.String("output", "human", "human or json")
@@ -324,10 +353,15 @@ func runPromote(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("locate working directory: %w", err)
 	}
+	deployment, err := selection.resolve(ctx, workingDirectory, *environmentName, *configPath)
+	if err != nil {
+		return err
+	}
 	request, err := engine.NewPromoteRequest(workingDirectory, *environmentName, *configPath, *verificationPath, *backupPath)
 	if err != nil {
 		return err
 	}
+	request = request.WithDeployment(deployment)
 	report, err := engine.New().Promote(ctx, request)
 	if err != nil {
 		return operationalFailure{cause: err}
@@ -361,7 +395,8 @@ func runDoctor(ctx context.Context, arguments []string) error {
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	environmentName := flags.String("environment", "", "Production or Staging Environment")
-	configPath := flags.String("config", "", "Declared Configuration path")
+	configPath := flags.String("config", "", "Explicit standalone Declared Configuration path")
+	selection := deploymentFlags(flags)
 	output := flags.String("output", "human", "human or json")
 	if err := flags.Parse(arguments); err != nil {
 		return err
@@ -376,10 +411,15 @@ func runDoctor(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("locate working directory: %w", err)
 	}
+	deployment, err := selection.resolve(ctx, workingDirectory, *environmentName, *configPath)
+	if err != nil {
+		return err
+	}
 	request, err := engine.NewDoctorRequest(workingDirectory, *environmentName, *configPath)
 	if err != nil {
 		return err
 	}
+	request = request.WithDeployment(deployment)
 	report, err := engine.New().Doctor(ctx, request)
 	if err != nil {
 		return err
@@ -409,7 +449,8 @@ func runPlan(ctx context.Context, arguments []string) error {
 	flags := flag.NewFlagSet("plan", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	environmentName := flags.String("environment", "", "Production or Staging Environment")
-	configPath := flags.String("config", "", "Declared Configuration path")
+	configPath := flags.String("config", "", "Explicit standalone Declared Configuration path")
+	selection := deploymentFlags(flags)
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -421,10 +462,15 @@ func runPlan(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("locate working directory: %w", err)
 	}
+	deployment, err := selection.resolve(ctx, workingDirectory, *environmentName, *configPath)
+	if err != nil {
+		return err
+	}
 	request, err := engine.NewPlanRequest(workingDirectory, *environmentName, *configPath)
 	if err != nil {
 		return err
 	}
+	request = request.WithDeployment(deployment)
 	plan, err := engine.New().Plan(ctx, request)
 	if err != nil {
 		return err
@@ -440,7 +486,8 @@ func runInit(ctx context.Context, arguments []string) error {
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	environmentName := flags.String("environment", "", "Production or Staging Environment")
-	configPath := flags.String("config", "", "Declared Configuration path")
+	configPath := flags.String("config", "", "Explicit standalone Declared Configuration path")
+	selection := deploymentFlags(flags)
 	nonInteractive := flags.Bool("non-interactive", false, "Read all answers from a file")
 	answersPath := flags.String("answers", "", "Initialization answers path")
 	companionsOnly := flags.Bool("companions", false, "Add missing companion credentials to existing encrypted secrets")
@@ -454,19 +501,24 @@ func runInit(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("locate working directory: %w", err)
 	}
+	deployment, err := selection.resolve(ctx, workingDirectory, *environmentName, *configPath)
+	if err != nil {
+		return err
+	}
 	var request engine.InitRequest
 	if *companionsOnly && *nonInteractive {
-		request, err = engine.NewCompanionInitRequest(workingDirectory, *environmentName, *configPath, *answersPath)
+		request, err = engine.NewCompanionInitRequest(workingDirectory, *environmentName, *configPath, *answersPath, deployment)
 	} else if *companionsOnly {
-		request, err = engine.NewInteractiveCompanionInitRequest(ctx, workingDirectory, *environmentName, *configPath, os.Stdin, os.Stdout)
+		request, err = engine.NewInteractiveCompanionInitRequest(ctx, workingDirectory, *environmentName, *configPath, os.Stdin, os.Stdout, deployment)
 	} else if *nonInteractive {
-		request, err = engine.NewInitRequest(workingDirectory, *environmentName, *configPath, *answersPath)
+		request, err = engine.NewInitRequest(workingDirectory, *environmentName, *configPath, *answersPath, deployment)
 	} else {
-		request, err = engine.NewInteractiveInitRequest(workingDirectory, *environmentName, *configPath, os.Stdin, os.Stdout)
+		request, err = engine.NewInteractiveInitRequest(workingDirectory, *environmentName, *configPath, os.Stdin, os.Stdout, deployment)
 	}
 	if err != nil {
 		return err
 	}
+	request = request.WithDeployment(deployment)
 	report, err := engine.New().Init(ctx, request)
 	if err != nil {
 		return err
@@ -474,7 +526,7 @@ func runInit(ctx context.Context, arguments []string) error {
 	if report.Preserved {
 		fmt.Fprintf(os.Stdout, "Preserved existing %s Environment choices and encrypted secrets.\n", report.Environment)
 	} else if *companionsOnly {
-		fmt.Fprintf(os.Stdout, "Saved missing %s Environment companion credentials with SOPS. Run media-stack apply --environment %s to configure the services.\n", report.Environment, report.Environment)
+		fmt.Fprintf(os.Stdout, "Saved missing %s Environment companion credentials with SOPS. Run apply with the same deployment selection to configure the services.\n", report.Environment)
 	} else {
 		fmt.Fprintf(os.Stdout, "Initialized %s Environment Declared Configuration and encrypted secrets.\n", report.Environment)
 	}

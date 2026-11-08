@@ -4,5 +4,5 @@ func servicePortSource(service string) string {
 	if service == "gluetun" {
 		service = "qbittorrent"
 	}
-	return "media-stack.yaml#spec.environments.<environment>.ports." + service
+	return "StackInstance#spec.media.environments.<environment>.ports." + service
 }

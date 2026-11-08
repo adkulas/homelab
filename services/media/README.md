@@ -57,6 +57,24 @@ The command covers Gluetun, qBittorrent, Prowlarr, Sonarr, Radarr, Profilarr, Je
 
 Sonarr and Radarr naming are Externally Synchronized Policies owned by the pinned Profilarr fixtures, not Declared Configuration. Every service also states that absent upstream settings are Unmanaged Configuration that `media-stack` does not promise to observe, apply, or repair. A service-setting change must update its source-adjacent contract metadata and this runbook in the same change.
 
+## Selecting a deployment
+
+Every operational command requires `--site <site> --instance <instance>` and
+`--environment production|staging`. The home Media Stack Instance is
+`media-homelab`, assigned to Host `homelab`. An explicit standalone `--config`
+remains supported for legacy installations and migration; it cannot be combined
+with Site selectors, and there is no implicit global configuration fallback.
+`config describe` and `test` do not select a deployment.
+
+Deployment defaults, paths, ports, and application secret references live under
+`spec.media` in `sites/<site>/instances/<instance>.yaml`. Secret references are
+relative to the Site directory. Reusable acquisition policy remains in
+`services/media/media-stack.yaml`. To deploy another machine, declare another
+Host and Stack Instance, add both references to `site.yaml`, and run `init` for
+that instance. Give it distinct application secret paths, even on another Host.
+Compose project names, ports, and storage roots must be distinct on the same Host.
+Application credentials follow an instance if its Host assignment changes.
+
 ## Quick start
 
 ### 1. Prepare a supported host
@@ -118,7 +136,7 @@ You also need:
 
 ### 2. Configure and initialize Staging first
 
-Edit `services/media/media-stack.yaml` before the first run. At minimum, choose absolute, non-overlapping `dataRoot` and
+Edit `sites/home/instances/media-homelab.yaml` before the first run. At minimum, choose absolute, non-overlapping `dataRoot` and
 `backupRoot` values, Compose `projectName` values, secret-file paths, and non-conflicting LAN ports for Production and
 Staging. Each `backupRoot` must also be outside its Environment's `dataRoot`. `dataRoot` is not prompted by `init`; it is a declared path in the checked-in configuration, and `init` provisions it.
 The `backup` command creates `backupRoot` with private permissions. Set `runtimeUID` and `runtimeGID` to the numeric
@@ -133,7 +151,7 @@ From the repository root, initialize Staging:
 
 ```bash
 CGO_ENABLED=0 go build -o bin/media-stack ./cmd/media-stack
-./bin/media-stack init --environment staging
+./bin/media-stack init --site home --instance media-homelab --environment staging
 ```
 
 That local build path is the simplest way to start a fresh implementation from the current repository state. The
@@ -146,7 +164,7 @@ OpenVPN UDP or TCP, Gluetun catalogue interval, hardware transcoding preference,
 supply the same answers explicitly:
 
 ```bash
-media-stack init \
+media-stack init --site home --instance media-homelab \
   --environment staging \
   --non-interactive \
   --answers staging-answers.yaml
@@ -154,7 +172,7 @@ media-stack init \
 
 Initialization also asks for a unique, high-entropy Profilarr API key of at least 32 characters and distinct Jellyfin administrator credentials for the selected Environment. The Profilarr key lets the CLI use
 Profilarr's documented API to verify Environment-specific Radarr and Sonarr connections; use a different value for each
-Environment. Companion usernames/passwords are operator-selected, encrypted by init, and used for automatic first-run setup during apply; see the [companion setup flow](#installation-and-automatic-first-run). The Jellyfin credentials bootstrap or authenticate the selected Environment through its supported API and are used for Movie and Series Library playback verification. Initialization writes the reviewable Declared Configuration and `secrets/staging.sops.yaml`; it never starts containers. It
+Environment. Companion usernames/passwords are operator-selected, encrypted by init, and used for automatic first-run setup during apply; see the [companion setup flow](#installation-and-automatic-first-run). The Jellyfin credentials bootstrap or authenticate the selected Environment through its supported API and are used for Movie and Series Library playback verification. Initialization writes the reviewable Declared Configuration and `sites/home/secrets/media-homelab/staging.sops.yaml`; it never starts containers. It
 also creates only the selected Staging Environment layout:
 
 ```text
@@ -177,9 +195,9 @@ directories while preserving complete configuration and encrypted secrets.
 These commands are available now:
 
 ```bash
-media-stack doctor --environment staging
-media-stack doctor --environment staging --output json
-media-stack plan --environment staging > staging-compose.yaml
+media-stack doctor --site home --instance media-homelab --environment staging
+media-stack doctor --site home --instance media-homelab --environment staging --output json
+media-stack plan --site home --instance media-homelab --environment staging > staging-compose.yaml
 docker compose -f staging-compose.yaml config --quiet
 ```
 
@@ -204,10 +222,10 @@ Validate hardware acceleration on the actual target host after applying the rend
 
 ```bash
 test -c /dev/dri/renderD128
-media-stack doctor --environment staging
-media-stack plan --environment staging > staging-compose.yaml
+media-stack doctor --site home --instance media-homelab --environment staging
+media-stack plan --site home --instance media-homelab --environment staging > staging-compose.yaml
 docker compose -f staging-compose.yaml config --quiet
-media-stack apply --environment staging
+media-stack apply --site home --instance media-homelab --environment staging
 docker compose -f staging-compose.yaml exec jellyfin \
   /usr/lib/jellyfin-ffmpeg/vainfo --display drm --device /dev/dri/renderD128
 ```
@@ -226,11 +244,11 @@ Shell redirection is used above because `--out` is not implemented yet.
 After `doctor` passes, start Staging qBittorrent behind Gluetun:
 
 ```bash
-media-stack apply --environment staging
+media-stack apply --site home --instance media-homelab --environment staging
 ```
 
 The currently available `apply` phase decrypts the selected Environment's NordVPN OpenVPN service credentials, Profilarr API key, Jellyfin administrator credentials, and stable qBittorrent Web UI credentials. Only the OpenVPN values and Profilarr key are materialized as runtime files; Jellyfin and qBittorrent credentials remain in memory. It atomically materializes them as `0600` files beneath the operator's `0700`
-`$XDG_RUNTIME_DIR/media-stack/<projectName>/` directory, streams the value-free Compose model to Docker, starts
+`$XDG_RUNTIME_DIR/media-stack/<site>/<instance>/<environment>/<projectName>/` directory, streams the value-free Compose model to Docker, starts
 Gluetun, and waits up to two minutes for its built-in health check. Only after Gluetun is healthy does `apply` start
 qBittorrent, which shares Gluetun's network namespace. It then reconciles qBittorrent through its Web API: the default
 save path is `/data/torrents`; Automatic Torrent Management relocates downloads when their torrent, save path, or category
@@ -260,8 +278,8 @@ other services and application reconciliation.
 ### 5. Verify Staging VPN behavior and legal request-to-playback paths
 
 ```bash
-media-stack verify --environment staging --suite full
-media-stack verify --environment staging --suite full --output json
+media-stack verify --site home --instance media-homelab --environment staging --suite full
+media-stack verify --site home --instance media-homelab --environment staging --suite full --output json
 media-stack verify \
   --environment staging \
   --suite promotion \
@@ -292,8 +310,8 @@ The smoke and Restore Drill suites and content-addressed Verification Artifacts 
 Initialize Production separately, then use the Staging evidence when planning the Production change:
 
 ```bash
-media-stack init --environment production
-media-stack doctor --environment production
+media-stack init --site home --instance media-homelab --environment production
+media-stack doctor --site home --instance media-homelab --environment production
 media-stack plan \
   --environment production \
   --verified-by staging-verification.json \
@@ -370,7 +388,7 @@ application network, preserving `http://qbittorrent:<Environment qBittorrent por
 qBittorrent another route. The deployed design prohibits host networking, privileged mode, `FIREWALL=off`, and broad LAN
 firewall exceptions as kill-switch workarounds.
 
-`media-stack verify --environment staging --suite full [--config path] [--output human|json]` compares the public IP
+`media-stack verify --site home --instance media-homelab --environment staging --suite full [--output human|json]` compares the public IP
 seen from qBittorrent's shared namespace with a host-side observation, interrupts the tunnel, proves a fresh egress attempt
 fails instead of using the host route, then restores Gluetun, verifies tunneled egress returns, and proves the declared qBittorrent credential still authenticates from a disposable peer on the Environment application network.
 `--suite promotion` runs that proof first, then drives each supplied `--legal-fixture <path>` and
@@ -476,24 +494,25 @@ from silently becoming ineffective configuration.
 
 | YAML field | Current consumer | Exact effect |
 | --- | --- | --- |
-| `apiVersion` | all commands | Must be `homelab.media-stack/v1alpha1`. |
-| `kind` | all commands | Must be `MediaStack`. |
-| `spec.defaults.timezone` | `init`, `plan` | Validated as an IANA timezone; rendered as `TZ` for every service. |
-| `spec.defaults.runtimeUID` / `runtimeGID` | `init`, `plan` | Own newly created data directories; render as `PUID`/`PGID` for LinuxServer-style services and Compose `user` for Jellyfin and Seerr. |
-| `spec.defaults.lanBindAddress` | `plan` | Host address used for every published web port. `0.0.0.0` listens on all host interfaces. |
-| `spec.defaults.backupRetention.daily` / `weekly` / `monthly` | `backup` | Counts of unprotected archives retained in distinct UTC day, ISO-week, and UTC-month buckets. The checked-in policy is 7/4/6; counts must be non-negative and at least one tier must retain an archive. |
-| `spec.environments.<name>.projectName` | `plan`, `apply` | Compose project name; scopes networks, runtime secret paths, and config volumes independently for Production and Staging. |
-| `spec.environments.<name>.dataRoot` | `init`, `plan` | Absolute host root provisioned by `init`; mounted as the selected Environment `/data` seam. The other Environment root is never rendered. |
-| `spec.environments.<name>.backupRoot` | `backup` | Absolute host namespace for the Environment's application-state archives. Production and Staging roots must be non-overlapping and neither may overlap either Environment's `dataRoot`; `backup` creates the selected root privately and atomically publishes verified backup directories beneath it. |
-| `spec.environments.<name>.secretsFile` | `init`, `doctor`, `apply`, Promotion verification | Environment-specific SOPS document written by `init`; it contains isolated qBittorrent `username`/`password` keys alongside OpenVPN, Profilarr, and Jellyfin credentials. `apply` keeps qBittorrent credentials in memory, persists them through the supported API, and supplies them to both Arr clients. Existing documents missing either key fail with a migration remedy; `init` never silently overwrites them. `plan` never decrypts it. |
-| `spec.environments.<name>.hardwareTranscoding` | `init`, `doctor`, `plan` | Must be `auto` or `disabled`. `auto` detects and validates `/dev/dri/renderD128`; supported hosts add the Jellyfin device and numeric render group, while missing hardware keeps the portable topology. `disabled` always keeps the portable topology. |
-| `spec.environments.<name>.ports.qbittorrent` | `plan`, `apply` | Canonical qBittorrent port used by `WEBUI_PORT`, Gluetun host/target publication and firewall admission, CLI/browser access, the application-network alias endpoint, and both Arr download clients. qBittorrent has no direct published port. |
-| `spec.environments.<name>.ports.prowlarr` | `plan` | Host port for Prowlarr target `9696`. |
-| `spec.environments.<name>.ports.sonarr` | `plan` | Host port for Sonarr target `8989`. |
-| `spec.environments.<name>.ports.radarr` | `plan` | Host port for Radarr target `7878`. |
-| `spec.environments.<name>.ports.profilarr` | `plan` | Host port for Profilarr target `6868`. |
-| `spec.environments.<name>.ports.jellyfin` | `plan` | Host port for Jellyfin target `8096`. |
-| `spec.environments.<name>.ports.seerr` | `plan` | Host port for Seerr target `5055`. |
+| Stack policy `apiVersion` / `kind` | Stack policy loader | `services/media/media-stack.yaml` uses `homelab.media-stack/v1alpha1` and `MediaStack`. |
+| Stack Instance `apiVersion` / `kind` | scoped commands | `sites/<site>/instances/<instance>.yaml` uses `homelab.site/v1alpha1` and `StackInstance`; deployment fields live under `spec.media`. Explicit standalone `--config` retains `MediaStack` with `spec.defaults` and `spec.environments`. |
+| `spec.media.defaults.timezone` | `init`, `plan` | Validated as an IANA timezone; rendered as `TZ` for every service. |
+| `spec.media.defaults.runtimeUID` / `runtimeGID` | `init`, `plan` | Own newly created data directories; render as `PUID`/`PGID` for LinuxServer-style services and Compose `user` for Jellyfin and Seerr. |
+| `spec.media.defaults.lanBindAddress` | `plan` | Host address used for every published web port. `0.0.0.0` listens on all host interfaces. |
+| `spec.media.defaults.backupRetention.daily` / `weekly` / `monthly` | `backup` | Counts of unprotected archives retained in distinct UTC day, ISO-week, and UTC-month buckets. The checked-in policy is 7/4/6; counts must be non-negative and at least one tier must retain an archive. |
+| `spec.media.environments.<name>.projectName` | `plan`, `apply` | Compose project name; scopes networks, runtime secret paths, and config volumes independently for Production and Staging. |
+| `spec.media.environments.<name>.dataRoot` | `init`, `plan` | Absolute host root provisioned by `init`; mounted as the selected Environment `/data` seam. The other Environment root is never rendered. |
+| `spec.media.environments.<name>.backupRoot` | `backup` | Absolute host namespace for the Environment's application-state archives. Production and Staging roots must be non-overlapping and neither may overlap either Environment's `dataRoot`; `backup` creates the selected root privately and atomically publishes verified backup directories beneath it. |
+| `spec.media.vpnSecretsFile` | `init`, `doctor`, `apply`, verification | Site-relative reference to the separate Site-owned NordVPN SOPS document. |
+| `spec.media.environments.<name>.secretsFile` | `init`, `doctor`, `apply`, Promotion verification | Environment-specific SOPS document written by `init`; it contains isolated qBittorrent `username`/`password` keys alongside Profilarr, Jellyfin, Houndarr and Cleanuparr credentials; NordVPN comes from the separate Site VPN document. `apply` keeps qBittorrent credentials in memory, persists them through the supported API, and supplies them to both Arr clients. Existing documents missing either key fail with a migration remedy; `init` never silently overwrites them. `plan` never decrypts it. |
+| `spec.media.environments.<name>.hardwareTranscoding` | `init`, `doctor`, `plan` | Must be `auto` or `disabled`. `auto` detects and validates `/dev/dri/renderD128`; supported hosts add the Jellyfin device and numeric render group, while missing hardware keeps the portable topology. `disabled` always keeps the portable topology. |
+| `spec.media.environments.<name>.ports.qbittorrent` | `plan`, `apply` | Canonical qBittorrent port used by `WEBUI_PORT`, Gluetun host/target publication and firewall admission, CLI/browser access, the application-network alias endpoint, and both Arr download clients. qBittorrent has no direct published port. |
+| `spec.media.environments.<name>.ports.prowlarr` | `plan` | Host port for Prowlarr target `9696`. |
+| `spec.media.environments.<name>.ports.sonarr` | `plan` | Host port for Sonarr target `8989`. |
+| `spec.media.environments.<name>.ports.radarr` | `plan` | Host port for Radarr target `7878`. |
+| `spec.media.environments.<name>.ports.profilarr` | `plan` | Host port for Profilarr target `6868`. |
+| `spec.media.environments.<name>.ports.jellyfin` | `plan` | Host port for Jellyfin target `8096`. |
+| `spec.media.environments.<name>.ports.seerr` | `plan` | Host port for Seerr target `5055`. |
 | `spec.acquisition.vpn.provider` / `protocol` | `init`, `doctor`, `plan`, `apply` | Currently fixed to `nordvpn` and `openvpn`; rendered as Gluetun's explicit `VPN_SERVICE_PROVIDER` and `VPN_TYPE`. The CLI never requests a Nord access token or calls a Nord API. |
 | `spec.acquisition.vpn.openvpnProtocol` | `init`, `doctor`, `plan`, `apply` | `udp` by default or explicit `tcp`; validated against the pinned catalogue and rendered as `OPENVPN_PROTOCOL`. |
 | `spec.acquisition.vpn.server.countries` | `init`, `doctor`, `plan`, `apply` | Non-empty semantic country selection rendered as `SERVER_COUNTRIES`; an empty selection is rejected before Docker starts. |
@@ -542,18 +561,73 @@ Profilarr-owned policy, secrets, or backups.
 
 ## Secrets
 
+Application secrets belong to a Site, Stack Instance, and Environment. The home
+paths are `sites/home/secrets/media-homelab/production.sops.yaml` and
+`sites/home/secrets/media-homelab/staging.sops.yaml`. Each encrypted document has:
+
+```yaml
+scope:
+  site: home
+  instance: media-homelab
+  environment: staging
+# profilarr, jellyfin, qbittorrent, houndarr and cleanuparr credentials follow
+```
+
+These scope values are encrypted too. A mismatch fails before application startup
+or generated credential writeback. Radarr, Sonarr and Prowlarr API keys remain in
+the selected application's config volume. Cleanuparr's generated key is persisted
+only to the selected instance's Environment SOPS document.
+
+NordVPN credentials are intentionally shared by the Site in a separate document,
+`sites/home/secrets/nordvpn.sops.yaml`, referenced by `spec.media.vpnSecretsFile`:
+
+```yaml
+site: home
+nordvpn:
+  openvpn:
+    serviceUsername: <NordVPN-service-username>
+    servicePassword: <NordVPN-service-password>
+```
+
+`init` creates a missing Site VPN document once, and reuses an existing document
+without rewriting it. It prompts for VPN credentials only when that document is
+missing. Application initialization never embeds the VPN credentials in its
+Environment document. This credential document is separate from the Site's
+sensitive network inventory. Keep the age identity outside Git.
+
+To migrate an existing standalone installation without rotating credentials:
+
+```bash
+./bin/media-stack migrate-secrets --site home --instance media-homelab \
+  --legacy-config /path/to/legacy/media-stack.yaml
+```
+
+Declare the destination Stack Instance first. Migration skips missing legacy
+Environment files, preserves existing values and age recipients, rejects differing
+VPN credentials across source Environments, and refuses conflicting destinations.
+An identical repeat preserves destination ciphertext. Legacy sources are retained
+until you verify cutover and remove them explicitly. The checked-in home staging
+credentials have already been migrated; Production credentials are created by its
+own `init`. Git history and historical backups can still contain old encrypted
+copies.
+
+Restore Drill credential files must carry the destination staging scope and omit
+NordVPN; the destination Site VPN document supplies acquisition credentials. The
+usual fresh drill application credentials and integration confirmation still apply.
+
+
 Secrets are committed only as SOPS-encrypted values using age recipients. Age private identities remain outside Git. The CLI
 decrypts narrowly at runtime and uses Compose secret files where the target image supports them; plaintext values must not
 appear in arguments, rendered Compose, plans, reports, logs, diagnostics, or backup manifests.
 
 `apply` writes `openvpn_user`, `openvpn_password`, and `profilarr.env` beneath
-`$XDG_RUNTIME_DIR/media-stack/<projectName>/` (or a per-user directory under the system temporary directory when
+`$XDG_RUNTIME_DIR/media-stack/<site>/<instance>/<environment>/<projectName>/` (or a per-user directory under the system temporary directory when
 `XDG_RUNTIME_DIR` is unavailable). The directory is mode `0700` and every file is mode `0600`; only Gluetun receives the
 OpenVPN Compose secret mounts, while Profilarr receives its API key through the owner-only runtime environment file. Values are intentionally not stored in plaintext in the repository or embedded in rendered Compose. They
 remain present for container restart support and are atomically replaced on the next `apply`; ending the user's runtime
 session removes the standard runtime directory.
 
-Each Environment's SOPS document must also contain a unique Profilarr API key of at least 32 characters and distinct Jellyfin administrator credentials:
+Each Stack Instance Environment's SOPS document must also contain a unique Profilarr API key of at least 32 characters and distinct Jellyfin administrator credentials:
 
 ```yaml
 profilarr:
@@ -564,7 +638,7 @@ jellyfin:
 ```
 
 New `init` runs collect and encrypt these values. For an Environment initialized before Profilarr or Jellyfin reconciliation was implemented,
-open its existing document with `sops services/media/secrets/<environment>.sops.yaml`, add the block above, save it, and rerun
+open its existing document with `sops sites/home/secrets/media-homelab/<environment>.sops.yaml`, add the block above, save it, and rerun
 `apply`. The Profilarr key declaratively configures Profilarr and authenticates only its documented versioned API. Companion usernames/passwords are operator-selected, encrypted by init, and used for automatic first-run setup during apply; see the [companion setup flow](#installation-and-automatic-first-run). The Jellyfin credentials bootstrap or authenticate one local administrator through Jellyfin's supported API. These values remain in memory, are never placed in Compose, and are never printed.
 
 The initial VPN path uses NordVPN OpenVPN manual-setup service username/password with UDP by default and TCP as an explicit
@@ -697,12 +771,12 @@ Houndarr 18877 / Cleanuparr 21011. For remote management, use an SSH tunnel, e.g
 `ssh -L 18877:127.0.0.1:18877 -L 21011:127.0.0.1:21011 homelab`.
 
 1. Review `seriesAutomation` under each Environment in `media-stack.yaml`.
-   Fresh interactive `media-stack init --environment staging` asks you to choose
+   Fresh interactive `media-stack init --site home --instance media-homelab --environment staging` asks you to choose
    Houndarr and Cleanuparr administrator usernames and passwords. Password input
    is hidden on a terminal and confirmed before saving. Init encrypts these
    choices in the selected Environment SOPS document before creating accounts.
 2. For an already initialized Environment, run
-   `media-stack init --environment staging --companions`. This asks only for
+   `media-stack init --site home --instance media-homelab --environment staging --companions`. This asks only for
    missing companion credentials and preserves existing credentials, SOPS
    recipients, other secrets and Declared Configuration. If accounts already
    exist, enter their current credentials. Never send passwords in chat or tickets.
@@ -721,7 +795,7 @@ Houndarr 18877 / Cleanuparr 21011. For remote management, use an SSH tunnel, e.g
    Houndarr usernames allow 3–32 letters, digits, dots, underscores or dashes;
    passwords require at least 8 characters and at most 72 UTF-8 bytes.
    Cleanuparr usernames require 3–50 characters and passwords 8–128 characters.
-3. Run `media-stack apply --environment staging`. Apply disables Seerr's grouped
+3. Run `media-stack apply --site home --instance media-homelab --environment staging`. Apply disables Seerr's grouped
    series search, starts the companions, and creates first-run accounts using your
    chosen credentials through upstream setup interfaces. It retrieves Cleanuparr's
    account API key and saves it to `cleanuparr.apiKey` with SOPS before configuring
@@ -742,7 +816,7 @@ Houndarr 18877 / Cleanuparr 21011. For remote management, use an SSH tunnel, e.g
    `cleanuparr.apiKey` installations remain supported without storing admin login
    credentials; accounts with 2FA need their API key stored in SOPS. Regular init
    preserves an existing document; use `--companions` to add missing credentials.
-6. Run `media-stack verify --environment staging --suite companions --output json`.
+6. Run `media-stack verify --site home --instance media-homelab --environment staging --suite companions --output json`.
    Plan and verify do not create accounts or update SOPS. A confirmed Restore Drill continues to use its supplied credentials and requires existing companion setup; it does not bootstrap accounts or overwrite the Environment SOPS document. Then prove legal
    multi-episode request and recovery behavior in disposable Staging before
    Promotion. Promotion requires successful companion policy, episode
@@ -863,18 +937,18 @@ disposable Staging Environment and legal media fixtures.
 ## Backups, restore, and Restore Drills
 
 ```bash
-media-stack backup --environment production --protect --label before-upgrade
-media-stack restore --environment production --backup <backup-id>
-media-stack restore --environment production --backup <backup-id> --confirm
+media-stack backup --site home --instance media-homelab --environment production --protect --label before-upgrade
+media-stack restore --site home --instance media-homelab --environment production --backup <backup-id>
+media-stack restore --site home --instance media-homelab --environment production --backup <backup-id> --confirm
 media-stack restore \
   --environment staging \
   --backup <production-backup-id> \
   --as-restore-drill \
-  --credentials services/media/secrets/staging-drill.sops.yaml
+  --credentials sites/home/secrets/media-homelab/staging-drill.sops.yaml
 media-stack restore \
   --environment staging \
   --as-restore-drill \
-  --credentials services/media/secrets/staging-drill.sops.yaml \
+  --credentials sites/home/secrets/media-homelab/staging-drill.sops.yaml \
   --confirm-integrations
 ```
 
@@ -883,7 +957,7 @@ writes a versioned manifest last. Media and incomplete downloads are deliberatel
 application-state backups reconstruct the stack, while media protection is a separate storage policy.
 
 The command writes `<backupRoot>/<backup-id>/manifest.json` and one tar archive per rendered named volume under
-`archives/`. The manifest records Environment and Compose-project identity, the Declared Configuration and checked-in
+`archives/`. The manifest records Site/Stack Instance/Environment ownership and Compose-project identity, the Declared Configuration and checked-in
 version digests, immutable service images, Docker volume and mount identities, archive paths, sizes, SHA-256 checksums, and
 the consistency method. A failed run remains under `.incomplete-<backup-id>` without a manifest and cannot be restored.
 
@@ -894,7 +968,7 @@ Protected backups are never expired by retention. Production and Staging backups
 should preferably live on another disk or NAS. `--now` fixes the backup and retention clock for deterministic verification;
 omit it during ordinary operation.
 
-Ordinary restore only accepts a complete backup from the same Environment and Compose project. It verifies exact mutable
+Ordinary restore only accepts a complete backup from the same Environment and Compose project. Scoped manifests must also match the selected Site and Stack Instance; Restore Drills require a Production backup from that same instance. Legacy manifests without ownership retain the prior explicit project/Environment matching behavior. It verifies exact mutable
 service-volume coverage, immutable images, archive paths, sizes, and SHA-256 checksums before printing a replacement preview.
 Without `--confirm`, the preview is printed, persisted under `<backupRoot>/.restore-previews/`, and the command exits without
 invoking Docker. After reviewing that output, rerun the unchanged command with `--confirm`. Confirmation consumes the exact
@@ -934,24 +1008,22 @@ then removes the gate and encrypted copy; a failed apply remains safely gated fo
 
 | Command | Availability | What it does and why to use it |
 | --- | --- | --- |
-| `media-stack init --environment production|staging [--config path]` | Available | Interactively completes runtime/VPN choices, collects a unique Profilarr API key and distinct Jellyfin administrator credentials, encrypts that Environment's credentials, and provisions its isolated data layout. Use it once per Environment and rerun it to restore missing directories without replacing complete choices. |
-| `media-stack init --environment ... --companions` | Available | Adds missing operator-selected companion credentials to the selected existing SOPS document, preserving other choices. |
-| `media-stack init --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
-| `media-stack doctor --environment production|staging [--config path] [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
-| `media-stack plan --environment production|staging [--config path]` | Available, configuration observation | Reports ordered create, update, restart, guide, and retained-unknown observations as YAML comments, followed by rendered Compose YAML. It compares complete Compose service hashes; inventories project containers, networks, and volumes; and reuses the application reconciliation contracts behind a mutation-blocking HTTP boundary. If an observation dependency is unavailable, that subject is explicitly deferred. Use it before `apply` to inspect Declared Configuration drift or pipe the complete output to `docker compose config`. Saved Plan Artifacts remain a later planner phase. |
-| `media-stack apply --environment production|staging [--config path]` | Available through series automation | Uses the selected Environment's OpenVPN, Profilarr, Jellyfin, and stable qBittorrent credentials without printing them; reconciles qBittorrent, Radarr, Sonarr, Prowlarr, Profilarr, and Jellyfin, then starts Seerr, enables new Jellyfin users with request and Advanced Requests default permissions, preserves the Jellyfin administrator as an emergency local Seerr administrator, and converges the default non-4K Radarr and Sonarr destinations by resolving the selected Environment's pinned profile identities. When `seriesAutomation` is declared, it also bootstraps Houndarr and Cleanuparr accounts, persists the Cleanuparr API key encrypted, verifies Houndarr policy, and reconciles Cleanuparr recovery. Enabled automation disables Seerr grouped series searches. See the [companion setup flow](#installation-and-automatic-first-run). A pending Restore Drill gate refuses apply; after confirmation, the next successful apply uses those credentials and clears the gate. Fresh compatible Profilarr state is bootstrapped automatically; partial or unsupported state exits `1` with a stable recovery diagnostic. |
-| `media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--now RFC3339] [--output human|json]` | Available | Stops only running services with mutable named volumes, archives each volume through a read-only Docker mount, resumes those services, independently verifies every checksum, atomically publishes the selected Environment manifest last, then expires unprotected archives according to `backupRetention`. Use `--protect` for an archive that retention must preserve and `--now` only to fix the clock for deterministic verification. |
-| `media-stack restore --environment production|staging --backup manifest.json [--config path] [--confirm] [--as-restore-drill --credentials path] [--output human|json]` | Available | Validates complete compatible application-state coverage and checksums and persists the exact preview. Matching-Environment confirmation performs transactional replacement and restart. Restore Drill confirmation restores Production into Staging while preserving Profilarr, applying rotated runtime credentials, leaving acquisition and integrations stopped, and starting only Jellyfin. Both modes create a protected safety backup and operation journal and roll back on failure. |
-| `media-stack restore --environment staging --as-restore-drill --credentials path --confirm-integrations [--config path] [--output human|json]` | Available | Confirms reconnection only when the encrypted credential document matches the completed Restore Drill. The next successful `apply` uses those credentials, including qBittorrent authentication, and clears the durable gate; failures remain gated and retryable. |
-| `media-stack verify --environment production|staging --suite companions [--config path] [--output human|json]` | Available | Observes Houndarr/Cleanuparr policy, search ownership, and recent queue activity without mutating applications. See [verification and troubleshooting](#verification-and-troubleshooting) for controlled recovery evidence in disposable Staging. |
-| `media-stack verify --environment staging --suite full [--config path] [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, recovery, and stable declared authentication from an application-network peer after qBittorrent recreation. Use it after `apply` in Staging; it is deliberately rejected for Production. |
-| `media-stack verify --environment staging --suite promotion --legal-fixture path [--config path] [--output human|json]` | Available through Seerr-to-Movie-Library playback proof | Runs the full VPN proof, authenticates the household user to Seerr, submits an approved fixture movie request, grabs the exact Internet Archive release selected through Radarr into qBittorrent, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported path, and requires direct-play readiness. Use only in a disposable Staging Environment. Verification Artifact behavior remains planned. |
-| `media-stack verify --environment staging --suite promotion --legal-series-fixture path [--config path] [--output human|json]` | Available through Seerr-to-Series-Library playback proof | Runs the full VPN proof, authenticates the household user to Seerr, submits the selected fixture season as an approved series request, waits for Sonarr registration, grabs the exact Internet Archive release into qBittorrent, waits for Sonarr import, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported episode, and requires direct-play readiness. Supply both legal fixture flags to prove both libraries in one run. Use only in a disposable Staging Environment. |
+| `media-stack init --site home --instance media-homelab --environment production|staging` | Available | Interactively completes runtime/VPN choices, collects a unique Profilarr API key and distinct Jellyfin administrator credentials, encrypts that Environment's credentials, and provisions its isolated data layout. Use it once per Environment and rerun it to restore missing directories without replacing complete choices. |
+| `media-stack init --site home --instance media-homelab --environment ... --companions` | Available | Adds missing operator-selected companion credentials to the selected existing SOPS document, preserving other choices. |
+| `media-stack init --site home --instance media-homelab --environment ... --non-interactive --answers path` | Available | Performs the same initialization from a strict answer document. Use it for repeatable automation; missing or unknown answers fail. |
+| `media-stack doctor --site home --instance media-homelab --environment production|staging [--output human|json]` | Available | Runs host, tooling, secret, TUN, Gluetun-filter, and container-visible storage preflights through the declared runtime identity. Use it before attempting startup; exit `1` means at least one diagnostic failed. |
+| `media-stack plan --site home --instance media-homelab --environment production|staging` | Available, configuration observation | Reports ordered create, update, restart, guide, and retained-unknown observations as YAML comments, followed by rendered Compose YAML. It compares complete Compose service hashes; inventories project containers, networks, and volumes; and reuses the application reconciliation contracts behind a mutation-blocking HTTP boundary. If an observation dependency is unavailable, that subject is explicitly deferred. Use it before `apply` to inspect Declared Configuration drift or pipe the complete output to `docker compose config`. Saved Plan Artifacts remain a later planner phase. |
+| `media-stack apply --site home --instance media-homelab --environment production|staging` | Available through series automation | Uses the selected Environment's OpenVPN, Profilarr, Jellyfin, and stable qBittorrent credentials without printing them; reconciles qBittorrent, Radarr, Sonarr, Prowlarr, Profilarr, and Jellyfin, then starts Seerr, enables new Jellyfin users with request and Advanced Requests default permissions, preserves the Jellyfin administrator as an emergency local Seerr administrator, and converges the default non-4K Radarr and Sonarr destinations by resolving the selected Environment's pinned profile identities. When `seriesAutomation` is declared, it also bootstraps Houndarr and Cleanuparr accounts, persists the Cleanuparr API key encrypted, verifies Houndarr policy, and reconciles Cleanuparr recovery. Enabled automation disables Seerr grouped series searches. See the [companion setup flow](#installation-and-automatic-first-run). A pending Restore Drill gate refuses apply; after confirmation, the next successful apply uses those credentials and clears the gate. Fresh compatible Profilarr state is bootstrapped automatically; partial or unsupported state exits `1` with a stable recovery diagnostic. |
+| `media-stack backup --site home --instance media-homelab --environment production|staging [--label text] [--protect] [--now RFC3339] [--output human|json]` | Available | Stops only running services with mutable named volumes, archives each volume through a read-only Docker mount, resumes those services, independently verifies every checksum, atomically publishes the selected Environment manifest last, then expires unprotected archives according to `backupRetention`. Use `--protect` for an archive that retention must preserve and `--now` only to fix the clock for deterministic verification. |
+| `media-stack restore --site home --instance media-homelab --environment production|staging --backup manifest.json [--confirm] [--as-restore-drill --credentials path] [--output human|json]` | Available | Validates complete compatible application-state coverage and checksums and persists the exact preview. Matching-Environment confirmation performs transactional replacement and restart. Restore Drill confirmation restores Production into Staging while preserving Profilarr, applying rotated runtime credentials, leaving acquisition and integrations stopped, and starting only Jellyfin. Both modes create a protected safety backup and operation journal and roll back on failure. |
+| `media-stack restore --site home --instance media-homelab --environment staging --as-restore-drill --credentials path --confirm-integrations [--output human|json]` | Available | Confirms reconnection only when the encrypted credential document matches the completed Restore Drill. The next successful `apply` uses those credentials, including qBittorrent authentication, and clears the durable gate; failures remain gated and retryable. |
+| `media-stack verify --site home --instance media-homelab --environment production|staging --suite companions [--output human|json]` | Available | Observes Houndarr/Cleanuparr policy, search ownership, and recent queue activity without mutating applications. See [verification and troubleshooting](#verification-and-troubleshooting) for controlled recovery evidence in disposable Staging. |
+| `media-stack verify --site home --instance media-homelab --environment staging --suite full [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, recovery, and stable declared authentication from an application-network peer after qBittorrent recreation. Use it after `apply` in Staging; it is deliberately rejected for Production. |
+| `media-stack verify --site home --instance media-homelab --environment staging --suite promotion --legal-fixture path [--output human|json]` | Available through Seerr-to-Movie-Library playback proof | Runs the full VPN proof, authenticates the household user to Seerr, submits an approved fixture movie request, grabs the exact Internet Archive release selected through Radarr into qBittorrent, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported path, and requires direct-play readiness. Use only in a disposable Staging Environment. Verification Artifact behavior remains planned. |
+| `media-stack verify --site home --instance media-homelab --environment staging --suite promotion --legal-series-fixture path [--output human|json]` | Available through Seerr-to-Series-Library playback proof | Runs the full VPN proof, authenticates the household user to Seerr, submits the selected fixture season as an approved series request, waits for Sonarr registration, grabs the exact Internet Archive release into qBittorrent, waits for Sonarr import, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported episode, and requires direct-play readiness. Supply both legal fixture flags to prove both libraries in one run. Use only in a disposable Staging Environment. |
 | `media-stack destroy` | Planned | Will remove only selected-Environment runtime resources behind explicit safety guards. It is not accepted by the current binary. |
 
-Every currently available command requires an explicit `production` or `staging`; Production is never inferred. A relative
-`--config` path is resolved from the working directory, while omitting it selects `services/media/media-stack.yaml` from the
-repository root.
+Operational commands require explicit Site, Stack Instance and Environment selection; Production is never inferred. An explicit standalone `--config` path is resolved from the working directory and cannot be combined with Site selectors. `config describe`, `test`, and the all-Environment `migrate-secrets` command do not require an Environment selector.
 
 Unknown project containers, networks, and volumes are outside the Service Configuration Contract. `plan` reports them deterministically and `apply` retains them; they are observations rather than change actions. A plan containing only retained unknowns therefore prints `# plan: no changes` before the still-valid Compose document. Guarded pruning is implemented separately.
 

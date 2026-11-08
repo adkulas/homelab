@@ -5,7 +5,7 @@ func Declared(id, name, source, valueType string, allowed []string, change strin
 }
 
 func Secret(id, name, source string, lifecycle ...Lifecycle) Setting {
-	return Setting{ID: id, Name: name, Control: ControlSecret, Description: name + " is consumed without exposing its resolved value.", Source: source, Type: "string", Sensitive: true, Lifecycle: lifecycle, Status: StatusImplemented, OperatorChange: "Change the value in the selected Environment's SOPS document; media-stack never displays it."}
+	return Setting{ID: id, Name: name, Control: ControlSecret, Description: name + " is consumed without exposing its resolved value.", Source: source, Type: "string", Sensitive: true, Lifecycle: lifecycle, Status: StatusImplemented, OperatorChange: "Change the value in the SOPS document identified by this source; media-stack never displays it."}
 }
 
 func Derived(id, name, source, description string, lifecycle ...Lifecycle) Setting {
