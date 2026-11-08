@@ -23,7 +23,8 @@ image and synthetic topology. No private home addresses or MACs are recorded her
   one-minute expiry removed them. The isolated probe observed exactly one offer
   source. Pilot containers, volumes, bridge and credentials were removed.
 
-The household scope has not been applied. Primary/secondary commissioning, a real
-paired pre-change backup, private topology readback and a household offer-source
-check remain supervised deployment evidence. Client/DNS collision protection remains
-a prerequisite to household allocation; this work provides no household enable path.
+The household-connected scope was subsequently staged disabled on 2026-11-08 UTC;
+see the [commissioning record](../docs/dhcp-commissioning.md) for the real paired
+backup, private topology readback, unchanged repeat apply and Bell-only household
+offer check. Client/DNS collision protection remains a prerequisite to household
+allocation; this work provides no household enable path.
