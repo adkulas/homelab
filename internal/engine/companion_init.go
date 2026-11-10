@@ -12,18 +12,18 @@ import (
 
 // NewCompanionInitRequest adds missing companion credentials to an existing
 // Environment, preserving its configuration and all existing secret values.
-func NewCompanionInitRequest(workingDirectory, environment, configPath, answersPath string) (InitRequest, error) {
-	request, err := NewInitRequest(workingDirectory, environment, configPath, answersPath)
+func NewCompanionInitRequest(workingDirectory, environment, configPath, answersPath string, deployments ...*Deployment) (InitRequest, error) {
+	request, err := NewInitRequest(workingDirectory, environment, configPath, answersPath, deployments...)
 	request.companionsOnly = true
 	return request, err
 }
 
-func NewInteractiveCompanionInitRequest(ctx context.Context, workingDirectory, environment, configPath string, input io.Reader, output io.Writer) (InitRequest, error) {
-	request, err := NewCompanionInitRequest(workingDirectory, environment, configPath, ".interactive")
+func NewInteractiveCompanionInitRequest(ctx context.Context, workingDirectory, environment, configPath string, input io.Reader, output io.Writer, deployments ...*Deployment) (InitRequest, error) {
+	request, err := NewCompanionInitRequest(workingDirectory, environment, configPath, ".interactive", deployments...)
 	if err != nil {
 		return InitRequest{}, err
 	}
-	declared, err := config.Load(request.configPath)
+	declared, err := request.load()
 	if err != nil {
 		return InitRequest{}, err
 	}
@@ -50,7 +50,7 @@ func initializeCompanionSecrets(ctx context.Context, request InitRequest, enviro
 		return InitReport{}, fmt.Errorf("declare seriesAutomation for the selected Environment before initializing companions")
 	}
 	path := selectedSecretPath(request.configPath, environment)
-	secrets, err := decryptEnvironmentSecrets(ctx, path)
+	secrets, err := decryptSelectedEnvironmentSecrets(ctx, request.configPath, environment)
 	if err != nil {
 		return InitReport{}, err
 	}
@@ -92,7 +92,7 @@ func initializeCompanionSecrets(ctx context.Context, request InitRequest, enviro
 		}
 		branches[account.branch] = map[string]string{"username": desired.Username, "password": desired.Password}
 	}
-	if err := patchEncryptedSecrets(ctx, path, branches); err != nil {
+	if err := patchEncryptedSecrets(ctx, path, branches, environment); err != nil {
 		return InitReport{}, err
 	}
 	return InitReport{Environment: request.environment}, nil

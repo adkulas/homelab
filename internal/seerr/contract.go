@@ -4,10 +4,10 @@ import "github.com/adkulas/homelab/internal/contractmodel"
 
 func ConfigurationContract() []contractmodel.Setting {
 	return []contractmodel.Setting{
-		contractmodel.Secret("jellyfinAuthentication.credentials", "Household Jellyfin credentials", "selected Environment SOPS document#jellyfin", "initialize", "reconcile", "verify"),
+		contractmodel.Secret("jellyfinAuthentication.credentials", "Household Jellyfin credentials", "selected Stack Instance Environment SOPS document#jellyfin", "initialize", "reconcile", "verify"),
 		contractmodel.Fixed("jellyfinAuthentication.enabled", "Jellyfin sign-in", "enabled", "Existing and new household Jellyfin sign-ins are enabled.", "reconcile", "verify"),
 		contractmodel.Fixed("localAuthentication.enabled", "Emergency local sign-in", "enabled", "Local authentication remains enabled as an emergency path.", "reconcile", "verify"),
-		contractmodel.Secret("localAdministrator.password", "Emergency local administrator password", "selected Environment SOPS document#jellyfin.password", "initialize", "reconcile", "verify"),
+		contractmodel.Secret("localAdministrator.password", "Emergency local administrator password", "selected Stack Instance Environment SOPS document#jellyfin.password", "initialize", "reconcile", "verify"),
 		contractmodel.Fixed("localAdministrator.permission", "Emergency local administrator permission", "administrator permission bit", "The emergency local account is verified as an administrator.", "verify"),
 		contractmodel.Fixed("defaultRequestPermission", "New household request permission", "request and advanced requests", "New Jellyfin-authenticated users may select the quality profile for a new request; Advanced Requests also exposes available server, root-folder, and tag controls.", "reconcile"),
 		contractmodel.Fixed("householdProfileChoice", "Existing household profile choice", "advanced requests for existing requesters", "Add Advanced Requests to existing household requesters while preserving every other permission; existing downloaded movies require an administrator upgrade in Radarr.", "reconcile"),

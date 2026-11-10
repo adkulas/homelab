@@ -68,7 +68,7 @@ func TestPlanIsolatesSeriesCompanionsWithoutCredentialsOrMediaAccess(t *testing.
 }
 
 func TestPlanRejectsUnboundedCompanionSearches(t *testing.T) {
-	configuration := string(readFile(t, filepath.Join(repositoryRoot(t), "services/media/media-stack.yaml")))
+	configuration := string(readFile(t, filepath.Join(repositoryRoot(t), "tests/fixtures/media-stack.yaml")))
 	configuration = strings.Replace(configuration, "hourlyCap: 12", "hourlyCap: 0", 1)
 	if !strings.Contains(configuration, "hourlyCap: 0") {
 		t.Fatal("declared companion budget missing")
@@ -264,7 +264,7 @@ func TestCompanionVerificationReportsPolicyFailuresWithoutMutatingServices(t *te
 	defer seerrAPI.Close()
 
 	temporary := t.TempDir()
-	declared := string(readFile(t, filepath.Join(repositoryRoot(t), "services/media/media-stack.yaml")))
+	declared := string(readFile(t, filepath.Join(repositoryRoot(t), "tests/fixtures/media-stack.yaml")))
 	declared = strings.Replace(declared, "seerr: 15055", "seerr: "+strconv.Itoa(fixturePort(t, seerrAPI.URL)), 1)
 	declared = strings.Replace(declared, "houndarr: 18877", "houndarr: "+strconv.Itoa(fixturePort(t, fixtures.hound.URL)), 1)
 	declared = strings.Replace(declared, "cleanuparr: 21011", "cleanuparr: "+strconv.Itoa(fixturePort(t, fixtures.cleanup.URL)), 1)
@@ -512,7 +512,7 @@ func withoutSeriesAutomation(contents []byte) []byte {
 
 func TestPromotionRequiresSeriesCompanionEvidenceAndStateCoverage(t *testing.T) {
 	temporary := t.TempDir()
-	configuration := readFile(t, filepath.Join(repositoryRoot(t), "services/media/media-stack.yaml"))
+	configuration := readFile(t, filepath.Join(repositoryRoot(t), "tests/fixtures/media-stack.yaml"))
 	versions := readFile(t, filepath.Join(repositoryRoot(t), "services/media/versions.yaml"))
 	configPath := filepath.Join(temporary, "media-stack.yaml")
 	writeFile(t, configPath, configuration, 0600)
@@ -554,7 +554,7 @@ func TestPromotionRequiresSeriesCompanionEvidenceAndStateCoverage(t *testing.T) 
 }
 
 func TestPlanRejectsSharedCompanionIdentityAndPorts(t *testing.T) {
-	original := string(readFile(t, filepath.Join(repositoryRoot(t), "services/media/media-stack.yaml")))
+	original := string(readFile(t, filepath.Join(repositoryRoot(t), "tests/fixtures/media-stack.yaml")))
 	for _, scenario := range []struct{ name, old, new, diagnostic string }{
 		{"project", "projectName: media-staging", "projectName: media-production", "companion state"},
 		{"secrets", "secretsFile: secrets/staging.sops.yaml", "secretsFile: secrets/production.sops.yaml", "companion state"},

@@ -5,4 +5,6 @@ metadata:
 spec:
     capabilities:
         - containers.compose
+        - network.tun
+        - network.net-admin
     networkAddress: homelab-address

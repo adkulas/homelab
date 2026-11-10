@@ -10,7 +10,7 @@ func ConfigurationContract() []contractmodel.Setting {
 		contractmodel.Fixed("downloadClient.qbittorrent", "qBittorrent download client", "qbittorrent:Environment port", "Sonarr uses the internal qBittorrent address with completed-download handling.", "reconcile"),
 		contractmodel.Fixed("downloadClient.category", "Series acquisition category", "series", "Sonarr submits acquisition to the series category.", "reconcile"),
 		contractmodel.SensitiveDerived("apiKey", "Generated Sonarr API key", "Sonarr generated credential", "Sonarr generates this sensitive API credential; media-stack observes it from Environment-specific mutable state.", "Rotate it through Sonarr; media-stack observes the replacement on the next reconciliation.", "reconcile"),
-		contractmodel.Secret("downloadClient.credentials", "qBittorrent client credentials", "selected Environment SOPS document#qbittorrent", "reconcile"),
+		contractmodel.Secret("downloadClient.credentials", "qBittorrent client credentials", "selected Stack Instance Environment SOPS document#qbittorrent", "reconcile"),
 	}
 	for _, item := range []struct{ id, name string }{
 		{"profile", "Series quality profile"},

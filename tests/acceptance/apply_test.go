@@ -613,7 +613,7 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	declared := strings.Replace(string(readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml"))), "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
+	declared := strings.Replace(string(readFile(t, filepath.Join(repositoryRoot(t), "tests", "fixtures", "media-stack.yaml"))), "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
 	if freshProfilarr {
 		declared = strings.Replace(declared, "/mnt/backups/media/staging", filepath.Join(temporary, "backups"), 1)
 	}
@@ -1278,7 +1278,7 @@ func TestApplyRedactsCredentialsFromUnhealthyGluetunFailure(t *testing.T) {
 		t.Fatalf("build media-stack: %v\n%s", err, output)
 	}
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	writeFile(t, configPath, readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml")), 0o600)
+	writeFile(t, configPath, readFile(t, filepath.Join(repositoryRoot(t), "tests", "fixtures", "media-stack.yaml")), 0o600)
 	if err := os.Mkdir(filepath.Join(temporary, "secrets"), 0o700); err != nil {
 		t.Fatal(err)
 	}

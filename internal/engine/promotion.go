@@ -42,7 +42,7 @@ func (engine localEngine) Promote(ctx context.Context, request PromoteRequest) (
 	if err := ctx.Err(); err != nil {
 		return PromoteReport{}, err
 	}
-	declared, err := config.Load(request.plan.configPath)
+	declared, err := request.plan.load()
 	if err != nil {
 		return PromoteReport{}, err
 	}
@@ -63,7 +63,7 @@ func (engine localEngine) Promote(ctx context.Context, request PromoteRequest) (
 	if verification.Environment != "staging" {
 		return PromoteReport{}, fmt.Errorf("promotion requires a staging verification artifact")
 	}
-	if verification.ConfigDigest != fileDigest(request.plan.configPath) || verification.VersionsDigest != fileDigest(request.plan.versionsPath) {
+	if verification.ConfigDigest != request.plan.configurationDigest() || verification.VersionsDigest != fileDigest(request.plan.versionsPath) {
 		return PromoteReport{}, fmt.Errorf("verification artifact does not match the current Declared Configuration and checked-in versions")
 	}
 	backupFile, err := os.ReadFile(request.backupPath)
@@ -76,6 +76,12 @@ func (engine localEngine) Promote(ctx context.Context, request PromoteRequest) (
 	}
 	if backup.SchemaVersion != backupSchemaVersion {
 		return PromoteReport{}, fmt.Errorf("backup manifest schema version %q is unsupported", backup.SchemaVersion)
+	}
+	if backup.Scope != nil {
+		expected := declared.Spec.Environments["staging"].SecretScope
+		if expected == nil || *expected != *backup.Scope {
+			return PromoteReport{}, fmt.Errorf("backup ownership does not match selected Staging Environment")
+		}
 	}
 	if backup.Environment != "staging" {
 		return PromoteReport{}, fmt.Errorf("promotion requires a Staging backup")

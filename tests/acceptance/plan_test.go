@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -38,6 +39,9 @@ func TestPlanRendersCheckedInImagesForSelectedEnvironment(t *testing.T) {
 
 func planCommand(t *testing.T, arguments ...string) *exec.Cmd {
 	t.Helper()
+	if !slices.Contains(arguments, "--config") && !slices.Contains(arguments, "--site") {
+		arguments = append(arguments, "--config", filepath.Join(repositoryRoot(t), "tests/fixtures/media-stack.yaml"))
+	}
 	goArguments := append([]string{"run", "../../cmd/media-stack", "plan"}, arguments...)
 	command := exec.Command("go", goArguments...)
 	command.Dir = filepath.Join(repositoryRoot(t), "services", "media")

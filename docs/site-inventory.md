@@ -40,8 +40,7 @@ A kind `Host` has a unique `metadata.name` and capabilities from the v1alpha1 ca
 
 A kind `StackInstance` has a unique `metadata.name`, selects `stack: media`, binds one listed Host, declares a Host-scoped
 `runtimeIdentity`, and supplies typed `media.defaults` and `media.environments` inputs. The adapter combines those inputs with
-the reusable acquisition policy in `services/media/media-stack.yaml` and the checked-in image versions. The legacy
-`media-stack` command remains available during migration.
+the reusable acquisition policy in `services/media/media-stack.yaml` and the checked-in image versions. Operational `media-stack` commands select the same placement using `--site` and `--instance`; an explicit legacy `--config` remains supported during migration.
 
 For the network Stack, a Stack Instance selects `stack: network`, binds a listed Host, and declares `network.role` as
 `primary` or `secondary`. The Site's `spec.dnsCluster` names one of each on distinct Hosts. A Site may then declare
@@ -113,9 +112,24 @@ rendered output with `<redacted:<id>>`. Each claim is the lowercase SHA-256 dige
 offline validation detect equality and containment without decrypting exact paths. Planning recomputes them from the
 decrypted value and rejects stale or dishonest claims before rendering. JSON lists each ID with a `<redacted>` value.
 Decryption failures and invalid or
-missing IDs use stable diagnostics and never include plaintext or ciphertext. Application credentials remain in the SOPS
-documents named by each Media Stack Environment; Site Inventory does not absorb them. Databases, media, downloads, caches,
+missing IDs use stable diagnostics and never include plaintext or ciphertext. Application credentials remain in the SOPS documents named by each Stack Instance Environment. References are relative to the Site directory and may not escape it or traverse symlinks. Each document carries encrypted Site, instance and Environment ownership, checked before use. `media.vpnSecretsFile` references a separate Site-owned NordVPN SOPS document shared intentionally across instances; it is separate from sensitive network inventory. Application secret references must be distinct across instances even when their Hosts differ. Databases, media, downloads, caches,
 logs, and other runtime state remain under each Stack's backup and restore contract and never belong in Site Inventory.
 
 Future Stack-to-Stack relationships must use typed outputs and inputs. They must not inspect another Stack's Compose file,
 database, or private implementation.
+
+## Media Stack credential selection
+
+The example declares `media.vpnSecretsFile: secrets/nordvpn.sops.yaml` and
+`media.environments.<name>.secretsFile: secrets/media/<name>.sops.yaml`.
+Application documents need not exist for validation or planning; `init` creates
+them. `site validate` detects shared application documents, escaping/symlinked
+references and same-Host Compose project collisions without decrypting credentials.
+Operational resolution performs these collision checks before any secret write.
+
+```bash
+./bin/media-stack init --site home --instance media-homelab --environment staging
+./bin/media-stack plan --site home --instance media-homelab --environment staging
+```
+
+See the [credential migration and ownership runbook](../services/media/README.md#secrets).

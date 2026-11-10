@@ -49,6 +49,11 @@ type restoreOperation struct {
 }
 
 func (engine localEngine) executeRestore(ctx context.Context, request RestoreRequest, backup BackupReport, sources []backupSource, compose []byte, report RestoreReport, drillSecrets, stagingSecrets, sourceSecrets environmentSecrets, jellyfinURL string) (result RestoreReport, returnErr error) {
+	declared, err := request.plan.load()
+	if err != nil {
+		return RestoreReport{}, err
+	}
+	environment := declared.Spec.Environments[request.plan.environment]
 	helperImage, err := restoreHelperImage(backup.Services)
 	if err != nil {
 		return RestoreReport{}, err
@@ -186,14 +191,14 @@ func (engine localEngine) executeRestore(ctx context.Context, request RestoreReq
 		return RestoreReport{}, err
 	}
 	if request.asRestoreDrill {
-		if err := materializeRuntimeSecrets(runtimeSecretDirectory(report.ProjectName), drillSecrets); err != nil {
+		if err := materializeRuntimeSecrets(environmentRuntimeSecretDirectory(environment), drillSecrets); err != nil {
 			return RestoreReport{}, fmt.Errorf("materialize restore drill credentials: %w", err)
 		}
 		defer func() {
 			if returnErr == nil {
 				return
 			}
-			if err := materializeRuntimeSecrets(runtimeSecretDirectory(report.ProjectName), stagingSecrets); err != nil {
+			if err := materializeRuntimeSecrets(environmentRuntimeSecretDirectory(environment), stagingSecrets); err != nil {
 				returnErr = errors.Join(returnErr, fmt.Errorf("restore staging runtime credentials after failed drill: %w", err))
 			}
 		}()

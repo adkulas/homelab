@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/adkulas/homelab/internal/config"
 )
 
 var ErrRestoreConfirmationRequired = errors.New("restore requires --confirm")
@@ -61,7 +59,7 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	if err := ctx.Err(); err != nil {
 		return RestoreReport{}, err
 	}
-	declared, err := config.Load(request.plan.configPath)
+	declared, err := request.plan.load()
 	if err != nil {
 		return RestoreReport{}, err
 	}
@@ -84,7 +82,7 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 		if err != nil {
 			return RestoreReport{}, fmt.Errorf("read Restore Drill confirmation credentials: %w", err)
 		}
-		if _, err := decryptEnvironmentSecrets(ctx, request.credentialsPath); err != nil {
+		if _, err := decryptRestoreCredentials(ctx, request.credentialsPath, environment); err != nil {
 			return RestoreReport{}, fmt.Errorf("validate Restore Drill confirmation credentials: %w", err)
 		}
 		if err := confirmRestoreDrillGate(environment.BackupRoot, environment.ProjectName, credentialsContents); err != nil {
@@ -120,6 +118,12 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	if backup.CLIContractVersion != backupCLIContractVersion || !backup.Complete {
 		return RestoreReport{}, fmt.Errorf("backup is not a complete compatible %s archive", request.plan.environment)
 	}
+	if backup.Scope != nil {
+		expected := environment.SecretScope
+		if expected == nil || backup.Scope.Site != expected.Site || backup.Scope.Instance != expected.Instance || backup.Scope.Environment != backup.Environment {
+			return RestoreReport{}, fmt.Errorf("backup ownership does not match selected Site and Stack Instance")
+		}
+	}
 	if backup.Environment != request.plan.environment && !request.asRestoreDrill {
 		return RestoreReport{}, fmt.Errorf("restore requires a backup from the %s Environment", request.plan.environment)
 	}
@@ -144,7 +148,7 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 		if err != nil {
 			return RestoreReport{}, fmt.Errorf("read restore drill credentials: %w", err)
 		}
-		drillSecrets, err = decryptEnvironmentSecrets(ctx, request.credentialsPath)
+		drillSecrets, err = decryptRestoreCredentials(ctx, request.credentialsPath, environment)
 		if err != nil {
 			return RestoreReport{}, fmt.Errorf("validate restore drill credentials: %w", err)
 		}

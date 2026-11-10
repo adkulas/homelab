@@ -52,6 +52,10 @@ func (preference HardwareTranscodingPreference) Valid() bool {
 }
 
 type Environment struct {
+	// SecretScope and RuntimeScope are resolved by Site Inventory, never read from YAML.
+	SecretScope         *SecretScope                  `yaml:"-"`
+	RuntimeScope        string                        `yaml:"-"`
+	VPNSecretsFile      string                        `yaml:"-"`
 	ProjectName         string                        `yaml:"projectName"`
 	DataRoot            string                        `yaml:"dataRoot"`
 	SecretsFile         string                        `yaml:"secretsFile"`
@@ -59,6 +63,13 @@ type Environment struct {
 	HardwareTranscoding HardwareTranscodingPreference `yaml:"hardwareTranscoding"`
 	SeriesAutomation    *SeriesAutomation             `yaml:"seriesAutomation,omitempty"`
 	Ports               Ports                         `yaml:"ports"`
+}
+
+// SecretScope identifies the owner of application credentials independently of placement.
+type SecretScope struct {
+	Site        string `yaml:"site" json:"site"`
+	Instance    string `yaml:"instance" json:"instance"`
+	Environment string `yaml:"environment" json:"environment"`
 }
 
 type Acquisition struct {
@@ -107,6 +118,8 @@ type Policy struct {
 	ProfilarrPCDRevision string `yaml:"profilarrPcdRevision"`
 }
 
+var composeProjectName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
 var digestReference = regexp.MustCompile(`^[^[:space:]@]+@sha256:[a-f0-9]{64}$`)
 
 func Load(path string) (MediaStack, error) {
@@ -154,6 +167,9 @@ func (declared MediaStack) validateEnvironment(name string, allowMissingHardware
 		return fmt.Errorf("environment %q is not declared", name)
 	}
 	for environmentName, environment := range declared.Spec.Environments {
+		if environment.ProjectName != "" && !composeProjectName.MatchString(environment.ProjectName) {
+			return fmt.Errorf("environment %s requires a valid Compose project name", environmentName)
+		}
 		if environment.SeriesAutomation != nil {
 			if err := environment.SeriesAutomation.Validate(); err != nil {
 				return fmt.Errorf("environment %s: %w", environmentName, err)

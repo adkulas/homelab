@@ -4,8 +4,8 @@ import "github.com/adkulas/homelab/internal/contractmodel"
 
 func ConfigurationContract() []contractmodel.Setting {
 	return []contractmodel.Setting{
-		contractmodel.Secret("webUI.username", "Stable Web UI username", "selected Environment SOPS document#qbittorrent.username", "initialize", "reconcile", "verify"),
-		contractmodel.Secret("webUI.password", "Stable Web UI password", "selected Environment SOPS document#qbittorrent.password", "initialize", "reconcile", "verify"),
+		contractmodel.Secret("webUI.username", "Stable Web UI username", "selected Stack Instance Environment SOPS document#qbittorrent.username", "initialize", "reconcile", "verify"),
+		contractmodel.Secret("webUI.password", "Stable Web UI password", "selected Stack Instance Environment SOPS document#qbittorrent.password", "initialize", "reconcile", "verify"),
 		contractmodel.SensitiveDerived("bootstrap.temporaryPassword", "Current-start temporary password", "qBittorrent current-start bootstrap credential", "A fresh service may expose one temporary bootstrap credential; media-stack consumes it in memory and replaces it.", "It cannot be set through Declared Configuration; restart a fresh qBittorrent configuration to regenerate it.", "initialize"),
 		contractmodel.Fixed("api.protectedVerification", "Protected API verification", "/api/v2/app/version", "Authentication succeeds only after a protected API observation.", "verify"),
 		contractmodel.Fixed("peerAuthentication", "Application-network peer authentication", "pinned disposable peer probe", "Verification proves the declared credentials work from an application-network peer after restart.", "verify"),

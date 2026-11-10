@@ -12,7 +12,7 @@ func TestDocumentationExplainsLocalBootstrapAndDeclaredDataRoot(t *testing.T) {
 
 	for _, want := range []string{
 		"go build -o bin/media-stack ./cmd/media-stack",
-		"./bin/media-stack init --environment staging",
+		"./bin/media-stack init --site home --instance media-homelab --environment staging",
 		"`setup.sh` expects a published GitHub Release asset",
 		"`dataRoot` is not prompted by `init`",
 		"declared path in the checked-in configuration",

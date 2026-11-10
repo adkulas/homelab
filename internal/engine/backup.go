@@ -33,19 +33,20 @@ type RetentionDecision struct {
 }
 
 type BackupReport struct {
-	SchemaVersion      string          `json:"schemaVersion"`
-	CLIContractVersion string          `json:"cliContractVersion"`
-	ID                 string          `json:"id"`
-	ManifestPath       string          `json:"manifestPath"`
-	Environment        string          `json:"environment"`
-	ProjectName        string          `json:"projectName"`
-	Label              string          `json:"label,omitempty"`
-	Protected          bool            `json:"protected"`
-	ConfigDigest       string          `json:"configDigest"`
-	VersionDigest      string          `json:"versionDigest"`
-	GeneratedAt        time.Time       `json:"generatedAt"`
-	Complete           bool            `json:"complete"`
-	Services           []BackupService `json:"services"`
+	Scope              *config.SecretScope `json:"scope,omitempty"`
+	SchemaVersion      string              `json:"schemaVersion"`
+	CLIContractVersion string              `json:"cliContractVersion"`
+	ID                 string              `json:"id"`
+	ManifestPath       string              `json:"manifestPath"`
+	Environment        string              `json:"environment"`
+	ProjectName        string              `json:"projectName"`
+	Label              string              `json:"label,omitempty"`
+	Protected          bool                `json:"protected"`
+	ConfigDigest       string              `json:"configDigest"`
+	VersionDigest      string              `json:"versionDigest"`
+	GeneratedAt        time.Time           `json:"generatedAt"`
+	Complete           bool                `json:"complete"`
+	Services           []BackupService     `json:"services"`
 }
 
 type backupConsistencyMethod string

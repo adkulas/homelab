@@ -12,7 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func resolveSensitiveInputs(ctx context.Context, siteDirectory string, declared *SensitiveValuesSpec, media *MediaStackInstance, environment string, stack *config.MediaStack) ([]RedactedReference, error) {
+func resolveSensitiveInputs(ctx context.Context, siteDirectory string, declared *SensitiveValuesSpec, media *MediaStackInstance, environment string, stack *config.MediaStack, reveal ...bool) ([]RedactedReference, error) {
 	references := media.SensitiveReferences.Environments[environment]
 	if references.DataRoot == "" && references.BackupRoot == "" {
 		return nil, nil
@@ -60,10 +60,16 @@ func resolveSensitiveInputs(ctx context.Context, siteDirectory string, declared 
 	redacted := []RedactedReference{}
 	if dataValue != "" {
 		environmentConfig.DataRoot = "/<redacted:" + string(references.DataRoot) + ">"
+		if len(reveal) > 0 && reveal[0] {
+			environmentConfig.DataRoot = dataValue
+		}
 		redacted = append(redacted, RedactedReference{ID: references.DataRoot, Value: "<redacted>"})
 	}
 	if backupValue != "" {
 		environmentConfig.BackupRoot = "/<redacted:" + string(references.BackupRoot) + ">"
+		if len(reveal) > 0 && reveal[0] {
+			environmentConfig.BackupRoot = backupValue
+		}
 		redacted = append(redacted, RedactedReference{ID: references.BackupRoot, Value: "<redacted>"})
 	}
 	sort.Slice(redacted, func(first, second int) bool { return redacted[first].ID < redacted[second].ID })

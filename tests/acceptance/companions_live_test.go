@@ -527,7 +527,7 @@ func TestDisposablePinnedSeriesCompanions(t *testing.T) {
 		})
 	})
 	// Verify the actual pinned services through the CLI public seam as well.
-	declared, err := config.Load(filepath.Join(repositoryRoot(t), "services/media/media-stack.yaml"))
+	declared, err := config.Load(filepath.Join(repositoryRoot(t), "tests/fixtures/media-stack.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

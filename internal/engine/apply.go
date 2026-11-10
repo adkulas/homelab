@@ -36,6 +36,7 @@ type ApplyReport struct {
 }
 
 type environmentSecrets struct {
+	Scope           *config.SecretScope
 	Houndarr        companions.AdminCredentials
 	CleanuparrKey   string
 	CleanuparrAdmin companions.AdminCredentials
@@ -58,7 +59,7 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if err != nil {
 		return ApplyReport{}, err
 	}
-	declared, err := config.Load(request.plan.configPath)
+	declared, err := request.plan.load()
 	if err != nil {
 		return ApplyReport{}, err
 	}
@@ -77,7 +78,7 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 		return ApplyReport{}, err
 	}
 	environment := declared.Spec.Environments[request.plan.environment]
-	secrets, restoreDrillConfirmed, err := restoreDrillSecretsForApply(ctx, environment.BackupRoot, environment.ProjectName)
+	secrets, restoreDrillConfirmed, err := restoreDrillSecretsForApply(ctx, environment.BackupRoot, environment.ProjectName, environment)
 	if err != nil {
 		return ApplyReport{}, err
 	}
@@ -88,7 +89,7 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 		}
 	}
 	credentials := secrets.OpenVPN
-	if err := materializeRuntimeSecrets(runtimeSecretDirectory(environment.ProjectName), secrets); err != nil {
+	if err := materializeRuntimeSecrets(environmentRuntimeSecretDirectory(environment), secrets); err != nil {
 		return ApplyReport{}, fmt.Errorf("materialize runtime secrets: %w", err)
 	}
 
@@ -522,23 +523,34 @@ type openVPNCredentials struct {
 	Password string
 }
 
-func decryptEnvironmentSecrets(ctx context.Context, path string) (environmentSecrets, error) {
+func readSecretDocument(ctx context.Context, path string, destination any) error {
 	command := exec.CommandContext(ctx, "sops", "decrypt", "--output-type", "yaml", path)
 	plain, err := command.Output()
 	if err != nil {
-		return environmentSecrets{}, fmt.Errorf("decrypt selected Environment secrets: %w", err)
+		return fmt.Errorf("decrypt selected credential document with SOPS")
 	}
-	var document environmentSecretDocument
 	decoder := yaml.NewDecoder(bytes.NewReader(plain))
 	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
-		return environmentSecrets{}, fmt.Errorf("decode selected Environment secrets: %w", err)
+	if err := decoder.Decode(destination); err != nil {
+		return fmt.Errorf("invalid selected credential document schema")
 	}
+	return nil
+}
+
+func decryptEnvironmentSecrets(ctx context.Context, path string) (environmentSecrets, error) {
+	var document environmentSecretDocument
+	if err := readSecretDocument(ctx, path, &document); err != nil {
+		return environmentSecrets{}, err
+	}
+	return environmentSecretsFromDocument(document)
+}
+
+func environmentSecretsFromDocument(document environmentSecretDocument) (environmentSecrets, error) {
 	credentials := openVPNCredentials{
 		Username: document.NordVPN.OpenVPN.ServiceUsername,
 		Password: document.NordVPN.OpenVPN.ServicePassword,
 	}
-	if credentials.Username == "" || credentials.Password == "" {
+	if document.Scope == nil && (credentials.Username == "" || credentials.Password == "") {
 		return environmentSecrets{}, fmt.Errorf("selected Environment secrets require NordVPN OpenVPN serviceUsername and servicePassword")
 	}
 	if len(document.Profilarr.APIKey) < 32 {
@@ -550,15 +562,60 @@ func decryptEnvironmentSecrets(ctx context.Context, path string) (environmentSec
 	if document.QBittorrent.Username == "" || document.QBittorrent.Password == "" {
 		return environmentSecrets{}, fmt.Errorf("selected Environment secrets require qbittorrent.username and qbittorrent.password; run media-stack init with the new keys to migrate this SOPS document without overwriting existing values")
 	}
-	return environmentSecrets{Houndarr: companions.AdminCredentials{Username: document.Houndarr.Username, Password: document.Houndarr.Password}, CleanuparrKey: document.Cleanuparr.APIKey, CleanuparrAdmin: companions.AdminCredentials{Username: document.Cleanuparr.Username, Password: document.Cleanuparr.Password}, OpenVPN: credentials, ProfilarrKey: document.Profilarr.APIKey, Jellyfin: jellyfin.Credentials{Username: document.Jellyfin.Username, Password: document.Jellyfin.Password}, QBittorrent: qbittorrent.Credentials{Username: document.QBittorrent.Username, Password: document.QBittorrent.Password}}, nil
+	return environmentSecrets{Scope: document.Scope, Houndarr: companions.AdminCredentials{Username: document.Houndarr.Username, Password: document.Houndarr.Password}, CleanuparrKey: document.Cleanuparr.APIKey, CleanuparrAdmin: companions.AdminCredentials{Username: document.Cleanuparr.Username, Password: document.Cleanuparr.Password}, OpenVPN: credentials, ProfilarrKey: document.Profilarr.APIKey, Jellyfin: jellyfin.Credentials{Username: document.Jellyfin.Username, Password: document.Jellyfin.Password}, QBittorrent: qbittorrent.Credentials{Username: document.QBittorrent.Username, Password: document.QBittorrent.Password}}, nil
 }
 
 func decryptSelectedEnvironmentSecrets(ctx context.Context, configPath string, environment config.Environment) (environmentSecrets, error) {
-	secretPath := environment.SecretsFile
-	if !filepath.IsAbs(secretPath) {
-		secretPath = filepath.Join(filepath.Dir(configPath), secretPath)
+	path := selectedSecretPath(configPath, environment)
+	var document environmentSecretDocument
+	if err := readSecretDocument(ctx, path, &document); err != nil {
+		return environmentSecrets{}, err
 	}
-	return decryptEnvironmentSecrets(ctx, secretPath)
+	if environment.SecretScope != nil {
+		if document.Scope == nil || *document.Scope != *environment.SecretScope {
+			return environmentSecrets{}, fmt.Errorf("application secret ownership does not match selected Site, Stack Instance and Environment")
+		}
+		if document.NordVPN.OpenVPN.ServiceUsername != "" || document.NordVPN.OpenVPN.ServicePassword != "" {
+			return environmentSecrets{}, fmt.Errorf("owned application secrets must use the separate Site VPN document")
+		}
+	} else if document.Scope != nil {
+		return environmentSecrets{}, fmt.Errorf("owned application credentials require explicit Site and Stack Instance selection")
+	}
+	secrets, err := environmentSecretsFromDocument(document)
+	if err != nil {
+		return environmentSecrets{}, err
+	}
+	if environment.SecretScope != nil {
+		credentials, err := decryptSiteVPN(ctx, environment.VPNSecretsFile, environment.SecretScope.Site)
+		if err != nil {
+			return environmentSecrets{}, err
+		}
+		secrets.OpenVPN = credentials
+	}
+	return secrets, nil
+}
+
+func decryptSiteVPN(ctx context.Context, path, site string) (openVPNCredentials, error) {
+	var document siteVPNSecretDocument
+	if err := readSecretDocument(ctx, path, &document); err != nil {
+		return openVPNCredentials{}, err
+	}
+	if document.Site != site {
+		return openVPNCredentials{}, fmt.Errorf("VPN secret ownership does not match selected Site")
+	}
+	credentials := openVPNCredentials{Username: document.NordVPN.OpenVPN.ServiceUsername, Password: document.NordVPN.OpenVPN.ServicePassword}
+	if credentials.Username == "" || credentials.Password == "" {
+		return openVPNCredentials{}, fmt.Errorf("Site VPN secrets require OpenVPN serviceUsername and servicePassword")
+	}
+	return credentials, nil
+}
+
+func decryptRestoreCredentials(ctx context.Context, path string, environment config.Environment) (environmentSecrets, error) {
+	if environment.SecretScope == nil {
+		return decryptEnvironmentSecrets(ctx, path)
+	}
+	environment.SecretsFile = path
+	return decryptSelectedEnvironmentSecrets(ctx, "", environment)
 }
 
 func materializeRuntimeSecrets(directory string, secrets environmentSecrets) error {

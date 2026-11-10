@@ -139,6 +139,7 @@ type NetworkStackInstance struct {
 }
 
 type MediaStackInstance struct {
+	VPNSecretsFile      string                        `yaml:"vpnSecretsFile"`
 	Defaults            config.Defaults               `yaml:"defaults"`
 	Environments        map[string]config.Environment `yaml:"environments"`
 	SensitiveReferences SensitiveReferences           `yaml:"sensitiveReferences,omitempty"`
@@ -274,64 +275,9 @@ func Validate(ctx context.Context, repositoryRoot string, siteName SiteName) Rep
 			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_SENSITIVE_RECIPIENTS_MISMATCH", Explanation: "the Site-sensitive values document does not include its declared recipients.", Remedy: "Re-encrypt the document for the declared recipients."})
 		}
 	}
-	hostNames := map[HostName]string{}
-	hosts := map[HostName]Host{}
-	for _, reference := range site.Spec.Hosts {
-		path, diagnostic := resolveReference(siteDirectory, reference)
-		if diagnostic != nil {
-			report.Diagnostics = append(report.Diagnostics, *diagnostic)
-			continue
-		}
-		var host Host
-		if err := decodeStrict(path, &host); err != nil {
-			report.Diagnostics = append(report.Diagnostics, documentError("Host", reference, err))
-			continue
-		}
-		if host.APIVersion != siteAPIVersion || host.Kind != hostKind || host.Metadata.Name == "" {
-			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_DOCUMENT_UNSUPPORTED", Explanation: fmt.Sprintf("Host reference %q has an unsupported API version, kind, or empty name.", reference), Remedy: "Use apiVersion homelab.site/v1alpha1 and kind Host with a name."})
-			continue
-		}
-		if first, exists := hostNames[host.Metadata.Name]; exists {
-			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_IDENTIFIER_DUPLICATE", Explanation: fmt.Sprintf("Host identifier %q is declared by both %q and %q.", host.Metadata.Name, first, reference), Remedy: "Give every Host within the Site a unique name."})
-		} else {
-			hostNames[host.Metadata.Name] = reference
-			hosts[host.Metadata.Name] = host
-		}
-		seenCapabilities := map[Capability]bool{}
-		for _, capability := range host.Spec.Capabilities {
-			if !knownCapability(capability) {
-				report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_CAPABILITY_UNKNOWN", Explanation: fmt.Sprintf("Host %q declares unknown capability %q.", host.Metadata.Name, capability), Remedy: "Use a capability from the homelab.site/v1alpha1 capability catalog."})
-			} else if seenCapabilities[capability] {
-				report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_CAPABILITY_DUPLICATE", Explanation: fmt.Sprintf("Host %q declares capability %q more than once.", host.Metadata.Name, capability), Remedy: "Declare each Host capability once."})
-			}
-			seenCapabilities[capability] = true
-		}
-	}
-	instanceNames := map[StackInstanceName]string{}
-	instances := make([]StackInstance, 0, len(site.Spec.StackInstances))
-	for _, reference := range site.Spec.StackInstances {
-		path, diagnostic := resolveReference(siteDirectory, reference)
-		if diagnostic != nil {
-			report.Diagnostics = append(report.Diagnostics, *diagnostic)
-			continue
-		}
-		var instance StackInstance
-		if err := decodeStrict(path, &instance); err != nil {
-			report.Diagnostics = append(report.Diagnostics, documentError("Stack Instance", reference, err))
-			continue
-		}
-		if instance.APIVersion != siteAPIVersion || instance.Kind != instanceKind || instance.Metadata.Name == "" {
-			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_DOCUMENT_UNSUPPORTED", Explanation: fmt.Sprintf("Stack Instance reference %q has an unsupported API version, kind, or empty name.", reference), Remedy: "Use apiVersion homelab.site/v1alpha1 and kind StackInstance with a name."})
-			continue
-		}
-		if first, exists := instanceNames[instance.Metadata.Name]; exists {
-			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_IDENTIFIER_DUPLICATE", Explanation: fmt.Sprintf("Stack Instance identifier %q is declared by both %q and %q.", instance.Metadata.Name, first, reference), Remedy: "Give every Stack Instance within the Site a unique name."})
-		} else {
-			instanceNames[instance.Metadata.Name] = reference
-			instances = append(instances, instance)
-		}
-	}
+	hosts, instances := loadInventoryStructure(siteDirectory, site, &report)
 	validatePlacements(hosts, instances, &report)
+	validateMediaSecretReferences(siteDirectory, instances, &report)
 	if site.Spec.DNSCluster != nil {
 		validateDNSCluster(site.Spec.DNSCluster, hosts, instances, &report)
 	}
@@ -412,6 +358,7 @@ type claimedResource struct {
 func validateHostConflicts(instances []StackInstance, report *Report) {
 	runtimeIdentities := map[HostName]map[RuntimeIdentity]string{}
 	ports := map[HostName]map[int]string{}
+	projects := map[HostName]map[string]string{}
 	storage := map[HostName][]claimedResource{}
 	for _, instance := range instances {
 		host := instance.Spec.Host
@@ -428,6 +375,9 @@ func validateHostConflicts(instances []StackInstance, report *Report) {
 		if instance.Spec.Media == nil {
 			continue
 		}
+		if projects[host] == nil {
+			projects[host] = map[string]string{}
+		}
 		if ports[host] == nil {
 			ports[host] = map[int]string{}
 		}
@@ -436,6 +386,10 @@ func validateHostConflicts(instances []StackInstance, report *Report) {
 			if !exists {
 				continue
 			}
+			if first, exists := projects[host][environment.ProjectName]; exists && environment.ProjectName != "" {
+				report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_PROJECT_CONFLICT", Explanation: fmt.Sprintf("%s and %s/%s share a Compose project on Host %s", first, instance.Metadata.Name, environmentName, host), Remedy: "Use distinct Compose project names on one Host."})
+			}
+			projects[host][environment.ProjectName] = string(instance.Metadata.Name) + "/" + environmentName
 			for _, port := range orderedPorts(environment.Ports) {
 				owner := string(instance.Metadata.Name) + "/" + environmentName + "/" + port.name
 				if first, exists := ports[host][port.value]; port.value > 0 && exists {
@@ -582,4 +536,65 @@ func decodeStrict(path string, destination any) error {
 	decoder := yaml.NewDecoder(file)
 	decoder.KnownFields(true)
 	return decoder.Decode(destination)
+}
+
+func loadInventoryStructure(siteDirectory string, site Site, report *Report) (map[HostName]Host, []StackInstance) {
+	hostNames := map[HostName]string{}
+	hosts := map[HostName]Host{}
+	for _, reference := range site.Spec.Hosts {
+		path, diagnostic := resolveReference(siteDirectory, reference)
+		if diagnostic != nil {
+			report.Diagnostics = append(report.Diagnostics, *diagnostic)
+			continue
+		}
+		var host Host
+		if err := decodeStrict(path, &host); err != nil {
+			report.Diagnostics = append(report.Diagnostics, documentError("Host", reference, err))
+			continue
+		}
+		if host.APIVersion != siteAPIVersion || host.Kind != hostKind || !siteNamePattern.MatchString(string(host.Metadata.Name)) {
+			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_DOCUMENT_UNSUPPORTED", Explanation: fmt.Sprintf("Host reference %q has an unsupported API version, kind, or empty name.", reference), Remedy: "Use apiVersion homelab.site/v1alpha1 and kind Host with a name."})
+			continue
+		}
+		if first, exists := hostNames[host.Metadata.Name]; exists {
+			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_IDENTIFIER_DUPLICATE", Explanation: fmt.Sprintf("Host identifier %q is declared by both %q and %q.", host.Metadata.Name, first, reference), Remedy: "Give every Host within the Site a unique name."})
+		} else {
+			hostNames[host.Metadata.Name] = reference
+			hosts[host.Metadata.Name] = host
+		}
+		seenCapabilities := map[Capability]bool{}
+		for _, capability := range host.Spec.Capabilities {
+			if !knownCapability(capability) {
+				report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_CAPABILITY_UNKNOWN", Explanation: fmt.Sprintf("Host %q declares unknown capability %q.", host.Metadata.Name, capability), Remedy: "Use a capability from the homelab.site/v1alpha1 capability catalog."})
+			} else if seenCapabilities[capability] {
+				report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_CAPABILITY_DUPLICATE", Explanation: fmt.Sprintf("Host %q declares capability %q more than once.", host.Metadata.Name, capability), Remedy: "Declare each Host capability once."})
+			}
+			seenCapabilities[capability] = true
+		}
+	}
+	instanceNames := map[StackInstanceName]string{}
+	instances := make([]StackInstance, 0, len(site.Spec.StackInstances))
+	for _, reference := range site.Spec.StackInstances {
+		path, diagnostic := resolveReference(siteDirectory, reference)
+		if diagnostic != nil {
+			report.Diagnostics = append(report.Diagnostics, *diagnostic)
+			continue
+		}
+		var instance StackInstance
+		if err := decodeStrict(path, &instance); err != nil {
+			report.Diagnostics = append(report.Diagnostics, documentError("Stack Instance", reference, err))
+			continue
+		}
+		if instance.APIVersion != siteAPIVersion || instance.Kind != instanceKind || !siteNamePattern.MatchString(string(instance.Metadata.Name)) {
+			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_DOCUMENT_UNSUPPORTED", Explanation: fmt.Sprintf("Stack Instance reference %q has an unsupported API version, kind, or empty name.", reference), Remedy: "Use apiVersion homelab.site/v1alpha1 and kind StackInstance with a name."})
+			continue
+		}
+		if first, exists := instanceNames[instance.Metadata.Name]; exists {
+			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_IDENTIFIER_DUPLICATE", Explanation: fmt.Sprintf("Stack Instance identifier %q is declared by both %q and %q.", instance.Metadata.Name, first, reference), Remedy: "Give every Stack Instance within the Site a unique name."})
+		} else {
+			instanceNames[instance.Metadata.Name] = reference
+			instances = append(instances, instance)
+		}
+	}
+	return hosts, instances
 }

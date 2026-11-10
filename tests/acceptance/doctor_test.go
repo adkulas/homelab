@@ -314,7 +314,7 @@ func doctorFixture(t *testing.T) (string, string) {
 	t.Helper()
 	temporary := t.TempDir()
 	configPath := filepath.Join(temporary, "media-stack.yaml")
-	configuration := readFile(t, filepath.Join(repositoryRoot(t), "services", "media", "media-stack.yaml"))
+	configuration := readFile(t, filepath.Join(repositoryRoot(t), "tests", "fixtures", "media-stack.yaml"))
 	configuration = []byte(strings.Replace(string(configuration), "runtimeUID: 1000", "runtimeUID: "+strconv.Itoa(os.Getuid()), 1))
 	configuration = []byte(strings.Replace(string(configuration), "runtimeGID: 1000", "runtimeGID: "+strconv.Itoa(os.Getgid()), 1))
 	if !strings.Contains(string(configuration), "\n  acquisition:") && !strings.Contains(string(configuration), "\n    acquisition:") {
@@ -410,7 +410,20 @@ exit 0
 	sops := `#!/bin/sh
 if [ "$1" = decrypt ]; then
   [ "$DOCTOR_SCENARIO" = secret ] && exit 1
-  echo 'nordvpn: doctor-secret-value'
+  cat <<'YAML'
+nordvpn:
+  openvpn:
+    serviceUsername: doctor-service
+    servicePassword: doctor-password
+profilarr:
+  apiKey: doctor-profilarr-api-key-32-characters
+jellyfin:
+  username: doctor-admin
+  password: doctor-password
+qbittorrent:
+  username: doctor-qbit
+  password: doctor-password
+YAML
 fi
 exit 0
 `

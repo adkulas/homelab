@@ -68,7 +68,7 @@ func (report VerifyReport) Failed() bool {
 }
 
 func (engine localEngine) Verify(ctx context.Context, request VerifyRequest) (report VerifyReport, returnError error) {
-	declared, err := config.Load(request.plan.configPath)
+	declared, err := request.plan.load()
 	if err != nil {
 		return report, err
 	}
@@ -76,12 +76,18 @@ func (engine localEngine) Verify(ctx context.Context, request VerifyRequest) (re
 	if err != nil {
 		return report, err
 	}
-	report = VerifyReport{SchemaVersion: verifySchemaVersion, Environment: request.plan.environment, Suite: request.suite, ConfigDigest: fileDigest(request.plan.configPath), VersionsDigest: fileDigest(request.plan.versionsPath)}
+	report = VerifyReport{SchemaVersion: verifySchemaVersion, Environment: request.plan.environment, Suite: request.suite, ConfigDigest: request.plan.configurationDigest(), VersionsDigest: fileDigest(request.plan.versionsPath)}
 	if report.ConfigDigest == "" || report.VersionsDigest == "" {
 		return report, fmt.Errorf("calculate verification digests")
 	}
 	if err := declared.ValidateEnvironment(request.plan.environment); err != nil {
 		return report, err
+	}
+	environment := declared.Spec.Environments[request.plan.environment]
+	if environment.SecretScope != nil {
+		if _, err := decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment); err != nil {
+			return report, err
+		}
 	}
 	if request.suite == "companions" {
 		plan, err := engine.Plan(ctx, request.plan)
@@ -171,7 +177,6 @@ func (engine localEngine) Verify(ctx context.Context, request VerifyRequest) (re
 		return report, nil
 	}
 	report.add("VERIFY_TUNNEL_RECOVERED", "tunneled qBittorrent egress recovery", "", true)
-	environment := declared.Spec.Environments[request.plan.environment]
 	secrets, err := decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment)
 	if err != nil {
 		report.add("VERIFY_QBITTORRENT_AUTH_FAILED", "stable qBittorrent authentication after recreation", err.Error(), false)

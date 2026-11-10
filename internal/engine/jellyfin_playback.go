@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"net/http"
-	"path/filepath"
 	"time"
 
 	"github.com/adkulas/homelab/internal/config"
@@ -34,11 +33,7 @@ var (
 
 func verifyJellyfinPlayback(ctx context.Context, declared config.MediaStack, request VerifyRequest, mediaPath string, deadline time.Time, report *VerifyReport, check jellyfinPlaybackCheck) {
 	environment := declared.Spec.Environments[request.plan.environment]
-	secretsPath := environment.SecretsFile
-	if !filepath.IsAbs(secretsPath) {
-		secretsPath = filepath.Join(filepath.Dir(request.plan.configPath), secretsPath)
-	}
-	secrets, err := decryptEnvironmentSecrets(ctx, secretsPath)
+	secrets, err := decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment)
 	if err != nil {
 		report.add(check.diagnosticPrefix+"_AUTH_FAILED", "authenticated Jellyfin "+check.libraryName+" access", err.Error(), false)
 		return

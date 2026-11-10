@@ -7,6 +7,7 @@ spec:
     host: media
     runtimeIdentity: example-media
     media:
+        vpnSecretsFile: secrets/nordvpn.sops.yaml
         defaults:
             timezone: America/Toronto
             runtimeUID: 1000
@@ -21,7 +22,7 @@ spec:
                 projectName: media-production
                 dataRoot: /srv/media/production
                 backupRoot: /mnt/backups/media/production
-                secretsFile: secrets/production.sops.yaml
+                secretsFile: secrets/media/production.sops.yaml
                 hardwareTranscoding: auto
                 seriesAutomation:
                     enabled: true
@@ -52,7 +53,7 @@ spec:
                 projectName: media-staging
                 dataRoot: /srv/media/staging
                 backupRoot: /mnt/backups/media/staging
-                secretsFile: secrets/staging.sops.yaml
+                secretsFile: secrets/media/staging.sops.yaml
                 hardwareTranscoding: auto
                 seriesAutomation:
                     enabled: true
