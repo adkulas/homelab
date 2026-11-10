@@ -255,6 +255,8 @@ func TestScopedApplyRejectsWrongOwnershipBeforeDocker(t *testing.T) {
 
 func TestScopedInitPreservesSharedVPNAndExistingApplicationCredentials(t *testing.T) {
 	fixture := newSiteFixture(t)
+	fixture.mediaInstance = strings.Replace(fixture.mediaInstance, "runtimeUID: 1000", "runtimeUID: "+strconv.Itoa(os.Getuid()), 1)
+	fixture.mediaInstance = strings.Replace(fixture.mediaInstance, "runtimeGID: 1000", "runtimeGID: "+strconv.Itoa(os.Getgid()), 1)
 	fixture.mediaInstance = strings.ReplaceAll(fixture.mediaInstance, "/srv/media/", t.TempDir()+"/")
 	root := fixture.write(t)
 	identity, recipient := newAgeIdentity(t)
