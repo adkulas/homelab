@@ -1,0 +1,230 @@
+---
+- name: Apply pending Docker configuration before deploying Traefik
+  ansible.builtin.meta: flush_handlers
+
+- name: Inspect Docker daemon availability
+  ansible.builtin.command:
+    argv: [docker, info, --format, '{{ "{{.ServerVersion}}" }}']
+  register: host_traefik_docker
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Inspect Docker Compose availability
+  ansible.builtin.command:
+    argv: [docker, compose, version, --short]
+  register: host_traefik_compose
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Require Docker and Compose before deploying Traefik
+  ansible.builtin.assert:
+    that:
+      - host_traefik_docker.rc == 0
+      - host_traefik_compose.rc == 0
+    fail_msg: >-
+      Traefik requires a running Docker daemon and Docker Compose v2.18 or later.
+      Provision Docker with --tags docker first; --tags traefik does not install it.
+      Docker: {{ host_traefik_docker.stderr | default(host_traefik_docker.msg | default('')) }}
+      Compose: {{ host_traefik_compose.stderr | default(host_traefik_compose.msg | default('')) }}
+  when: not ansible_check_mode
+
+- name: Inspect the installed Traefik project
+  ansible.builtin.stat:
+    path: '{{ host_traefik_deploy_root }}/sites/home/traefik/compose.yaml'
+  register: host_traefik_installed
+
+- name: Explain deferred first-install checks
+  ansible.builtin.debug:
+    msg: >-
+      Traefik deployment and validation deferred in check mode: Docker/Compose or
+      deployment files are absent. No containers are started. Run normally after
+      provisioning Docker, then repeat --check. The controller checkout supplies the files.
+  when: >-
+    ansible_check_mode and
+    (host_traefik_docker.rc != 0 or host_traefik_compose.rc != 0 or not host_traefik_installed.stat.exists)
+
+- name: Install and reconcile controller-selected Traefik files
+  when: >-
+    not ansible_check_mode or
+    (host_traefik_docker.rc == 0 and host_traefik_compose.rc == 0 and host_traefik_installed.stat.exists)
+  block:
+    - name: Create root-owned Traefik deployment directories
+      ansible.builtin.file:
+        path: '{{ host_traefik_deploy_root }}/{{ item }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - services/traefik
+        - sites/home/traefik/dynamic
+
+    - name: Select the controller's managed dynamic filenames
+      ansible.builtin.set_fact:
+        host_traefik_dynamic_names: >-
+          {{ query('ansible.builtin.fileglob', host_traefik_source_root ~ '/sites/home/traefik/dynamic/*.yml',
+                   host_traefik_source_root ~ '/sites/home/traefik/dynamic/*.yaml')
+             | map('basename') | sort }}
+
+    - name: Inspect the previous managed dynamic manifest
+      ansible.builtin.stat:
+        path: '{{ host_traefik_deploy_root }}/sites/home/traefik/.ansible-dynamic.json'
+      register: host_traefik_manifest_file
+
+    - name: Read the previous managed dynamic manifest
+      ansible.builtin.slurp:
+        src: '{{ host_traefik_deploy_root }}/sites/home/traefik/.ansible-dynamic.json'
+      register: host_traefik_manifest
+      when: host_traefik_manifest_file.stat.exists
+
+    - name: Load previously managed filenames
+      ansible.builtin.set_fact:
+        host_traefik_previous_dynamic: >-
+          {{ host_traefik_manifest.content | default('W10=') | b64decode | from_json }}
+
+    - name: Require safe filenames before removing managed routes
+      ansible.builtin.assert:
+        that:
+          - item is string
+          - item is match('^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*\.ya?ml$')
+        fail_msg: Invalid managed dynamic filename; inspect .ansible-dynamic.json before continuing.
+      loop: '{{ host_traefik_previous_dynamic }}'
+
+    - name: Copy reusable and Site Compose configuration from the controller
+      ansible.builtin.copy:
+        src: '{{ host_traefik_source_root }}/{{ item }}'
+        dest: '{{ host_traefik_deploy_root }}/{{ item }}'
+        owner: root
+        group: root
+        mode: '0644'
+      loop:
+        - services/traefik/compose.yaml
+        - sites/home/traefik/compose.yaml
+
+    - name: Copy static configuration from the controller
+      ansible.builtin.copy:
+        src: '{{ host_traefik_source_root }}/services/traefik/traefik.yml'
+        dest: '{{ host_traefik_deploy_root }}/services/traefik/traefik.yml'
+        owner: root
+        group: root
+        mode: '0644'
+      register: host_traefik_static_configuration
+
+    # Persist invalidation before validation can fail; a delayed handler loses retry state.
+    - name: Invalidate applied static state after replacing the bind-mounted file # noqa: no-handler
+      ansible.builtin.file:
+        path: '{{ host_traefik_deploy_root }}/sites/home/traefik/.ansible-static.sha256'
+        state: absent
+      when: host_traefik_static_configuration.changed
+
+    - name: Validate the installed Compose project before starting containers
+      ansible.builtin.command:
+        argv: [docker, compose, --project-directory, '{{ host_traefik_deploy_root }}/sites/home/traefik', config, --quiet]
+      changed_when: false
+      check_mode: false
+      when: not ansible_check_mode
+
+    - name: Copy Site-owned dynamic configuration from the controller
+      ansible.builtin.copy:
+        src: '{{ host_traefik_source_root }}/sites/home/traefik/dynamic/{{ item }}'
+        dest: '{{ host_traefik_deploy_root }}/sites/home/traefik/dynamic/{{ item | basename }}'
+        owner: root
+        group: root
+        mode: '0644'
+      loop: '{{ host_traefik_dynamic_names }}'
+
+    - name: Remove only obsolete previously managed dynamic files
+      ansible.builtin.file:
+        path: '{{ host_traefik_deploy_root }}/sites/home/traefik/dynamic/{{ item }}'
+        state: absent
+      loop: '{{ host_traefik_previous_dynamic | difference(host_traefik_dynamic_names) }}'
+
+    - name: Record the dynamic files managed by this deployment
+      ansible.builtin.copy:
+        content: '{{ host_traefik_dynamic_names | to_nice_json }}'
+        dest: '{{ host_traefik_deploy_root }}/sites/home/traefik/.ansible-dynamic.json'
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Inspect the last successfully applied static checksum
+      ansible.builtin.stat:
+        path: '{{ host_traefik_deploy_root }}/sites/home/traefik/.ansible-static.sha256'
+      register: host_traefik_static_marker_file
+
+    - name: Read the last successfully applied static checksum
+      ansible.builtin.slurp:
+        src: '{{ host_traefik_deploy_root }}/sites/home/traefik/.ansible-static.sha256'
+      register: host_traefik_static_marker
+      when: host_traefik_static_marker_file.stat.exists
+
+    - name: Determine whether the static bind mount needs recreation
+      ansible.builtin.set_fact:
+        host_traefik_static_checksum: >-
+          {{ lookup('ansible.builtin.file', host_traefik_source_root ~ '/services/traefik/traefik.yml', rstrip=false) | hash('sha256') }}
+        host_traefik_applied_static_checksum: >-
+          {{ host_traefik_static_marker.content | default('') | b64decode | trim }}
+
+    - name: Ensure the Site Traefik project is running
+      community.docker.docker_compose_v2:
+        project_src: '{{ host_traefik_deploy_root }}/sites/home/traefik'
+        project_name: home-traefik
+        services: [traefik]
+        state: present
+        pull: missing
+        build: never
+        recreate: '{{ "always" if host_traefik_static_checksum != host_traefik_applied_static_checksum else "auto" }}'
+        remove_orphans: false
+        wait: true
+        wait_timeout: '{{ host_traefik_wait_timeout }}'
+      register: host_traefik_project
+      when: not ansible_check_mode
+
+    - name: Require a running Traefik container
+      ansible.builtin.assert:
+        that:
+          - host_traefik_project.containers | length == 1
+          - host_traefik_project.containers[0].State == 'running'
+        fail_msg: Inspect sudo docker compose logs traefik in the installed Site project.
+      when: not ansible_check_mode
+
+    - name: Verify local HTTP proxy availability without requiring an application
+      ansible.builtin.uri:
+        url: '{{ host_traefik_probe_url }}'
+        headers:
+          Host: traefik-startup.invalid
+        status_code: [404]
+        use_proxy: false
+      register: host_traefik_http
+      retries: 10
+      delay: 2
+      until: host_traefik_http.status | default(0) == 404
+      when: not ansible_check_mode
+
+    - name: Record static configuration only after successful startup
+      ansible.builtin.copy:
+        content: '{{ host_traefik_static_checksum }}'
+        dest: '{{ host_traefik_deploy_root }}/sites/home/traefik/.ansible-static.sha256'
+        owner: root
+        group: root
+        mode: '0644'
+      when: not ansible_check_mode
+
+    - name: Report proxy and backend verification separately
+      ansible.builtin.debug:
+        msg: >-
+          Traefik is running and its local HTTP entry point returns the expected unmatched-route 404.
+          This does not verify Media backends or Minecraft. Clients must resolve service .home names;
+          Traefik must resolve homelab.home and pc.home. Verify Media routes and Minecraft separately
+          using the Host runbook. No DNS or network settings were changed.
+      when: not ansible_check_mode
+
+    - name: Explain check-mode validation limits
+      ansible.builtin.debug:
+        msg: >-
+          File changes above are a preview. Compose validation, container reconciliation, and HTTP
+          verification are deferred until a normal run; check mode never starts or recreates containers.
+          Static recreation required: {{ host_traefik_static_checksum != host_traefik_applied_static_checksum }}.
+      when: ansible_check_mode

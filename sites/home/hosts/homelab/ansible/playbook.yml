@@ -291,6 +291,10 @@
       when: ansible_check_mode and 'docker-ce' not in ansible_facts.packages
       tags: [docker]
 
+    - name: Deploy the Site Traefik project
+      ansible.builtin.import_tasks: traefik.yml
+      tags: [traefik]
+
     - name: Configure SSH key authentication
       tags: [ssh]
       block:

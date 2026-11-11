@@ -9,7 +9,8 @@ addresses and reservations before deployment.
 Follow the [ordered network setup and recovery walkthrough](../../services/network/docs/setup.md) before any live network change.
 
 The `homelab` Host's [provisioning guide and Ansible playbook](hosts/homelab/README.md)
-manage its operating system and container runtime separately from Stack deployment.
+manage its operating system, container runtime, and the Site Traefik deployment.
+Media application reconciliation remains with the Media Stack CLI.
 
 ## Name resolution
 
@@ -50,13 +51,12 @@ and Bedrock on UDP port 19134 for Minecraft. The dynamic files define the Media 
 `homelab.home` and `pc.home` as upstream Host names, so moving a service to another machine changes its upstream name or
 DNS record without adding an IP to routing configuration.
 
-On `homelab`, from the repository root:
-
-```bash
-sudo docker compose -f sites/home/traefik/compose.yaml config
-sudo docker compose -f sites/home/traefik/compose.yaml up -d
-sudo docker compose -f sites/home/traefik/compose.yaml logs traefik
-```
+Deploy from the controller checkout using the Host playbook's `traefik` tag;
+see the [deployment and verification workflow](hosts/homelab/README.md#traefik-deployment).
+Ansible copies the selected files to root-owned `/opt/homelab` on homelab and
+manages the single `home-traefik` project there. Use that installed directory for
+read-only Compose diagnostics. Avoid starting another project from a working
+checkout: it would compete for the same identity and published ports.
 
 The router for `jellyfin.home`, for example, targets `homelab.home:8096`; `jellyfin-staging.home` targets
 `homelab.home:18096`. The qBittorrent routes target Gluetun's published Web UI ports, not a separate qBittorrent network.

@@ -39,3 +39,9 @@ host_backup_password_file: /etc/homelab/backup-password
 host_backup_age_recipient: >-
   {{ (lookup('ansible.builtin.file', playbook_dir ~ '/../../../site.yaml')
       | from_yaml).spec.sensitiveValues.dailyRecipient }}
+
+# Deploy only controller-selected Traefik inputs, independently of the Host checkout.
+host_traefik_source_root: '{{ playbook_dir }}/../../../../..'
+host_traefik_deploy_root: /opt/homelab
+host_traefik_wait_timeout: 60
+host_traefik_probe_url: http://127.0.0.1/
