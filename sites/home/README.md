@@ -23,6 +23,7 @@ Technitium DNS and DHCP are configured separately from this change. Create these
 | `qbittorrent.home`, `prowlarr.home`, `sonarr.home`, `radarr.home`, `profilarr.home`, `jellyfin.home`, `seerr.home` | CNAME | `homelab.home` |
 | The same seven names with `-staging` before `.home` | CNAME | `homelab.home` |
 | `minecraft.home` | CNAME | `homelab.home` |
+| `technitium.home`, `technitium-pi.home` | CNAME | `homelab.home` |
 
 The A records hold the machine addresses for this routing setup. No machine address is stored in this routing project. The
 Site network inventory versions proposed IP addresses and MAC addresses as SOPS-encrypted values rather than plaintext Git.
@@ -47,7 +48,8 @@ If Docker cannot resolve the upstream Host names, Traefik cannot reach the servi
 The reusable [Traefik service](../../services/traefik/compose.yaml) and its [static configuration](../../services/traefik/traefik.yml)
 live under `services/traefik`. The [home Site Compose file](traefik/compose.yaml) extends that service and mounts the
 Site-owned files in [`traefik/dynamic`](traefik/dynamic). Traefik publishes HTTP on TCP port 80 for the Media Stack
-and Bedrock on UDP port 19134 for Minecraft. The dynamic files define the Media Stack HTTP routes and Minecraft UDP route. The routes use
+and Bedrock on UDP port 19134 for Minecraft. The dynamic files define the Media Stack HTTP routes, Technitium management
+redirects and Minecraft UDP route. The routes use
 `homelab.home` and `pc.home` as upstream Host names, so moving a service to another machine changes its upstream name or
 DNS record without adding an IP to routing configuration.
 
@@ -62,6 +64,14 @@ The router for `jellyfin.home`, for example, targets `homelab.home:8096`; `jelly
 `homelab.home:18096`. The qBittorrent routes target Gluetun's published Web UI ports, not a separate qBittorrent network.
 If qBittorrent's Host header validation is enabled, add `qbittorrent.home` to Production's server domains and
 `qbittorrent-staging.home` to Staging's server domains.
+
+`http://technitium.home` redirects to the primary console at `https://homelab.home:53443`;
+`http://technitium-pi.home` redirects to the secondary console at `https://raspberrypi.home:53443`.
+Both aliases point to `homelab`, where Traefik runs. Reconcile the aliases from `network.json`
+before using them. Redirects preserve paths and query strings and keep management traffic on
+Technitium's existing HTTPS listeners with their Host certificates. Administrators still need
+to trust the [home CA](../../services/network/docs/management-https.md) and have access through
+the existing management firewall rules.
 
 Houndarr and Cleanuparr are administered through Host loopback ports and have no Traefik routes or DNS records.
 Production uses ports 8877 and 11011; Staging uses 18877 and 21011. Use the SSH tunnel described in the

@@ -24,7 +24,9 @@
       "qbittorrent-staging.home": "homelab",
       "radarr-staging.home": "homelab",
       "seerr-staging.home": "homelab",
-      "sonarr-staging.home": "homelab"
+      "sonarr-staging.home": "homelab",
+      "technitium.home": "homelab",
+      "technitium-pi.home": "homelab"
     }
   }
 }

@@ -1,0 +1,26 @@
+# Redirect before credentials are submitted, retaining the existing trusted Host certificates.
+http:
+  routers:
+    technitium-primary:
+      rule: Host(`technitium.home`)
+      entryPoints:
+        - web
+      middlewares:
+        - technitium-primary-https
+      service: noop@internal
+    technitium-secondary:
+      rule: Host(`technitium-pi.home`)
+      entryPoints:
+        - web
+      middlewares:
+        - technitium-secondary-https
+      service: noop@internal
+  middlewares:
+    technitium-primary-https:
+      redirectRegex:
+        regex: '^http://technitium\.home(?::[0-9]+)?/(.*)$'
+        replacement: 'https://homelab.home:53443/${1}'
+    technitium-secondary-https:
+      redirectRegex:
+        regex: '^http://technitium-pi\.home(?::[0-9]+)?/(.*)$'
+        replacement: 'https://raspberrypi.home:53443/${1}'
