@@ -56,6 +56,12 @@ func NewRestoreRequest(workingDirectory, environment, configPath, backupPath, cr
 }
 
 func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (RestoreReport, error) {
+	release, err := lockEnvironment(ctx, request.plan, false)
+	if err != nil {
+		return RestoreReport{}, err
+	}
+	defer release()
+
 	if err := ctx.Err(); err != nil {
 		return RestoreReport{}, err
 	}
@@ -115,7 +121,7 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	if backup.SchemaVersion != backupSchemaVersion {
 		return RestoreReport{}, fmt.Errorf("backup manifest schema version %q is unsupported", backup.SchemaVersion)
 	}
-	if backup.CLIContractVersion != backupCLIContractVersion || !backup.Complete {
+	if backup.CLIContractVersion != backupCLIContractVersion || !backup.Complete || len(backup.MissingVolumes) > 0 {
 		return RestoreReport{}, fmt.Errorf("backup is not a complete compatible %s archive", request.plan.environment)
 	}
 	if backup.Scope != nil {

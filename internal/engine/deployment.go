@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -11,6 +12,9 @@ import (
 // Deployment is the effective configuration selected by Site Inventory. It never
 // contains decrypted credentials. Save updates only the instance declaration.
 type Deployment struct {
+	// Reload re-resolves authoritative Site declarations for volatile safety checks.
+	Reload       func(context.Context) (*Deployment, error)
+	HostName     string
 	Declared     config.MediaStack
 	ConfigPath   string
 	VersionsPath string
@@ -122,4 +126,18 @@ func (request PromoteRequest) WithDeployment(deployment *Deployment) PromoteRequ
 func (request VerifyRequest) WithDeployment(deployment *Deployment) VerifyRequest {
 	request.plan = request.plan.WithDeployment(deployment)
 	return request
+}
+
+func (request PlanRequest) refresh(ctx context.Context) (PlanRequest, error) {
+	if request.deployment != nil && request.deployment.Reload != nil {
+		fresh, err := request.deployment.Reload(ctx)
+		if err != nil {
+			return request, err
+		}
+		if fresh == nil {
+			return request, fmt.Errorf("selected Site deployment could not be re-resolved")
+		}
+		return request.WithDeployment(fresh), nil
+	}
+	return request, nil
 }

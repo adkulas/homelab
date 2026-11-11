@@ -9,7 +9,7 @@ independent Production and Staging Environments so changes can be proven before 
 > VPN-confined qBittorrent, Radarr Movie Library, Sonarr Series Library, Prowlarr Movie and Series Library discovery, automatic fresh Profilarr connections and policy, authenticated Jellyfin Movie and Series Library reconciliation, Seerr household authentication and Movie and Series Library request routing, and automatic Houndarr/Cleanuparr first-run setup and series automation phases of `apply`; VPN-focused
 > `verify --suite full` and read-only companion configuration/activity diagnostics through `verify --suite companions`; legal movie and series request-to-playback proofs through `verify --suite promotion`; and verified application-state archives through `backup` are available now.
 > Ordinary matching-Environment state replacement and isolated Production-to-Staging Restore Drill execution through `restore` are also available. The other verification suites,
-> Verification Artifacts, and `destroy` remain planned. Ubuntu is the authoritative implementation and
+> Verification Artifacts remain planned. Saved-plan destruction and optional protected Environment reset through `destroy` are available. Ubuntu is the authoritative implementation and
 > completion platform. Docker
 > Desktop WSL2 compatibility is verified independently and does not block Ubuntu work. Sections below label planned behavior explicitly.
 > The authoritative target design is in the
@@ -1021,7 +1021,7 @@ then removes the gate and encrypted copy; a failed apply remains safely gated fo
 | `media-stack verify --site home --instance media-homelab --environment staging --suite full [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, recovery, and stable declared authentication from an application-network peer after qBittorrent recreation. Use it after `apply` in Staging; it is deliberately rejected for Production. |
 | `media-stack verify --site home --instance media-homelab --environment staging --suite promotion --legal-fixture path [--output human|json]` | Available through Seerr-to-Movie-Library playback proof | Runs the full VPN proof, authenticates the household user to Seerr, submits an approved fixture movie request, grabs the exact Internet Archive release selected through Radarr into qBittorrent, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported path, and requires direct-play readiness. Use only in a disposable Staging Environment. Verification Artifact behavior remains planned. |
 | `media-stack verify --site home --instance media-homelab --environment staging --suite promotion --legal-series-fixture path [--output human|json]` | Available through Seerr-to-Series-Library playback proof | Runs the full VPN proof, authenticates the household user to Seerr, submits the selected fixture season as an approved series request, waits for Sonarr registration, grabs the exact Internet Archive release into qBittorrent, waits for Sonarr import, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported episode, and requires direct-play readiness. Supply both legal fixture flags to prove both libraries in one run. Use only in a disposable Staging Environment. |
-| `media-stack destroy` | Planned | Will remove selected-Environment containers/networks/runtime files, with opt-in application volumes, downloads, library media, and application secrets. Requires a saved plan and explicit confirmation; volume deletion requires an automatic protected backup. See the [agreed implementation plan](../../docs/plans/media-stack-destroy.md). It is not accepted by the current binary. |
+| `media-stack destroy` | Implemented on the selected Ubuntu Host with local Docker | Removes owned containers/networks/generated runtime files after exact saved-plan approval. Independent opt-ins select application volumes, downloads, media, and application credentials. Volume reset captures a protected final-state backup. See [destroy and reset](#destroy-and-reset). |
 
 Operational commands require explicit Site, Stack Instance and Environment selection; Production is never inferred. An explicit standalone `--config` path is resolved from the working directory and cannot be combined with Site selectors. `config describe`, `test`, and the all-Environment `migrate-secrets` command do not require an Environment selector.
 
@@ -1033,7 +1033,7 @@ The agreed [destroy plan](../../docs/plans/media-stack-destroy.md) allows explic
 application volumes, downloads, library media, and application secrets in addition to runtime resources. It preserves
 backups, Declared Configuration, shared VPN credentials, age identities, and Site infrastructure. Production can continue
 while Staging runtime is absent; retain Staging's declaration and recreate it before new verification or Restore Drills.
-Payload deletion is not protected by application-state backups. Destroy remains planned and is not available in the binary.
+Payload deletion is not protected by application-state backups. Use the saved-plan procedure below.
 
 ## Operating principles
 
@@ -1057,3 +1057,116 @@ Payload deletion is not protected by application-state backups. Destroy remains 
 - [arr-new teaching-reference analysis](../../docs/research/arr-new-compose.md)
 - [Home Media Stack implementation map](https://github.com/adkulas/homelab/issues/36)
 - [Media Stack testing-strategy map](https://github.com/adkulas/homelab/issues/37)
+
+
+## Destroy and reset
+
+Run destroy on the selected Ubuntu Host against its local Unix-socket Docker daemon.
+Remote Docker contexts and ambiguous Host/daemon identity are refused. For Site
+Inventory, the selected Host name must match the local hostname; the saved plan
+also binds the machine identity, daemon ID, socket, effective configuration and
+versions. Production is always selected explicitly. Both Environment declarations
+remain in configuration.
+
+First save and inspect a private plan outside the paths being deleted:
+
+```bash
+./bin/media-stack destroy --site home --instance media-homelab \
+  --environment staging --plan /private/operator-state/destroy-staging.json
+```
+
+Add independent `--volumes`, `--downloads`, or `--media` selections when a reset
+is intended. `--secrets` requires `--volumes`. There is no `--data` option. Default
+destruction removes owned containers and networks, then only generated
+`openvpn_user`, `openvpn_password`, and `profilarr.env` runtime files; unknown
+files and resources remain. Saving the requested artifact is preview's only
+intended write. Preview does not start services, recover restores, or create
+missing volumes.
+
+Execute within 30 minutes using the SHA256 printed by that exact preview:
+
+```bash
+./bin/media-stack destroy --site home --instance media-homelab \
+  --environment staging --execute /private/operator-state/destroy-staging.json \
+  --confirm SHA256_FROM_PREVIEW
+```
+
+Production also requires `--target` with the full identity printed in the plan.
+Every payload deletion, including disposable Staging, requires
+`--acknowledge-loss` with the exact printed token, for example
+`home/media-homelab/production/media-production:downloads,media:permanent-loss`.
+This explicitly accepts potentially permanent loss; no external storage-backup
+validator is required. Application-state backups **do not cover media or downloads**.
+Automation uses the same two invocations and explicit approval flags.
+Use `--output json` on either invocation for the plan, digest, journal location,
+coverage, completed/failed/pending actions, and completion status.
+
+Apply, backup, restore, and destroy share a Host-wide Environment lock. Independent
+Environments remain operable. Execution checks ownership, consumers, storage
+boundaries, recovery state, configuration and Host/daemon identity under that lock
+before stopping services. Replaced targets, symlinks, nested mounts and unexpected
+volume consumers block destruction. Payload traversal does not follow symlinks.
+
+With `--volumes`, destroy stops the owned service set and archives exactly the
+surviving declared volumes. It independently compares a second read-only capture,
+publishes and verifies a private protected `before-destroy` backup, and skips
+retention. No writers resume between that capture and deletion. Missing volumes
+are listed explicitly. Partial snapshots have `complete: false`; ordinary restore
+refuses them. An empty installation creates a recovery record and reports no
+Environment backup, rather than manufacturing volumes or complete coverage.
+
+Recover a partial snapshot through supervised per-volume recovery: inspect the
+manifest's `services`, `missingVolumes`, image and ownership fields; independently
+verify each archive's SHA256 and size; keep services stopped; recreate only the
+recorded owned volume and extract its corresponding tar archive with the recorded
+ownership; then restore or initialize missing application state before apply.
+Never change `complete` to pass ordinary restore's gate. Use a separate disposable
+project first to verify recovered content. The existing complete-backup restore
+flow remains the supported automatic recovery path for complete snapshots.
+
+When deleting application credentials, their ciphertext is preserved alongside the
+backup as `secrets.sops.yaml`; needed active Restore Drill credentials are preserved
+as `drill-credentials.sops.yaml`. Neither document is decrypted for archiving or
+removal. Restore the ciphertext to its declared active path, or initialize new
+credentials, before apply. Deleting a document does not revoke provider credentials
+or erase copies from Git history or historical backups.
+
+The private journal is beneath the selected `backupRoot/.destroy-operations` and
+remains outside selected deletion paths. A failure before deletion attempts to
+restore the previously running service set and reports recovery failures. Once
+deletion begins, survivors stay stopped: there is no automatic rollback. Apply
+and restore refuse unfinished destroy operations. Keep the journal and protected
+backup. To resume while authorization is valid, repeat the exact execute command.
+The operation verifies its backup and remaining identities; absent targets are
+idempotent, replacements require new authorization.
+
+If authorization expires, save a new preview of remaining work:
+
+```bash
+./bin/media-stack destroy --site home --instance media-homelab \
+  --environment staging --volumes --downloads --secrets \
+  --resume /path/from/report/to/operation.json \
+  --plan /private/operator-state/destroy-staging-renewed.json
+```
+
+Repeat the original deletion selections, review the new artifact, and execute it
+with its new digest and acknowledgements. Unchanged protected identities reuse the interrupted capture. A newly authorized
+replacement gets a fresh final-state snapshot; previous journals and backups remain
+linked and are independently verified. After successful volume reset, obsolete restore
+journals and Restore Drill gates move into the protected recovery directory;
+active drill credentials disappear only after their recovery copy is preserved.
+Container-only destruction retains restore and Profilarr recovery state. Volume
+reset refuses unfinished restore or unresolved Profilarr recovery.
+
+Destroy retains dataRoot itself, declarations, versions, backups, shared VPN
+documents, age identities, other Environments and Stack Instances, and Site DNS,
+Traefik and CA resources. Production can continue while Staging is absent. Recreate
+Staging before new verification or Restore Drills. Historical Promotion evidence
+survives; destroy does not add expiry checks to existing verification evidence.
+
+Disposable Docker acceptance (never run against household Environments):
+
+```bash
+MEDIA_STACK_LIVE_DESTROY=1 go test ./tests/acceptance \
+  -run '^TestDisposableDestroy' -count=1 -timeout=3m -v
+```

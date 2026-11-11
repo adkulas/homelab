@@ -33,6 +33,8 @@ type RetentionDecision struct {
 }
 
 type BackupReport struct {
+	MissingVolumes     []string            `json:"missingVolumes,omitempty"`
+	RecoveryDocuments  []string            `json:"recoveryDocuments,omitempty"`
 	Scope              *config.SecretScope `json:"scope,omitempty"`
 	SchemaVersion      string              `json:"schemaVersion"`
 	CLIContractVersion string              `json:"cliContractVersion"`
@@ -77,6 +79,12 @@ func NewBackupRequest(workingDirectory, environment, configPath, label string, p
 }
 
 func (engine localEngine) Backup(ctx context.Context, request BackupRequest) (BackupReport, error) {
+	release, err := lockEnvironment(ctx, request.plan, false)
+	if err != nil {
+		return BackupReport{}, err
+	}
+	defer release()
+
 	return engine.executeBackup(ctx, request)
 }
 

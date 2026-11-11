@@ -103,3 +103,15 @@ rehearsal runs with `sites/home/hosts/homelab/ansible/tests/run.sh`; it requires
 Docker and free TCP 28080 / UDP 29134, refuses an existing `home-traefik` project,
 and verifies preview, convergence, watched routes, removal, static recreation,
 and failed-validation recovery. See the [Host deployment guide](sites/home/hosts/homelab/README.md#traefik-deployment).
+
+Destroy safety fixtures run in the full suite and use private disposable state.
+Run real Docker destruction acceptance separately (only disposable test projects):
+
+```bash
+MEDIA_STACK_LIVE_DESTROY=1 go test ./tests/acceptance \
+  -run '^TestDisposableDestroy' -count=1 -timeout=3m -v
+```
+
+See the [destroy procedure](services/media/README.md#destroy-and-reset) for exact
+saved-plan approval, resume and partial-snapshot recovery. These tests must never
+target household Environments.

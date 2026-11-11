@@ -24,6 +24,9 @@ func ResolveMedia(ctx context.Context, repositoryRoot string, siteName SiteName,
 		return nil, err
 	}
 
+	resolved.Deployment.Reload = func(ctx context.Context) (*engine.Deployment, error) {
+		return ResolveMedia(ctx, repositoryRoot, siteName, instanceName, environment)
+	}
 	return &resolved.Deployment, nil
 }
 
@@ -123,7 +126,7 @@ func resolveMedia(ctx context.Context, repositoryRoot string, siteName SiteName,
 	if len(redactedReferences) > 0 && site.Spec.SensitiveValues != nil {
 		sources = append(sources, filepath.ToSlash(filepath.Join("sites", string(siteName), site.Spec.SensitiveValues.Document)))
 	}
-	deployment := engine.Deployment{Declared: declared, ConfigPath: filepath.Join(siteDirectory, instanceReference), VersionsPath: filepath.Join(repositoryRoot, "services/media/versions.yaml"), ConfigurationIdentity: configurationIdentity}
+	deployment := engine.Deployment{HostName: string(host.Metadata.Name), Declared: declared, ConfigPath: filepath.Join(siteDirectory, instanceReference), VersionsPath: filepath.Join(repositoryRoot, "services/media/versions.yaml"), ConfigurationIdentity: configurationIdentity}
 	deployment.Save = func(updated config.MediaStack) error {
 		current, err := os.ReadFile(deployment.ConfigPath)
 		if err != nil {
