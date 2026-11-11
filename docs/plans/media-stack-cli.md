@@ -266,16 +266,18 @@ results, timestamp, and expiry. Failure cannot be downgraded to enable Promotion
 
 ### `destroy`
 
-```text
-media-stack destroy --environment staging
-media-stack destroy --environment production --verified-backup backup-manifest.json
-```
+The operator-approved [destroy implementation plan](media-stack-destroy.md) supersedes the original narrower contract.
+Destroy remains unimplemented. It selects exactly one Environment through Site/Stack Instance selectors or an explicit
+standalone configuration and runs on that Host with local Docker.
 
-`destroy` previews selected-environment containers, networks, generated runtime files, and mutable volumes. Execution needs
-a saved plan, confirmation, and an identity recheck. Production confirmation includes typing its environment name.
+By default it removes owned containers, networks, and generated runtime files. Optional `--volumes`, `--downloads`,
+`--media`, and `--secrets` select additional removal; `--secrets` requires `--volumes`. Volume deletion automatically creates
+a protected, verified final-state backup, including encrypted credential recovery copies when deleting secrets. Payload
+deletion requires explicit loss acknowledgement because application-state backups exclude media and downloads.
 
-By default it removes only containers and networks. Volumes require `--volumes`, a current backup, and a second confirmation.
-It never deletes media, torrent payloads, backups, secrets, or Declared Configuration. There is no `--purge-data`.
+Execution requires a saved plan valid for 30 minutes, confirmation, identity rechecks, and an Environment lock. Production
+confirmation names the full target identity. Declarations, backups, shared VPN credentials, age identities, other
+Environments, and Site infrastructure survive. See the dedicated plan for partial installations, resume, and recovery gates.
 
 ## Declared Configuration
 
@@ -541,6 +543,7 @@ Test through the CLI and supported observable state; use internal adapters only 
 
 1. **Profilarr in Restore Drills:** safe exclusion means the drill is not literally every Production volume.
 2. **Verification expiry:** choose wall-clock lifetime in addition to digest invalidation.
-3. **Current backup:** define maximum age separately for prune, restore, image changes, and destroy.
+3. **Current backup:** define maximum age separately for prune, restore, and image changes. Destroy captures a protected
+   final-state backup automatically as specified in its dedicated plan.
 4. **Emergency Production changes:** there is deliberately no break-glass bypass yet.
 5. **Public Torrent Source catalog:** select the initial source and define its non-secret semantic fields.
