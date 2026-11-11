@@ -1,0 +1,4 @@
+FROM python:3.13-alpine
+RUN apk add --no-cache docker-cli docker-cli-compose && pip install --no-cache-dir ansible-core==2.20.1
+COPY requirements.yml /requirements.yml
+RUN ansible-galaxy collection install -r /requirements.yml

@@ -96,3 +96,10 @@ Protected DHCP command checks run with
 PyYAML, age and age-keygen, without a Docker daemon. The optional pinned-image
 operator and isolated DHCP-client rehearsals are documented in the
 [disabled DHCP staging procedure](services/network/docs/declared-dhcp.md).
+
+Traefik Ansible syntax and lint checks use the collections pinned in
+`sites/home/hosts/homelab/ansible/requirements.yml`. The disposable deployment
+rehearsal runs with `sites/home/hosts/homelab/ansible/tests/run.sh`; it requires
+Docker and free TCP 28080 / UDP 29134, refuses an existing `home-traefik` project,
+and verifies preview, convergence, watched routes, removal, static recreation,
+and failed-validation recovery. See the [Host deployment guide](sites/home/hosts/homelab/README.md#traefik-deployment).

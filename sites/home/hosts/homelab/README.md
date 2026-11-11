@@ -3,7 +3,7 @@
 The Host's [Site Inventory declaration](../homelab.yaml) remains separate from
 its [Ansible playbook](ansible/playbook.yml). Run the playbook from a controller
 with SSH access to `adam@homelab` and Ansible Core 2.20 or later. Install the
-pinned mount-management collection before running. Host key verification remains
+pinned Ansible collections before running. Host key verification remains
 enabled.
 
 From the repository root:
@@ -28,7 +28,7 @@ Docker is installed, check mode can inspect the Docker tasks too. A preview
 is not a substitute for the first real run and a second convergence run.
 
 The tags `storage`, `base`, `repo`, `power`, `docker`, `ssh`, `secrets`, `duckdns`,
-`backups`, and `security`
+`backups`, `traefik`, and `security`
 select areas. The OS and package
 inspection preflight always runs. For example:
 
@@ -171,7 +171,8 @@ verification, before Promotion to Production.
 
 Firewall configuration needs confirmed management and trusted LAN ranges and
 must account for Docker's published-port rules. This playbook does not install
-or enable a firewall and does not deploy any containers or publish service ports.
+or enable a firewall. It deploys the Site Traefik container and publishes TCP 80
+and UDP 19134; Media application deployment remains with the Media Stack CLI.
 Disk health alert delivery also needs an agreed destination.
 
 Host addressing, DNS, DHCP, and router changes follow the separate exact-plan
@@ -180,3 +181,90 @@ and the [network setup procedure](../../../../services/network/docs/setup.md).
 
 References: [Docker's Ubuntu installation instructions](https://docs.docker.com/engine/install/ubuntu/)
 and [Ansible check mode](https://docs.ansible.com/projects/ansible/latest/playbook_guide/playbooks_checkmode.html).
+
+## Traefik deployment
+
+The `traefik` tag deploys the existing `home-traefik` Compose project from the
+**controller checkout**, into a root-owned `/opt/homelab` tree. It copies only
+`services/traefik/{compose.yaml,traefik.yml}`, `sites/home/traefik/compose.yaml`,
+and the Site dynamic YAML files. The relative layout preserves Compose extends
+and bind mounts. It does not read, pull, or update `/home/adam/homelab`.
+
+From the repository root:
+
+```bash
+cd sites/home/hosts/homelab/ansible
+ansible-galaxy collection install -r requirements.yml
+ansible-playbook -i inventory.yml playbook.yml --tags traefik --check --diff --ask-become-pass
+ansible-playbook -i inventory.yml playbook.yml --tags traefik --ask-become-pass
+ansible-playbook -i inventory.yml playbook.yml --tags traefik --ask-become-pass
+```
+
+The last run should report zero changes. Docker Engine and Compose v2.18 or later
+must already be available with sudo (`--tags docker` provisions them). A full run
+applies pending Docker handlers before Traefik. A tagged run fails clearly if
+prerequisites are missing. No administrator Docker group membership is granted.
+Check mode never reconciles containers. On a fresh Host it explains deferred
+installation/validation; on an installed Host it previews file changes and reports
+which runtime checks require a normal run.
+
+Commit or deliberately select the controller files before running. For rollback,
+create a separate controller checkout at the desired commit (`git worktree add
+--detach /tmp/homelab-traefik-rollback <commit>`), install that revision's pinned
+collections, and run the same commands from its Ansible directory. Review the diff
+first. This deliberately redeploys the older revision without touching the Host's
+administrator checkout. Uncommitted controller edits are deployed too.
+
+Re-run the tag for configuration updates. Dynamic YAML changes use Traefik's file
+watcher; files previously managed by Ansible are removed when absent from the
+selected checkout. Unrelated files are preserved. The deployment keeps a managed
+filename manifest; do not edit that manifest. Static configuration changes force
+container recreation because atomic replacement of a single-file bind mount
+otherwise leaves the old inode mounted. The last successfully applied checksum
+is retained so a failed run can retry recreation. Compose reconciles service
+changes; routine runs pull only a missing pinned image and do not upgrade it.
+Compose validation must pass before any container start or update.
+
+Verification first checks the running container, then sends an unmatched Host
+request to localhost HTTP and requires Traefik's 404. This proves proxy startup,
+not application reachability. Inspect the installed project with:
+
+```bash
+cd /opt/homelab/sites/home/traefik
+sudo docker compose config
+sudo docker compose ps
+sudo docker compose logs --tail 100 traefik
+curl --noproxy '*' -i -H 'Host: traefik-startup.invalid' http://127.0.0.1/
+# Actual Media route: expect the application's response when its backend is running.
+curl --noproxy '*' -i -H 'Host: jellyfin.home' http://127.0.0.1/
+# Check client DNS and the complete client path separately.
+getent hosts jellyfin.home homelab.home pc.home
+curl --noproxy '*' -i http://jellyfin.home/
+# Container-side backend name resolution (independent of client DNS):
+sudo docker compose exec traefik nslookup homelab.home
+sudo docker compose exec traefik nslookup pc.home
+```
+
+A 502/504 on a matched route indicates an upstream problem; an unexpected 404
+suggests a missing route or Host header. Check Traefik logs for dynamic-file parse
+errors. A failed localhost startup check or stopped container is a proxy failure.
+A DNS failure is a separate prerequisite. The container must resolve `homelab.home`
+and `pc.home`; household clients must resolve the service aliases to Traefik.
+See the [Site DNS requirements](../../README.md#name-resolution). Do not change
+DNS, DHCP, Host addressing, or router settings as part of this deployment.
+
+Minecraft is separate from the HTTP probe: `minecraft.home` must resolve to
+homelab, `pc.home` must resolve inside Traefik, and the Bedrock process and PC
+firewall must allow UDP 19134 from homelab. Verify with a Bedrock client against
+`minecraft.home:19134` when those prerequisites exist; a UDP port scan alone does
+not prove backend availability. Report it unavailable/unverified independently
+of proxy startup. These tasks neither provision Minecraft nor enable a dashboard.
+Keep published ports on the trusted LAN with no internet forwarding. TLS and
+firewall rollout remain outside this deployment.
+
+Local validation uses `tests/run.sh` in the Ansible directory. It builds an isolated
+Ansible controller, uses a temporary deployment tree and ports 28080/29134, and
+refuses to run if `home-traefik` already exists on the local Docker daemon. It
+requires Docker, outbound access for test-tool installation, and free test ports.
+It does not deploy to the live Host; record live deployment and backend checks
+separately from this rehearsal.
