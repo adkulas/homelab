@@ -39,6 +39,7 @@ type Plan struct {
 }
 
 type Engine interface {
+	Destroy(context.Context, DestroyRequest) (DestroyReport, error)
 	Plan(context.Context, PlanRequest) (Plan, error)
 	Apply(context.Context, ApplyRequest) (ApplyReport, error)
 	Backup(context.Context, BackupRequest) (BackupReport, error)

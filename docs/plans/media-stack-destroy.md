@@ -1,6 +1,9 @@
 # Media Stack destroy implementation plan
 
-Status: agreed design, confirmed by the operator on 2026-11-09; implementation pending.
+Status: agreed design, confirmed by the operator on 2026-11-09; implemented under #127.
+
+Exact flags, resume, partial-state recovery and disposable acceptance are documented
+in the [operator procedure](../../services/media/README.md#destroy-and-reset).
 
 This records the completed design interview. It supersedes the narrower destroy
 contract in the original CLI plan, which prohibited payload and secret deletion.
@@ -158,3 +161,17 @@ Run the full repository suite with `./bin/media-stack test` or `go test ./...`
 when implementation is complete, plus the explicit disposable Docker acceptance
 cases. Documentation-only planning changes need consistency and diff checks;
 they do not demonstrate implemented destroy behavior.
+
+
+## Implementation behavior matrix
+
+| Public seam | Required behavior | Source of truth | Observable evidence |
+| --- | --- | --- | --- |
+| CLI destroy preview/execute | Explicit selection, private exact-byte approval, 30-minute lifetime, Host/daemon confinement | Operator contract: preview and authorization | `TestDestroyRequiresExplicitSelectionAndVolumesForSecrets`, `TestDestroyPreviewIsPrivateObservationalAndBoundToExactBytes`, `TestDestroyRejectsUnsafeChangesBeforeStoppingServices` |
+| Engine lifecycle methods | Shared Environment lock; interrupted destruction blocks apply/restore | Mutation coordination and interruption contract | `TestLifecycleCommandsShareEnvironmentLockAndCancellationReleasesIt`, failure/resume and cancellation acceptance |
+| Engine destroy with Docker/filesystem boundary fixtures | Independent selections; protect surviving volumes only; retain unknown resources and other Environments | Selection table and backup contract | `TestDestroyEveryIndependentDeletionSelection`, missing-target and unknown-runtime acceptance |
+| Engine destroy backup/recovery | Independent capture verification, ciphertext recovery, partial metadata, no retention, durable resume | Final-state and recovery contract | Corrupt-capture, renewed-preview, failure/resume and drill-retirement acceptance |
+| Disposable Docker project | Actual Staging deletion preserves running Production and its state | Isolation and release acceptance | `TestDisposableDestroyProtectsPartialStateAndIsolatesProduction` |
+
+Test seams confirmed by the operator before implementation. Fixture checks run
+with the repository suite; disposable Docker acceptance is explicitly enabled.

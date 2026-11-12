@@ -25,6 +25,8 @@ usage:
   media-stack plan --environment production|staging [--config path]
   media-stack apply --environment production|staging [--config path]
   media-stack promote --environment production [--config path] --verification path --backup path [--output human|json]
+  media-stack destroy --environment production|staging [--config path] --plan path [--volumes] [--downloads] [--media] [--secrets] [--resume journal] [--output human|json]
+  media-stack destroy --environment production|staging [--config path] --execute path --confirm SHA256 [--target identity] [--acknowledge-loss token] [--output human|json]
   media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--now RFC3339] [--output human|json]
   media-stack restore --environment production|staging --backup path [--config path] [--confirm] [--as-restore-drill] [--credentials path] [--output human|json]
   media-stack restore --environment staging --as-restore-drill --credentials path --confirm-integrations [--config path] [--output human|json]
@@ -76,6 +78,8 @@ func run(ctx context.Context, arguments []string) error {
 		return runApply(ctx, arguments[1:])
 	case "promote":
 		return runPromote(ctx, arguments[1:])
+	case "destroy":
+		return runDestroy(ctx, arguments[1:])
 	case "backup":
 		return runBackup(ctx, arguments[1:])
 	case "restore":

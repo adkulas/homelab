@@ -267,7 +267,7 @@ results, timestamp, and expiry. Failure cannot be downgraded to enable Promotion
 ### `destroy`
 
 The operator-approved [destroy implementation plan](media-stack-destroy.md) supersedes the original narrower contract.
-Destroy remains unimplemented. It selects exactly one Environment through Site/Stack Instance selectors or an explicit
+Destroy is implemented on the selected Ubuntu Host with local Docker. It selects exactly one Environment through Site/Stack Instance selectors or an explicit
 standalone configuration and runs on that Host with local Docker.
 
 By default it removes owned containers, networks, and generated runtime files. Optional `--volumes`, `--downloads`,
@@ -277,7 +277,7 @@ deletion requires explicit loss acknowledgement because application-state backup
 
 Execution requires a saved plan valid for 30 minutes, confirmation, identity rechecks, and an Environment lock. Production
 confirmation names the full target identity. Declarations, backups, shared VPN credentials, age identities, other
-Environments, and Site infrastructure survive. See the dedicated plan for partial installations, resume, and recovery gates.
+Environments, and Site infrastructure survive. See the dedicated plan for partial installations, resume, and recovery gates, and the [operator procedure](../../services/media/README.md#destroy-and-reset) for exact approval flags.
 
 ## Declared Configuration
 

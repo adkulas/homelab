@@ -55,6 +55,12 @@ func NewApplyRequest(workingDirectory, environment, configPath string) (ApplyReq
 }
 
 func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (ApplyReport, error) {
+	release, err := lockEnvironment(ctx, request.plan, false)
+	if err != nil {
+		return ApplyReport{}, err
+	}
+	defer release()
+
 	plan, err := engine.Plan(ctx, request.plan)
 	if err != nil {
 		return ApplyReport{}, err

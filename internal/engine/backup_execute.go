@@ -173,25 +173,7 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 		Complete:           true,
 		Services:           services,
 	}
-	if err := verifyBackupArchives(incompletePath, report.Services); err != nil {
-		return BackupReport{}, err
-	}
-	manifest, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		return BackupReport{}, fmt.Errorf("encode backup manifest: %w", err)
-	}
-	manifest = append(manifest, '\n')
-	manifestPath := filepath.Join(incompletePath, "manifest.json")
-	if err := os.WriteFile(manifestPath, manifest, 0o600); err != nil {
-		return BackupReport{}, fmt.Errorf("write backup manifest: %w", err)
-	}
-	if err := os.Rename(incompletePath, finalPath); err != nil {
-		return BackupReport{}, fmt.Errorf("atomically publish backup: %w", err)
-	}
-	if err := verifyPublishedBackup(report); err != nil {
-		if quarantineErr := quarantinePublishedBackup(finalPath, incompletePath); quarantineErr != nil {
-			return BackupReport{}, errors.Join(err, quarantineErr)
-		}
+	if err := publishCapturedBackup(incompletePath, finalPath, report); err != nil {
 		return BackupReport{}, err
 	}
 	if !request.skipRetention {
