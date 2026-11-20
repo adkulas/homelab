@@ -319,6 +319,12 @@ media-stack plan \
 media-stack apply --plan production-plan.json
 ```
 
+During first-time interactive initialization, choose the shared admin login option
+to enter one username and password for Jellyfin, qBittorrent, and any declared
+series companions in that Environment. The default is separate logins. The
+OpenVPN service credentials and Profilarr API key have their own prompts.
+The CLI hides passwords and the Profilarr key on a terminal.
+
 Production is never the default. A changed configuration, image digest, CLI contract, expired verification, or missing current
 backup when one is required invalidates Promotion evidence.
 

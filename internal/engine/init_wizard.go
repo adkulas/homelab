@@ -108,51 +108,28 @@ func NewInteractiveInitRequest(workingDirectory, environment, configPath string,
 		answers.HardwareTranscoding = config.HardwareTranscodingPreference(preference)
 	}
 	if !secretExists {
-		fmt.Fprintln(output, "Use the username and password from the Nord Account manual-setup area.")
-		fmt.Fprintln(output, "These are service credentials, not your Nord account email/password.")
-		fmt.Fprintln(output, "Choose a unique 32-character-or-longer Profilarr API key for this Environment; the CLI stores it only in the SOPS document and uses it to verify the guided connections.")
-		fmt.Fprintln(output, "Choose distinct Jellyfin administrator credentials for this Environment; they are used for supported API reconciliation and authenticated playback verification.")
-		fmt.Fprintln(output, "Choose stable qBittorrent Web UI credentials for this Environment; use them for browser sign-in.")
 		answers.AgeRecipient, err = promptRequired(reader, output, "Age recipient for this environment: ")
 		if err != nil {
 			return InitRequest{}, err
 		}
 		if answers.ServiceUsername == "" {
+			fmt.Fprintln(output, "Use the OpenVPN service credentials from Nord Account manual setup.")
 			answers.ServiceUsername, err = promptRequired(reader, output, "NordVPN OpenVPN service username: ")
 		}
 		if err != nil {
 			return InitRequest{}, err
 		}
 		if answers.ServicePassword == "" {
-			answers.ServicePassword, err = promptRequired(reader, output, "NordVPN OpenVPN service password: ")
+			answers.ServicePassword, err = promptHiddenPassword(reader, input, output, "NordVPN OpenVPN service password: ")
 		}
 		if err != nil {
 			return InitRequest{}, err
 		}
-		answers.ProfilarrAPIKey, err = promptRequired(reader, output, "Profilarr API key (at least 32 characters): ")
+		answers.ProfilarrAPIKey, err = promptHiddenPassword(reader, input, output, "Profilarr API key (at least 32 characters): ")
 		if err != nil {
 			return InitRequest{}, err
 		}
-		answers.JellyfinUsername, err = promptRequired(reader, output, "Jellyfin administrator username: ")
-		if err != nil {
-			return InitRequest{}, err
-		}
-		answers.JellyfinPassword, err = promptRequired(reader, output, "Jellyfin administrator password: ")
-		if err != nil {
-			return InitRequest{}, err
-		}
-		answers.QBittorrentUsername, err = promptRequired(reader, output, "qBittorrent Web UI username: ")
-		if err != nil {
-			return InitRequest{}, err
-		}
-		answers.QBittorrentPassword, err = promptRequired(reader, output, "qBittorrent Web UI password: ")
-		if err != nil {
-			return InitRequest{}, err
-		}
-	}
-	if !secretExists && declared.Spec.Environments[environment].SeriesAutomation != nil {
-		fmt.Fprintln(output, "Choose the administrator credentials for each series companion. They are encrypted in this Environment’s SOPS document before apply creates the accounts.")
-		if err := promptCompanionAnswers(reader, input, output, &answers, false); err != nil {
+		if err := promptAdminAnswers(reader, input, output, &answers, declared.Spec.Environments[environment].SeriesAutomation != nil); err != nil {
 			return InitRequest{}, err
 		}
 	}
@@ -222,4 +199,54 @@ func prompt(reader *bufio.Reader, output io.Writer, label string) (string, error
 		return "", err
 	}
 	return strings.TrimSpace(answer), nil
+}
+
+func promptAdminAnswers(reader *bufio.Reader, input io.Reader, output io.Writer, answers *initAnswers, includeCompanions bool) error {
+	services := "Jellyfin and qBittorrent"
+	if includeCompanions {
+		services = "Jellyfin, qBittorrent, Houndarr, and Cleanuparr"
+	}
+	shared, err := prompt(reader, output, "Use one admin username and password for "+services+"? [y/N]: ")
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(shared, "y") || strings.EqualFold(shared, "yes") {
+		username, err := promptRequired(reader, output, "Shared administrator username: ")
+		if err != nil {
+			return err
+		}
+		password, err := promptHiddenPassword(reader, input, output, "Shared administrator password: ")
+		if err != nil {
+			return err
+		}
+		answers.JellyfinUsername, answers.JellyfinPassword = username, password
+		answers.QBittorrentUsername, answers.QBittorrentPassword = username, password
+		if includeCompanions {
+			answers.HoundarrUsername, answers.HoundarrPassword = username, password
+			answers.CleanuparrUsername, answers.CleanuparrPassword = username, password
+			return validateCompanionAnswers(*answers, true)
+		}
+		return nil
+	}
+
+	answers.JellyfinUsername, err = promptRequired(reader, output, "Jellyfin administrator username: ")
+	if err != nil {
+		return err
+	}
+	answers.JellyfinPassword, err = promptHiddenPassword(reader, input, output, "Jellyfin administrator password: ")
+	if err != nil {
+		return err
+	}
+	answers.QBittorrentUsername, err = promptRequired(reader, output, "qBittorrent Web UI username: ")
+	if err != nil {
+		return err
+	}
+	answers.QBittorrentPassword, err = promptHiddenPassword(reader, input, output, "qBittorrent Web UI password: ")
+	if err != nil {
+		return err
+	}
+	if includeCompanions {
+		return promptCompanionAnswers(reader, input, output, answers, false)
+	}
+	return nil
 }
