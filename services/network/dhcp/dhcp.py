@@ -53,10 +53,13 @@ def declaration(site):
     # A single scope spans both bands: all space below the dynamic band is excluded.
     # This also excludes any gap between the declared reservation and dynamic bands.
     fixed = [address(network['gateway'])]
+    reserved_references = {entry['address'] for entry in dhcp['reservations']}
+    dns_hosts = {member['host'] for member in desired['members'].values()}
     for reference in spec['hosts']:
-        host = yaml.load((site / reference).read_text(), Loader=dns.InventoryLoader)['spec']
-        if host.get('networkAddress'):
-            fixed.append(address(host['networkAddress']))
+        host = yaml.load((site / reference).read_text(), Loader=dns.InventoryLoader)
+        host_address = host['spec'].get('networkAddress')
+        if host_address and (host_address not in reserved_references or host['metadata']['name'] in dns_hosts):
+            fixed.append(address(host_address))
     if len(set(fixed)) != len(fixed) or any(rs <= value <= de for value in fixed):
         raise ValueError('static address collision')
     reservations = []

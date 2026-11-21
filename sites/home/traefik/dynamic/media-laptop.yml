@@ -1,0 +1,131 @@
+# Traefik resolves laptop.home through local DNS.
+# This file is loaded by Traefik's file provider.
+http:
+  routers:
+    laptop-qbittorrent-production:
+      rule: Host(`qbittorrent.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-qbittorrent-production
+    laptop-prowlarr-production:
+      rule: Host(`prowlarr.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-prowlarr-production
+    laptop-sonarr-production:
+      rule: Host(`sonarr.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-sonarr-production
+    laptop-radarr-production:
+      rule: Host(`radarr.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-radarr-production
+    laptop-profilarr-production:
+      rule: Host(`profilarr.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-profilarr-production
+    laptop-jellyfin-production:
+      rule: Host(`jellyfin.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-jellyfin-production
+    laptop-seerr-production:
+      rule: Host(`seerr.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-seerr-production
+    laptop-qbittorrent-staging:
+      rule: Host(`qbittorrent.staging.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-qbittorrent-staging
+    laptop-prowlarr-staging:
+      rule: Host(`prowlarr.staging.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-prowlarr-staging
+    laptop-sonarr-staging:
+      rule: Host(`sonarr.staging.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-sonarr-staging
+    laptop-radarr-staging:
+      rule: Host(`radarr.staging.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-radarr-staging
+    laptop-profilarr-staging:
+      rule: Host(`profilarr.staging.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-profilarr-staging
+    laptop-jellyfin-staging:
+      rule: Host(`jellyfin.staging.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-jellyfin-staging
+    laptop-seerr-staging:
+      rule: Host(`seerr.staging.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-seerr-staging
+  services:
+    laptop-qbittorrent-production:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:8080
+    laptop-prowlarr-production:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:9696
+    laptop-sonarr-production:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:8989
+    laptop-radarr-production:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:7878
+    laptop-profilarr-production:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:6868
+    laptop-jellyfin-production:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:8096
+    laptop-seerr-production:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:5055
+    laptop-qbittorrent-staging:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:18080
+    laptop-prowlarr-staging:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:19696
+    laptop-sonarr-staging:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:18989
+    laptop-radarr-staging:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:17878
+    laptop-profilarr-staging:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:16868
+    laptop-jellyfin-staging:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:18096
+    laptop-seerr-staging:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:15055

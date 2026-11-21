@@ -5,6 +5,7 @@ metadata:
 spec:
     hosts:
         - hosts/homelab.yaml
+        - hosts/laptop.yaml
         - hosts/pc.yaml
         - hosts/raspberrypi.yaml
     stackInstances:

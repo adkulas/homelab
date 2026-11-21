@@ -30,21 +30,70 @@ type traefikService struct {
 
 func TestHomeTraefikRoutesTargetNamedHosts(t *testing.T) {
 	root := filepath.Join(repositoryRoot(t), "sites", "home", "traefik")
+	checkMediaTraefikRoutes(t, filepath.Join(root, "dynamic", "media-stack.yml"), "homelab.home", map[string]int{
+		"qbittorrent.home": 8080, "prowlarr.home": 9696, "sonarr.home": 8989,
+		"radarr.home": 7878, "profilarr.home": 6868, "jellyfin.home": 8096, "seerr.home": 5055,
+		"qbittorrent-staging.home": 18080, "prowlarr-staging.home": 19696,
+		"sonarr-staging.home": 18989, "radarr-staging.home": 17878,
+		"profilarr-staging.home": 16868, "jellyfin-staging.home": 18096, "seerr-staging.home": 15055,
+	})
+
+	var game struct {
+		UDP struct {
+			Routers  map[string]traefikRouter  `yaml:"routers"`
+			Services map[string]traefikService `yaml:"services"`
+		} `yaml:"udp"`
+	}
+	if err := yaml.Unmarshal(readFile(t, filepath.Join(root, "dynamic", "minecraft.yml")), &game); err != nil {
+		t.Fatalf("decode Minecraft route: %v", err)
+	}
+	if len(game.UDP.Routers) != 1 || len(game.UDP.Services) != 1 {
+		t.Fatalf("Minecraft has %d UDP routers and %d services, want one each", len(game.UDP.Routers), len(game.UDP.Services))
+	}
+	router := game.UDP.Routers["minecraft-bedrock"]
+	service := game.UDP.Services[router.Service]
+	if len(router.EntryPoints) != 1 || router.EntryPoints[0] != "bedrock" ||
+		len(service.LoadBalancer.Servers) != 1 || service.LoadBalancer.Servers[0].Address != "pc.home:19134" {
+		t.Fatalf("Minecraft route = %+v, service = %+v, want bedrock -> pc.home:19134", router, service)
+	}
+}
+
+func TestLaptopMediaTraefikRoutesAndDNSAliases(t *testing.T) {
+	site := filepath.Join(repositoryRoot(t), "sites", "home")
+	want := map[string]int{
+		"qbittorrent.laptop.home": 8080, "prowlarr.laptop.home": 9696, "sonarr.laptop.home": 8989,
+		"radarr.laptop.home": 7878, "profilarr.laptop.home": 6868, "jellyfin.laptop.home": 8096, "seerr.laptop.home": 5055,
+		"qbittorrent.staging.laptop.home": 18080, "prowlarr.staging.laptop.home": 19696,
+		"sonarr.staging.laptop.home": 18989, "radarr.staging.laptop.home": 17878,
+		"profilarr.staging.laptop.home": 16868, "jellyfin.staging.laptop.home": 18096, "seerr.staging.laptop.home": 15055,
+	}
+	checkMediaTraefikRoutes(t, filepath.Join(site, "traefik", "dynamic", "media-laptop.yml"), "laptop.home", want)
+
+	var dns struct {
+		Spec struct {
+			Aliases map[string]string `json:"aliases"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(readFile(t, filepath.Join(site, "network.json")), &dns); err != nil {
+		t.Fatalf("decode Site DNS policy: %v", err)
+	}
+	for host := range want {
+		if target := dns.Spec.Aliases[host]; target != "homelab" {
+			t.Errorf("DNS alias %s targets %q, want homelab", host, target)
+		}
+	}
+}
+
+func checkMediaTraefikRoutes(t *testing.T, path, upstream string, want map[string]int) {
+	t.Helper()
 	var media struct {
 		HTTP struct {
 			Routers  map[string]traefikRouter  `yaml:"routers"`
 			Services map[string]traefikService `yaml:"services"`
 		} `yaml:"http"`
 	}
-	if err := yaml.Unmarshal(readFile(t, filepath.Join(root, "dynamic", "media-stack.yml")), &media); err != nil {
+	if err := yaml.Unmarshal(readFile(t, path), &media); err != nil {
 		t.Fatalf("decode Media Stack routes: %v", err)
-	}
-	want := map[string]int{
-		"qbittorrent.home": 8080, "prowlarr.home": 9696, "sonarr.home": 8989,
-		"radarr.home": 7878, "profilarr.home": 6868, "jellyfin.home": 8096, "seerr.home": 5055,
-		"qbittorrent-staging.home": 18080, "prowlarr-staging.home": 19696,
-		"sonarr-staging.home": 18989, "radarr-staging.home": 17878,
-		"profilarr-staging.home": 16868, "jellyfin-staging.home": 18096, "seerr-staging.home": 15055,
 	}
 	if len(media.HTTP.Routers) != len(want) || len(media.HTTP.Services) != len(want) {
 		t.Fatalf("Media Stack has %d routers and %d services, want %d each",
@@ -67,7 +116,7 @@ func TestHomeTraefikRoutesTargetNamedHosts(t *testing.T) {
 		}
 		seen[host] = true
 		service, exists := media.HTTP.Services[router.Service]
-		wantURL := fmt.Sprintf("http://homelab.home:%d", port)
+		wantURL := fmt.Sprintf("http://%s:%d", upstream, port)
 		if !exists || len(service.LoadBalancer.Servers) != 1 || service.LoadBalancer.Servers[0].URL != wantURL {
 			t.Errorf("%s targets %+v, want %s", host, service.LoadBalancer.Servers, wantURL)
 		}
@@ -76,25 +125,6 @@ func TestHomeTraefikRoutesTargetNamedHosts(t *testing.T) {
 		if !seen[host] {
 			t.Errorf("missing router for %s", host)
 		}
-	}
-
-	var game struct {
-		UDP struct {
-			Routers  map[string]traefikRouter  `yaml:"routers"`
-			Services map[string]traefikService `yaml:"services"`
-		} `yaml:"udp"`
-	}
-	if err := yaml.Unmarshal(readFile(t, filepath.Join(root, "dynamic", "minecraft.yml")), &game); err != nil {
-		t.Fatalf("decode Minecraft route: %v", err)
-	}
-	if len(game.UDP.Routers) != 1 || len(game.UDP.Services) != 1 {
-		t.Fatalf("Minecraft has %d UDP routers and %d services, want one each", len(game.UDP.Routers), len(game.UDP.Services))
-	}
-	router := game.UDP.Routers["minecraft-bedrock"]
-	service := game.UDP.Services[router.Service]
-	if len(router.EntryPoints) != 1 || router.EntryPoints[0] != "bedrock" ||
-		len(service.LoadBalancer.Servers) != 1 || service.LoadBalancer.Servers[0].Address != "pc.home:19134" {
-		t.Fatalf("Minecraft route = %+v, service = %+v, want bedrock -> pc.home:19134", router, service)
 	}
 }
 

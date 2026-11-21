@@ -14,14 +14,16 @@ Media application reconciliation remains with the Media Stack CLI.
 
 ## Name resolution
 
-Technitium DNS and DHCP are configured separately from this change. Create these local DNS records before starting Traefik:
+Traefik and its clients use these local DNS records:
 
 | Name | Record | Destination |
 | --- | --- | --- |
 | `homelab.home` | A | `homelab`'s LAN address |
+| `laptop.home` | A | Laptop's reserved LAN address |
 | `pc.home` | A | `pc`'s LAN address, once assigned |
 | `qbittorrent.home`, `prowlarr.home`, `sonarr.home`, `radarr.home`, `profilarr.home`, `jellyfin.home`, `seerr.home` | CNAME | `homelab.home` |
 | The same seven names with `-staging` before `.home` | CNAME | `homelab.home` |
+| The same seven services as `<service>.laptop.home` and `<service>.staging.laptop.home` | CNAME | `homelab.home` |
 | `minecraft.home` | CNAME | `homelab.home` |
 | `technitium.home`, `technitium-pi.home` | CNAME | `homelab.home` |
 
@@ -38,7 +40,7 @@ The same encrypted snapshot records the operator-confirmed current Bell DHCP poo
 above the proposed infrastructure address band. Historical low-address entries still require a live conflict check before
 assigning static Host addresses. The wired Hosts, NVR, and Hue bridge were reconfirmed in the revised wired dashboard.
 Household clients and the Traefik container must resolve these names through Technitium. Configure DHCP to distribute
-Technitium as the resolver, and make sure Docker on `homelab` also uses a resolver that knows `homelab.home` and `pc.home`.
+Technitium as the resolver, and make sure Docker on `homelab` also uses a resolver that knows `homelab.home`, `laptop.home`, and `pc.home`.
 If Docker cannot resolve the upstream Host names, Traefik cannot reach the services even when client DNS works.
 
 `pc.home` has no address yet, so Minecraft routing will not be usable until that A record exists.
@@ -50,7 +52,7 @@ live under `services/traefik`. The [home Site Compose file](traefik/compose.yaml
 Site-owned files in [`traefik/dynamic`](traefik/dynamic). Traefik publishes HTTP on TCP port 80 for the Media Stack
 and Bedrock on UDP port 19134 for Minecraft. The dynamic files define the Media Stack HTTP routes, Technitium management
 redirects and Minecraft UDP route. The routes use
-`homelab.home` and `pc.home` as upstream Host names, so moving a service to another machine changes its upstream name or
+`homelab.home`, `laptop.home`, and `pc.home` as upstream Host names, so moving a service to another machine changes its upstream name or
 DNS record without adding an IP to routing configuration.
 
 Deploy from the controller checkout using the Host playbook's `traefik` tag;
@@ -64,6 +66,14 @@ The router for `jellyfin.home`, for example, targets `homelab.home:8096`; `jelly
 `homelab.home:18096`. The qBittorrent routes target Gluetun's published Web UI ports, not a separate qBittorrent network.
 If qBittorrent's Host header validation is enabled, add `qbittorrent.home` to Production's server domains and
 `qbittorrent-staging.home` to Staging's server domains.
+
+The [laptop routes](traefik/dynamic/media-laptop.yml) use the laptop's published ports. For example,
+`jellyfin.laptop.home` targets `laptop.home:8096` and `jellyfin.staging.laptop.home` targets `laptop.home:18096`.
+Deploy the file with the existing `traefik` tag. Use the [declared DNS workflow](../../services/network/docs/declared-dns.md)
+to reconcile the service aliases and the laptop's A and PTR records. Adding the laptop's address records requires a protected
+DNS apply. Confirm the laptop is using its reserved address, then check `laptop.home` resolves inside the Traefik container
+and test the Production and Staging URLs from a LAN client. If qBittorrent uses Host header validation, allow
+`qbittorrent.laptop.home` in Production and `qbittorrent.staging.laptop.home` in Staging.
 
 `http://technitium.home` redirects to the primary console at `https://homelab.home:53443`;
 `http://technitium-pi.home` redirects to the secondary console at `https://raspberrypi.home:53443`.

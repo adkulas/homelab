@@ -35,8 +35,9 @@ Backup credentials stay separate from deployment credentials.
 The command consumes `site.yaml`, referenced Host and Stack Instance declarations,
 `network.json`, and the encrypted Site-sensitive document. Validate the Site with
 `homelab site validate --site home` first. DHCP must belong to the declared primary.
-Addresses must be usable in-subnet and unique; static Hosts/gateway must be outside
-the scope, and reservations require unique unicast Ethernet MACs and addresses in
+Addresses must be usable in-subnet and unique. The gateway and static Hosts must be outside
+the scope. A non-DNS Host can share the exact address reference from one reservation.
+Reservations require unique unicast Ethernet MACs and addresses in
 the reservation band. Reservation names must be single DNS labels and avoid declared
 Host/alias names and `cluster.home`.
 
