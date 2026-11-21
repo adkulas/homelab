@@ -224,9 +224,15 @@ func (fixture *companionBootstrapFixture) serveHound(w http.ResponseWriter, r *h
 	return false
 }
 
-func installBootstrapSOPSFixture(t *testing.T, bin, secretPath string) {
+func installApplySOPSFixture(t *testing.T, bin, secretPath string, bootstrapCompanions bool) {
 	t.Helper()
 	document := map[string]any{"nordvpn": map[string]any{"openvpn": map[string]string{"serviceUsername": "apply-service-user", "servicePassword": "apply-service-password"}}, "profilarr": map[string]string{"apiKey": "fixture-profilarr-api-key-32-characters"}, "jellyfin": map[string]string{"username": "household", "password": "fixture-jellyfin-password"}, "qbittorrent": map[string]string{"username": "household", "password": "fixture-qbittorrent-password"}, "houndarr": map[string]string{"username": "chosen-hound-admin", "password": "chosen-hound-password"}, "cleanuparr": map[string]string{"username": "chosen-clean-admin", "password": "chosen-clean-password"}}
+	if bootstrapCompanions {
+		document["jellyfinRefresh"] = map[string]string{"apiKey": "fixture-jellyfin-refresh-key"}
+	} else {
+		document["houndarr"] = map[string]string{"username": "companion-admin", "password": "fixture-houndarr-password"}
+		document["cleanuparr"] = map[string]string{"apiKey": "fixture-cleanuparr-key"}
+	}
 	encoded, err := json.Marshal(document)
 	if err != nil {
 		t.Fatal(err)

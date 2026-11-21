@@ -35,9 +35,9 @@ func patchEncryptedSecrets(ctx context.Context, path string, branches map[string
 	}
 	original, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read encrypted companion secrets: %w", err)
+		return fmt.Errorf("read encrypted Environment secrets: %w", err)
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".media-stack-companions-*.sops.yaml")
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".media-stack-secrets-*.sops.yaml")
 	if err != nil {
 		return err
 	}
@@ -51,18 +51,18 @@ func patchEncryptedSecrets(ctx context.Context, path string, branches map[string
 		return err
 	}
 	for branch, value := range branches {
-		if branch != "houndarr" && branch != "cleanuparr" {
-			return fmt.Errorf("only companion credentials may be patched")
+		if branch != "houndarr" && branch != "cleanuparr" && branch != "jellyfinRefresh" {
+			return fmt.Errorf("cannot patch Environment secret branch %q", branch)
 		}
 		encoded, err := json.Marshal(value)
 		if err != nil {
-			return fmt.Errorf("encode companion secrets")
+			return fmt.Errorf("encode Environment secrets")
 		}
 		index, _ := json.Marshal([]string{branch})
 		command := exec.CommandContext(ctx, "sops", "set", "--value-stdin", "--input-type", "yaml", "--output-type", "yaml", tempPath, string(index))
 		command.Stdin = bytes.NewReader(encoded)
 		if err := command.Run(); err != nil {
-			return fmt.Errorf("encrypt companion secrets with SOPS; original document preserved")
+			return fmt.Errorf("encrypt Environment secrets with SOPS; original document preserved")
 		}
 	}
 	var updatedDocument environmentSecretDocument
@@ -73,7 +73,7 @@ func patchEncryptedSecrets(ctx context.Context, path string, branches map[string
 		return fmt.Errorf("credential patch changed ownership")
 	}
 	if _, err := environmentSecretsFromDocument(updatedDocument); err != nil {
-		return fmt.Errorf("validate updated companion SOPS document; original document preserved")
+		return fmt.Errorf("validate updated Environment SOPS document; original document preserved")
 	}
 	updated, err := os.ReadFile(tempPath)
 	if err != nil {
@@ -84,7 +84,7 @@ func patchEncryptedSecrets(ctx context.Context, path string, branches map[string
 		return err
 	}
 	if !bytes.Equal(original, current) {
-		return fmt.Errorf("companion secrets changed concurrently; retry with the current SOPS document")
+		return fmt.Errorf("Environment secrets changed concurrently; retry with the current SOPS document")
 	}
 	return writeSecretAtomic(path, updated)
 }

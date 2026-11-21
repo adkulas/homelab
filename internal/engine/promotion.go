@@ -10,12 +10,16 @@ import (
 	"github.com/adkulas/homelab/internal/config"
 )
 
-const promotionSchemaVersion = "homelab.media-stack/promotion/v1alpha1"
+const (
+	promotionSchemaVersion        = "homelab.media-stack/promotion/v1alpha1"
+	jellyfinRefreshEvidenceSchema = "homelab.media-stack/jellyfin-refresh-evidence/v1alpha1"
+)
 
 type PromoteRequest struct {
-	plan             PlanRequest
-	verificationPath string
-	backupPath       string
+	plan                        PlanRequest
+	verificationPath            string
+	backupPath                  string
+	jellyfinRefreshEvidencePath string
 }
 
 type PromoteReport struct {
@@ -36,6 +40,12 @@ func NewPromoteRequest(workingDirectory, environment, configPath, verificationPa
 		backupPath = filepath.Join(workingDirectory, backupPath)
 	}
 	return PromoteRequest{plan: plan, verificationPath: verificationPath, backupPath: backupPath}, nil
+}
+
+// WithJellyfinRefreshEvidence attaches the recorded Staging rehearsal and native event results.
+func (request PromoteRequest) WithJellyfinRefreshEvidence(path string) PromoteRequest {
+	request.jellyfinRefreshEvidencePath = path
+	return request
 }
 
 func (engine localEngine) Promote(ctx context.Context, request PromoteRequest) (PromoteReport, error) {
@@ -66,6 +76,9 @@ func (engine localEngine) Promote(ctx context.Context, request PromoteRequest) (
 	if verification.ConfigDigest != request.plan.configurationDigest() || verification.VersionsDigest != fileDigest(request.plan.versionsPath) {
 		return PromoteReport{}, fmt.Errorf("verification artifact does not match the current Declared Configuration and checked-in versions")
 	}
+	if err := validateJellyfinRefreshEvidence(request.jellyfinRefreshEvidencePath, verification); err != nil {
+		return PromoteReport{}, err
+	}
 	backupFile, err := os.ReadFile(request.backupPath)
 	if err != nil {
 		return PromoteReport{}, fmt.Errorf("read backup manifest: %w", err)
@@ -93,6 +106,38 @@ func (engine localEngine) Promote(ctx context.Context, request PromoteRequest) (
 	}
 	preview := fmt.Sprintf("promote the verified Staging change to Production using backup %s", request.backupPath)
 	return PromoteReport{SchemaVersion: promotionSchemaVersion, Environment: request.plan.environment, Preview: preview}, nil
+}
+
+func validateJellyfinRefreshEvidence(path string, verification VerifyReport) error {
+	if path == "" {
+		return fmt.Errorf("Promotion requires Staging Jellyfin refresh evidence (--jellyfin-refresh-evidence)")
+	}
+	if verification.Suite != "promotion" || verification.Failed() {
+		return fmt.Errorf("Jellyfin refresh evidence requires a successful Staging Promotion verification artifact")
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read Jellyfin refresh evidence: %w", err)
+	}
+	var evidence struct {
+		SchemaVersion    string `json:"schemaVersion"`
+		Environment      string `json:"environment"`
+		ConfigDigest     string `json:"configDigest"`
+		VersionsDigest   string `json:"versionsDigest"`
+		PinnedRehearsal  string `json:"pinnedRehearsal"`
+		NativeArrChanges string `json:"nativeArrChanges"`
+	}
+	if err := json.Unmarshal(contents, &evidence); err != nil {
+		return fmt.Errorf("decode Jellyfin refresh evidence: %w", err)
+	}
+	if evidence.SchemaVersion != jellyfinRefreshEvidenceSchema || evidence.Environment != "staging" ||
+		evidence.ConfigDigest != verification.ConfigDigest || evidence.VersionsDigest != verification.VersionsDigest {
+		return fmt.Errorf("Jellyfin refresh evidence must match the Staging Verification Artifact's Declared Configuration and checked-in versions")
+	}
+	if evidence.PinnedRehearsal != "pass" || evidence.NativeArrChanges != "pass" {
+		return fmt.Errorf("Jellyfin refresh evidence must record passing pinned rehearsal and native Arr change checks")
+	}
+	return nil
 }
 
 func validateCompanionPromotion(declared config.MediaStack, verification VerifyReport, backup BackupReport) error {

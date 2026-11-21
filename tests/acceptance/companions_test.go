@@ -518,6 +518,7 @@ func TestPromotionRequiresSeriesCompanionEvidenceAndStateCoverage(t *testing.T) 
 	writeFile(t, configPath, configuration, 0600)
 	digest := func(contents []byte) string { sum := sha256.Sum256(contents); return hex.EncodeToString(sum[:]) }
 	verification := map[string]any{"schemaVersion": "homelab.media-stack/verify/v1alpha1", "environment": "staging", "suite": "promotion", "configDigest": digest(configuration), "versionsDigest": digest(versions), "diagnostics": []any{}}
+	refreshEvidencePath := writePassingJellyfinRefreshEvidence(t, temporary, digest(configuration), digest(versions))
 	backup := map[string]any{"schemaVersion": "homelab.media-stack/backup/v1alpha1", "environment": "staging", "services": []any{}}
 	verificationPath, backupPath := filepath.Join(temporary, "verification.json"), filepath.Join(temporary, "backup.json")
 	run := func() ([]byte, error) {
@@ -529,7 +530,7 @@ func TestPromotionRequiresSeriesCompanionEvidenceAndStateCoverage(t *testing.T) 
 			}
 			writeFile(t, path, encoded, 0600)
 		}
-		command := exec.Command("go", "run", "./cmd/media-stack", "promote", "--environment", "production", "--config", configPath, "--verification", verificationPath, "--backup", backupPath)
+		command := exec.Command("go", "run", "./cmd/media-stack", "promote", "--environment", "production", "--config", configPath, "--verification", verificationPath, "--backup", backupPath, "--jellyfin-refresh-evidence", refreshEvidencePath)
 		command.Dir = repositoryRoot(t)
 		return command.CombinedOutput()
 	}
@@ -551,6 +552,21 @@ func TestPromotionRequiresSeriesCompanionEvidenceAndStateCoverage(t *testing.T) 
 	if err != nil {
 		t.Fatalf("promotion rejected matching companion proof: %v\n%s", err, output)
 	}
+}
+
+func writePassingJellyfinRefreshEvidence(t *testing.T, directory, configDigest, versionsDigest string) string {
+	t.Helper()
+	path := filepath.Join(directory, "jellyfin-refresh.json")
+	contents, err := json.Marshal(map[string]string{
+		"schemaVersion": "homelab.media-stack/jellyfin-refresh-evidence/v1alpha1", "environment": "staging",
+		"configDigest": configDigest, "versionsDigest": versionsDigest,
+		"pinnedRehearsal": "pass", "nativeArrChanges": "pass",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, contents, 0600)
+	return path
 }
 
 func TestPlanRejectsSharedCompanionIdentityAndPorts(t *testing.T) {

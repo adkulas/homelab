@@ -78,6 +78,10 @@ scenarios.
 See the [series automation runbook](services/media/README.md#episode-searching-and-queue-recovery)
 for bootstrap, tuning, upstream safety limits and Staging recovery evidence.
 
+Run the optional pinned Jellyfin refresh acceptance test with Docker and the
+local image pins. The [Jellyfin verification runbook](services/media/README.md#staging-verification-before-promotion)
+includes the command and the Staging cases for native Arr events.
+
 Declared DNS command checks run with
 `go test ./tests/acceptance -run '^TestNetworkDNSCommands$'`. They require Python 3
 with PyYAML 6 (`python3-yaml` on Ubuntu, or the pinned

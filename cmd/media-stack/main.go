@@ -24,7 +24,7 @@ usage:
   media-stack doctor --environment production|staging [--config path] [--output human|json]
   media-stack plan --environment production|staging [--config path]
   media-stack apply --environment production|staging [--config path]
-  media-stack promote --environment production [--config path] --verification path --backup path [--output human|json]
+  media-stack promote --environment production [--config path] --verification path --backup path --jellyfin-refresh-evidence path [--output human|json]
   media-stack destroy --environment production|staging [--config path] --plan path [--volumes] [--downloads] [--media] [--secrets] [--resume journal] [--output human|json]
   media-stack destroy --environment production|staging [--config path] --execute path --confirm SHA256 [--target identity] [--acknowledge-loss token] [--output human|json]
   media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--now RFC3339] [--output human|json]
@@ -337,6 +337,7 @@ func runPromote(ctx context.Context, arguments []string) error {
 	selection := deploymentFlags(flags)
 	verificationPath := flags.String("verification", "", "verification artifact path")
 	backupPath := flags.String("backup", "", "backup manifest path")
+	refreshEvidencePath := flags.String("jellyfin-refresh-evidence", "", "Staging Jellyfin refresh evidence path")
 	output := flags.String("output", "human", "human or json")
 	if err := flags.Parse(arguments); err != nil {
 		return err
@@ -365,7 +366,7 @@ func runPromote(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return err
 	}
-	request = request.WithDeployment(deployment)
+	request = request.WithDeployment(deployment).WithJellyfinRefreshEvidence(*refreshEvidencePath)
 	report, err := engine.New().Promote(ctx, request)
 	if err != nil {
 		return operationalFailure{cause: err}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -148,6 +149,26 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 	profilarrObservations := 0
 	var seriesRootFolders []map[string]any
 	var seriesDownloadClients []map[string]any
+	var movieRefreshConnection, seriesRefreshConnection map[string]any
+	refreshConnectionWrites := 0
+	refreshConnectionAPI := func(writer http.ResponseWriter, request *http.Request, connection *map[string]any) bool {
+		if request.URL.Path != "/api/v3/notification" {
+			return false
+		}
+		if request.Method == http.MethodGet {
+			result := []map[string]any{}
+			if *connection != nil {
+				result = append(result, *connection)
+			}
+			_ = json.NewEncoder(writer).Encode(result)
+			return true
+		}
+		_ = json.NewDecoder(request.Body).Decode(connection)
+		(*connection)["id"] = 1
+		refreshConnectionWrites++
+		writer.WriteHeader(http.StatusCreated)
+		return true
+	}
 	seriesPolicyObservations := map[string]int{
 		"qualityprofile":    0,
 		"customformat":      0,
@@ -233,6 +254,9 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 			return
 		}
 		if (liveProfilarr || request.URL.Path == "/api/v3/delayprofile") && acceptProfilarrMutation(writer, request, &seriesQualityProfiles, &seriesCustomFormats, &seriesQualityDefinitions, &seriesNaming, &seriesMediaManagement, &seriesDelay) {
+			return
+		}
+		if refreshConnectionAPI(writer, request, &seriesRefreshConnection) {
 			return
 		}
 		switch request.Method + " " + request.URL.Path {
@@ -361,6 +385,9 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 			if (liveProfilarr || request.URL.Path == "/api/v3/delayprofile") && acceptProfilarrMutation(writer, request, &movieQualityProfiles, &movieCustomFormats, &movieQualityDefinitions, &movieNaming, &movieMediaManagement, &movieDelay) {
 				return
 			}
+			if refreshConnectionAPI(writer, request, &movieRefreshConnection) {
+				return
+			}
 			switch request.Method + " " + request.URL.Path {
 			case "GET /api/v3/system/status":
 				_ = json.NewEncoder(writer).Encode(map[string]string{"appName": "Radarr", "version": "6.3.0.10514"})
@@ -449,6 +476,10 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 	jellyfinLibraries := []map[string]any{}
 	jellyfinPolicy := map[string]any{"IsAdministrator": true, "EnableMediaPlayback": true, "EnableContentDeletion": true, "EnableContentDeletionFromFolders": []any{"old-library"}}
 	jellyfinPolicyWrites := 0
+	jellyfinScanWrites := 0
+	jellyfinKeyCreates := 0
+	refreshKeyExists := bootstrap || scenario != ""
+	jellyfinScanTriggers := json.RawMessage(`[{"Type":"IntervalTrigger","IntervalTicks":432000000000}]`)
 	jellyfinAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.Method + " " + request.URL.Path {
 		case "GET /System/Info/Public":
@@ -463,7 +494,28 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 			name := request.URL.Query().Get("name")
 			collectionType := request.URL.Query().Get("collectionType")
 			path := request.URL.Query().Get("paths")
-			jellyfinLibraries = append(jellyfinLibraries, map[string]any{"Name": name, "CollectionType": collectionType, "Locations": []string{path}})
+			var body struct{ LibraryOptions map[string]any }
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			jellyfinLibraries = append(jellyfinLibraries, map[string]any{"Name": name, "CollectionType": collectionType, "Locations": []string{path}, "LibraryOptions": body.LibraryOptions})
+			writer.WriteHeader(http.StatusNoContent)
+		case "GET /ScheduledTasks":
+			_ = json.NewEncoder(writer).Encode([]map[string]any{{"Key": "RefreshLibrary", "Id": "scan", "Triggers": jellyfinScanTriggers}})
+		case "POST /ScheduledTasks/scan/Triggers":
+			_ = json.NewDecoder(request.Body).Decode(&jellyfinScanTriggers)
+			jellyfinScanWrites++
+			writer.WriteHeader(http.StatusNoContent)
+		case "GET /Auth/Keys":
+			keys := []map[string]string{}
+			if refreshKeyExists {
+				keys = append(keys, map[string]string{"AppName": "Media Stack Library Refresh (media-staging)", "AccessToken": "fixture-jellyfin-refresh-key"})
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]any{"Items": keys})
+		case "POST /Auth/Keys":
+			if request.URL.Query().Get("app") != "Media Stack Library Refresh (media-staging)" {
+				t.Error("Jellyfin key creation did not select Staging")
+			}
+			jellyfinKeyCreates++
+			refreshKeyExists = true
 			writer.WriteHeader(http.StatusNoContent)
 		case "POST /Users/jellyfin-user/Policy":
 			jellyfinPolicyWrites++
@@ -659,13 +711,15 @@ profilarr:
 jellyfin:
   username: household
   password: fixture-jellyfin-password
+jellyfinRefresh:
+  apiKey: fixture-jellyfin-refresh-key
 qbittorrent:
   username: household
   password: fixture-qbittorrent-password
 EOF
 `), 0o700)
-	if bootstrap {
-		installBootstrapSOPSFixture(t, binDirectory, filepath.Join(temporary, "secrets", "staging.sops.yaml"))
+	if bootstrap || scenario == "" {
+		installApplySOPSFixture(t, binDirectory, filepath.Join(temporary, "secrets", "staging.sops.yaml"), bootstrap)
 	}
 	if liveProfilarr && fault != "" {
 		installProfilarrFault(t, filepath.Join(binDirectory, "profilarr-fault"))
@@ -674,6 +728,7 @@ EOF
 	composeCapture := filepath.Join(temporary, "compose.yaml")
 	healthCount := filepath.Join(temporary, "health-count")
 	topologyReady := filepath.Join(temporary, "topology-ready")
+	libraryMarkers := filepath.Join(temporary, "jellyfin-library-markers")
 	writeFile(t, filepath.Join(binDirectory, "docker"), []byte(`#!/bin/sh
   if [ -n "$APPLY_REAL_PROFILARR" ]; then
     if [ "$1" = start ] && [ "$APPLY_PROFILARR_FAULT" = restart ]; then exit 1; fi
@@ -768,7 +823,13 @@ EOF
 	  "compose -f - exec -T prowlarr cat /config/config.xml") printf '<Config><ApiKey>fixture-prowlarr-api-key</ApiKey></Config>\n'; exit 0 ;;
 	  "compose -f - ps --all -q profilarr") printf 'fixture-profilarr-id\n'; exit 0 ;;
 	  "compose -f - up -d profilarr") exit 0 ;;
-	  "compose -f - up -d jellyfin") exit 0 ;;
+	  "compose -f - up -d jellyfin"|"compose -f - restart jellyfin") exit 0 ;;
+	  "compose -f - exec -T --user "*" media-stack-library-markers check")
+	    [ -f "$APPLY_LIBRARY_MARKERS" ] || printf '%s\n' 'missing-marker'
+	    exit 0 ;;
+	  "compose -f - exec -T --user "*" media-stack-library-markers create")
+	    touch "$APPLY_LIBRARY_MARKERS"
+	    exit $? ;;
 	  "compose -f - up -d seerr") touch "$APPLY_TOPOLOGY_READY"; exit 0 ;;
 	  "compose -f - ps --format json gluetun")
 	    count=0
@@ -790,6 +851,7 @@ EOF
 		"APPLY_COMPOSE_CAPTURE="+composeCapture,
 		"APPLY_HEALTH_COUNT="+healthCount,
 		"APPLY_TOPOLOGY_READY="+topologyReady,
+		"APPLY_LIBRARY_MARKERS="+libraryMarkers,
 		"APPLY_PROFILARR_READY="+profilarrReady,
 		"APPLY_REAL_PROFILARR="+profilarrID,
 		"APPLY_REAL_DOCKER="+realDocker,
@@ -925,13 +987,19 @@ EOF
 	}
 
 	dockerLines := strings.Split(strings.TrimSpace(string(readFile(t, dockerLog))), "\n")
-	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - ps -q qbittorrent\ninspect --format {{.State.StartedAt}} fixture-qbittorrent-id\ncompose -f - logs --no-color --since 2026-08-28T12:34:56.123456789Z qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr\ncompose -f - up -d jellyfin\ncompose -f - up -d seerr"
+	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - ps -q qbittorrent\ninspect --format {{.State.StartedAt}} fixture-qbittorrent-id\ncompose -f - logs --no-color --since 2026-08-28T12:34:56.123456789Z qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr\ncompose -f - up -d jellyfin\ncompose -f - restart jellyfin\ncompose -f - up -d seerr"
 	wantDocker += "\ncompose -f - up -d houndarr cleanuparr"
+	if !slices.ContainsFunc(dockerLines, func(line string) bool {
+		return strings.Contains(line, "exec -T --user ") && strings.Contains(line, "media-stack-library.keep")
+	}) {
+		t.Error("apply did not prepare empty Movie and Series Library roots under the runtime identity")
+	}
+	dockerLines = slices.DeleteFunc(dockerLines, func(line string) bool { return strings.Contains(line, "media-stack-library.keep") })
 	if got := strings.Join(dockerLines, "\n"); !freshProfilarr && got != wantDocker {
 		t.Errorf("Docker invocation = %q", got)
 	}
 	rendered := string(readFile(t, composeCapture))
-	for _, secret := range []string{"apply-service-user", "apply-service-password", "fixture-profilarr-api-key-32-characters", "fixture-jellyfin-password", "fixture-qbittorrent-password", "fixture-radarr-api-key", "fixture-sonarr-api-key", "chosen-hound-password", "chosen-clean-password", "fixture-cleanuparr-key"} {
+	for _, secret := range []string{"apply-service-user", "apply-service-password", "fixture-profilarr-api-key-32-characters", "fixture-jellyfin-password", "fixture-qbittorrent-password", "fixture-radarr-api-key", "fixture-sonarr-api-key", "chosen-hound-password", "chosen-clean-password", "fixture-cleanuparr-key", "fixture-jellyfin-refresh-key"} {
 		if strings.Contains(rendered, secret) || strings.Contains(string(output), secret) {
 			t.Errorf("apply exposed secret %q\noutput: %s\nCompose: %s", secret, output, rendered)
 		}
@@ -1015,6 +1083,12 @@ EOF
 		jellyfinLibraries[1]["Name"] != "Series Library" || jellyfinLibraries[1]["CollectionType"] != "tvshows" || jellyfinLibraries[1]["Locations"].([]string)[0] != "/data/media/series" {
 		t.Errorf("apply did not reconcile Jellyfin Movie and Series Libraries: %v", jellyfinLibraries)
 	}
+	if string(jellyfinScanTriggers) != `[{"Type":"DailyTrigger","TimeOfDayTicks":144000000000}]` || jellyfinScanWrites != 1 {
+		t.Errorf("Staging recovery triggers = %s, writes = %d", jellyfinScanTriggers, jellyfinScanWrites)
+	}
+	if movieRefreshConnection["onMovieDelete"] != true || seriesRefreshConnection["onSeriesDelete"] != true {
+		t.Error("apply did not configure native Jellyfin updates in both Arr services")
+	}
 	if jellyfinPolicy["EnableContentDeletion"] != false || jellyfinPolicyWrites != 1 {
 		t.Errorf("apply did not disable destructive Jellyfin deletion: policy=%v writes=%d", jellyfinPolicy, jellyfinPolicyWrites)
 	}
@@ -1091,6 +1165,11 @@ EOF
 	}
 
 	secondCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
+	if !bootstrap && scenario == "" {
+		if err := os.Remove(libraryMarkers); err != nil {
+			t.Fatal(err)
+		}
+	}
 	secondCommand.Dir = command.Dir
 	secondCommand.Env = command.Env
 	secondOutput, err := secondCommand.CombinedOutput()
@@ -1102,6 +1181,18 @@ EOF
 	}
 	if bootstrap && companions.bootstrap.accounts != 2 {
 		t.Fatal("repeated apply recreated a companion account")
+	}
+	if refreshConnectionWrites != 2 || jellyfinScanWrites != 1 {
+		t.Errorf("repeated apply rewrote refresh settings: connector writes = %d, scan writes = %d", refreshConnectionWrites, jellyfinScanWrites)
+	}
+	if !bootstrap && scenario == "" {
+		if got := strings.Count(string(readFile(t, dockerLog)), "compose -f - restart jellyfin\n"); got != 2 {
+			t.Errorf("apply restarted Jellyfin %d times, want one for first setup and one after repairing a missing root marker", got)
+		}
+		var document struct{ JellyfinRefresh struct{ APIKey string } }
+		if err := json.Unmarshal(readFile(t, filepath.Join(temporary, "secrets/staging.sops.yaml")), &document); err != nil || document.JellyfinRefresh.APIKey != "fixture-jellyfin-refresh-key" || jellyfinKeyCreates != 1 {
+			t.Fatalf("Apply did not persist the new Staging connector credential through SOPS exactly once: %v", err)
+		}
 	}
 	if companions.writes != companionWrites {
 		t.Errorf("repeated apply mutated companion policy %d times", companions.writes-companionWrites)

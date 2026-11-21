@@ -32,6 +32,11 @@ var (
 )
 
 func verifyJellyfinPlayback(ctx context.Context, declared config.MediaStack, request VerifyRequest, mediaPath string, deadline time.Time, report *VerifyReport, check jellyfinPlaybackCheck) {
+	if refreshDeadline := time.Now().Add(2 * time.Minute); refreshDeadline.Before(deadline) {
+		deadline = refreshDeadline
+	}
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
 	environment := declared.Spec.Environments[request.plan.environment]
 	secrets, err := decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment)
 	if err != nil {
@@ -51,7 +56,7 @@ func verifyJellyfinPlayback(ctx context.Context, declared config.MediaStack, req
 			return
 		}
 		if time.Now().After(deadline) {
-			report.add(check.diagnosticPrefix+"_PLAYBACK_FAILED", "authenticated Jellyfin "+check.mediaName+" playback", "Wait for Jellyfin to scan the "+check.libraryName+" and confirm direct playback is available, then retry.", false)
+			report.add(check.diagnosticPrefix+"_PLAYBACK_FAILED", "authenticated Jellyfin "+check.mediaName+" playback", "Check targeted updates and real-time monitoring for the "+check.libraryName+", then retry.", false)
 			return
 		}
 		if !waitForMediaPoll(ctx, deadline) {

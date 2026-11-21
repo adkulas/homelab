@@ -166,7 +166,8 @@ func TestScopedPromotionPreservesIdentityWithSensitiveStorageReferences(t *testi
 	encoded, _ := json.Marshal(proof)
 	proofPath := filepath.Join(root, "verification.json")
 	writeFile(t, proofPath, encoded, 0600)
-	command = exec.Command("go", "run", "./cmd/media-stack", "promote", "--site", "fixture", "--instance", "media", "--environment", "production", "--verification", proofPath, "--backup", backup["manifestPath"].(string))
+	refreshEvidencePath := writePassingJellyfinRefreshEvidence(t, root, backup["configDigest"].(string), backup["versionDigest"].(string))
+	command = exec.Command("go", "run", "./cmd/media-stack", "promote", "--site", "fixture", "--instance", "media", "--environment", "production", "--verification", proofPath, "--backup", backup["manifestPath"].(string), "--jellyfin-refresh-evidence", refreshEvidencePath)
 	command.Dir = repositoryRoot(t)
 	command.Env = append(os.Environ(), "HOMELAB_REPOSITORY_ROOT="+root, "SOPS_AGE_KEY_FILE="+identity)
 	if output, err := command.CombinedOutput(); err != nil {

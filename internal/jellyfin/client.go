@@ -55,6 +55,15 @@ func (client *Client) Ready(ctx context.Context) error {
 }
 
 func (client *Client) ReconcileLibraries(ctx context.Context, credentials Credentials) error {
+	return client.reconcileLibraries(ctx, credentials, nil)
+}
+
+// ReconcileWatchedLibraries prepares a watcher reload before creating a library.
+func (client *Client) ReconcileWatchedLibraries(ctx context.Context, credentials Credentials, prepareMonitorChange func() error) error {
+	return client.reconcileLibraries(ctx, credentials, prepareMonitorChange)
+}
+
+func (client *Client) reconcileLibraries(ctx context.Context, credentials Credentials, prepareMonitorChange func() error) error {
 	if credentials.Username == "" || credentials.Password == "" {
 		return fmt.Errorf("Jellyfin username and password are required")
 	}
@@ -97,8 +106,8 @@ func (client *Client) ReconcileLibraries(ctx context.Context, credentials Creden
 		collectionType string
 		path           string
 	}{
-		{name: "Movie Library", collectionType: "movies", path: movieLibraryPath},
-		{name: "Series Library", collectionType: "tvshows", path: seriesLibraryPath},
+		{name: movieLibraryName, collectionType: "movies", path: movieLibraryPath},
+		{name: seriesLibraryName, collectionType: "tvshows", path: seriesLibraryPath},
 	}
 	for _, desired := range desiredLibraries {
 		found := false
@@ -112,8 +121,15 @@ func (client *Client) ReconcileLibraries(ctx context.Context, credentials Creden
 			found = true
 		}
 		if !found {
+			if prepareMonitorChange != nil {
+				if err := prepareMonitorChange(); err != nil {
+					return err
+				}
+				prepareMonitorChange = nil
+			}
 			query := url.Values{"name": {desired.name}, "collectionType": {desired.collectionType}, "paths": {desired.path}, "refreshLibrary": {"true"}}
-			if err := client.doJSON(ctx, http.MethodPost, "/Library/VirtualFolders?"+query.Encode(), nil, auth.AccessToken, nil); err != nil {
+			body := map[string]any{"LibraryOptions": map[string]bool{"EnableRealtimeMonitor": true}}
+			if err := client.doJSON(ctx, http.MethodPost, "/Library/VirtualFolders?"+query.Encode(), body, auth.AccessToken, nil); err != nil {
 				return fmt.Errorf("create Jellyfin %s: %w", desired.name, err)
 			}
 		}

@@ -275,6 +275,46 @@ publishes the selected Environment's qBittorrent Web UI port to that same contai
 `http://qbittorrent:<Environment qBittorrent port>` endpoint without granting qBittorrent an independent route. Later tickets extend `apply` to the
 other services and application reconciliation.
 
+### Jellyfin library refresh
+
+`apply` enables real-time monitoring on the Movie Library and Series Library and creates a managed **Media Stack Jellyfin Library Refresh** connection in Radarr and Sonarr. The connections use the Environment-local `http://jellyfin:8096` endpoint and shared `/data/media` paths. Completed imports, upgrades, renames, and deletions send targeted updates. Sonarr also sends an import-complete update. Jellyfin watches changes made directly on disk. `apply` leaves a `media-stack-library.keep` file in each library root so the pinned Jellyfin can watch it before its first import and after its last deletion. The native queues group affected movie or series paths. During healthy operation the target is two minutes from completion to the current Jellyfin path, with stale paths removed.
+
+`apply` issues a Jellyfin API key and saves it in the selected Environment's SOPS document at `jellyfinRefresh.apiKey`. Existing documents acquire the field automatically. Keep the encrypted update with the Environment's credentials. Radarr and Sonarr mask the key in their API output, so `apply` resubmits it and the pinned apps compare it with their stored settings. To rotate it, revoke the **Media Stack Library Refresh** key for that project in the selected Jellyfin dashboard and rerun `apply`. If `apply` creates a library or enables monitoring on an existing one, it restarts that Environment's Jellyfin to reload the watchers. Rerun `apply` if the reload is interrupted.
+
+The built-in **Scan Media Library** task has one daily trigger. It defaults to 03:00 Production and 04:00 Staging in the configured timezone. Change `spec.media.defaults.jellyfinRecoveryScanTime` on the Stack Instance and run `apply` for each Environment to change the base time. Staging's trigger is one hour later on the local clock, with midnight rollover.
+
+For missed updates, open the selected Jellyfin **Dashboard → Scheduled Tasks → Scan Media Library** and check the last run time and result. Use that task's run button for urgent recovery. If a scheduled run fails or is missed, the next daily run or a manual run can recover it. Check the selected Radarr or Sonarr **System → Logs** for errors from **Emby / Jellyfin** and Jellyfin's dashboard logs for library watcher errors. A successful connector request only acknowledges the update. Confirm recovery by checking the current item and file path in Jellyfin.
+
+#### Staging verification before Promotion
+
+Run the automated rehearsal on an Ubuntu Docker host with the three pinned images available locally. It uses disposable containers, loopback ports, and generated media. It checks the native connector APIs, watcher-driven path additions, bulk renames and deletions, the absence of routine full scans, scheduled outage recovery, and manual scan isolation.
+
+```bash
+MEDIA_STACK_LIVE_JELLYFIN_REFRESH=1 go test ./tests/acceptance \
+  -run '^TestDisposablePinnedJellyfinLibraryRefresh$' -count=1 -timeout=12m -v
+```
+
+Verify native Arr events with legal media fixtures in a disposable Staging Environment. These cases require Arr to recognize real movie and series metadata and accept the fixture imports and quality upgrades. The automated rehearsal uses generated files to exercise Jellyfin independently of metadata and acquisition services. Use the existing [Promotion verification](#5-verify-staging-vpn-behavior-and-legal-request-to-playback-paths) for the legal request-to-playback import path and run the following cases against the selected Staging Jellyfin only.
+
+1. Run `apply` for Staging. In both Arr services, use **Settings → Connect** to verify the managed connection and test it. In Jellyfin, check both libraries have real-time monitoring enabled and **Scan Media Library** shows one daily trigger at the expected Staging time. Record the pinned image versions, Environment, timezone, trigger time, and the task's most recent run. Start the event cases away from the daily scan window. In disposable Staging, temporarily disable Jellyfin's real-time monitoring on both managed libraries and restart only Staging Jellyfin. This isolates native connector delivery from watcher updates.
+2. Import a legal movie into Radarr and a multi-episode season into Sonarr. Record the time the movie and final episode imports complete in Arr history. Confirm that Jellyfin shows the exact movie and episode paths within two minutes and that the full scan's most recent run has not changed. Record the import and discovery timestamps and paths.
+3. Import higher-quality copies of that movie and an episode through Radarr and Sonarr. Record the old paths and upgrade completion times. Within two minutes, verify that Jellyfin shows the replacement paths and no stale copies. Repeat for a Radarr movie rename and a Sonarr bulk episode rename using each application's rename action. Record before and after paths, timestamps, and scan history.
+4. Delete the test movie file through Radarr and an episode file through Sonarr. Repeat with an entire movie and an entire series using each application's **delete files** option. Verify the removed media paths disappear from Jellyfin within two minutes, remaining episode paths stay present, and the full scan's most recent run has not changed. Record each deletion and the first Jellyfin observation showing the expected paths.
+5. Save the Arr event and connector log entries and the Jellyfin item paths and scan task history for each case, omitting API keys. Reapply to restore monitoring and verify both libraries show it enabled. A failed refresh or recovery case blocks Promotion until the native behavior is corrected or the design is revisited.
+
+Record both results in `staging-jellyfin-refresh.json` after running these checks and a successful `verify --suite promotion --output json`. Copy the two digest values from that Staging verification report and keep the test output, event timings, and scan observations alongside the evidence. `promote` requires both results to pass and the digests to match.
+
+```json
+{
+  "schemaVersion": "homelab.media-stack/jellyfin-refresh-evidence/v1alpha1",
+  "environment": "staging",
+  "configDigest": "<configDigest from the Staging report>",
+  "versionsDigest": "<versionsDigest from the Staging report>",
+  "pinnedRehearsal": "pass",
+  "nativeArrChanges": "pass"
+}
+```
+
 ### 5. Verify Staging VPN behavior and legal request-to-playback paths
 
 ```bash
@@ -300,14 +340,22 @@ For movies and legacy series configurations, verification selects the exact decl
 `movies` or `series` qBittorrent torrent to complete and for the Arr application to expose the imported file, then compares
 the source and library filesystem identities beneath the selected Environment `dataRoot`. The `VERIFY_MOVIE_*` and
 `VERIFY_SERIES_EPISODE_*` diagnostics pass only when each requested path succeeds and both paths resolve to the same inode.
-For either fixture, Promotion then authenticates to Jellyfin, waits for the exact imported path to appear, and requires direct-play readiness through playback information; `VERIFY_MOVIE_PLAYBACK_READY` or `VERIFY_SERIES_EPISODE_PLAYBACK_READY` records success. The checked-in fixtures allow up to 45 minutes for download, import, and playback discovery. Run Promotion verification only in a disposable
+For either fixture, Promotion then authenticates to Jellyfin, waits for the exact imported path to appear, and requires direct-play readiness through playback information; `VERIFY_MOVIE_PLAYBACK_READY` or `VERIFY_SERIES_EPISODE_PLAYBACK_READY` records success. Playback verification allows up to two minutes after the import is first observed, within the existing 45-minute fixture deadline. Run Promotion verification only in a disposable
 Staging Environment; it adds the fixture items and retains their qBittorrent sources for seeding.
 
 The smoke and Restore Drill suites and content-addressed Verification Artifacts remain planned.
 
 ### 6. Create Production and promote the proven change (planned)
 
-Initialize Production separately, then use the Staging evidence when planning the Production change:
+Initialize Production separately. Use the available `promote` command to preview the change with a successful Staging Verification Artifact, the Staging backup manifest, and the [Jellyfin refresh evidence](#staging-verification-before-promotion).
+
+```bash
+media-stack promote --site home --instance media-homelab --environment production \
+  --verification staging-verification.json --backup /path/to/staging/manifest.json \
+  --jellyfin-refresh-evidence staging-jellyfin-refresh.json
+```
+
+The saved-plan application flow is planned:
 
 ```bash
 media-stack init --site home --instance media-homelab --environment production
@@ -503,6 +551,7 @@ from silently becoming ineffective configuration.
 | Stack policy `apiVersion` / `kind` | Stack policy loader | `services/media/media-stack.yaml` uses `homelab.media-stack/v1alpha1` and `MediaStack`. |
 | Stack Instance `apiVersion` / `kind` | scoped commands | `sites/<site>/instances/<instance>.yaml` uses `homelab.site/v1alpha1` and `StackInstance`; deployment fields live under `spec.media`. Explicit standalone `--config` retains `MediaStack` with `spec.defaults` and `spec.environments`. |
 | `spec.media.defaults.timezone` | `init`, `plan` | Validated as an IANA timezone; rendered as `TZ` for every service. |
+| `spec.media.defaults.jellyfinRecoveryScanTime` | `apply` | Optional Production daily Jellyfin recovery scan at local `HH:MM`, default `03:00`. Staging uses one hour later with midnight rollover. |
 | `spec.media.defaults.runtimeUID` / `runtimeGID` | `init`, `plan` | Own newly created data directories; render as `PUID`/`PGID` for LinuxServer-style services and Compose `user` for Jellyfin and Seerr. |
 | `spec.media.defaults.lanBindAddress` | `plan` | Host address used for every published web port. `0.0.0.0` listens on all host interfaces. |
 | `spec.media.defaults.backupRetention.daily` / `weekly` / `monthly` | `backup` | Counts of unprotected archives retained in distinct UTC day, ISO-week, and UTC-month buckets. The checked-in policy is 7/4/6; counts must be non-negative and at least one tier must retain an archive. |
@@ -1027,6 +1076,7 @@ then removes the gate and encrypted copy; a failed apply remains safely gated fo
 | `media-stack verify --site home --instance media-homelab --environment staging --suite full [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, recovery, and stable declared authentication from an application-network peer after qBittorrent recreation. Use it after `apply` in Staging; it is deliberately rejected for Production. |
 | `media-stack verify --site home --instance media-homelab --environment staging --suite promotion --legal-fixture path [--output human|json]` | Available through Seerr-to-Movie-Library playback proof | Runs the full VPN proof, authenticates the household user to Seerr, submits an approved fixture movie request, grabs the exact Internet Archive release selected through Radarr into qBittorrent, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported path, and requires direct-play readiness. Use only in a disposable Staging Environment. Verification Artifact behavior remains planned. |
 | `media-stack verify --site home --instance media-homelab --environment staging --suite promotion --legal-series-fixture path [--output human|json]` | Available through Seerr-to-Series-Library playback proof | Runs the full VPN proof, authenticates the household user to Seerr, submits the selected fixture season as an approved series request, waits for Sonarr registration, grabs the exact Internet Archive release into qBittorrent, waits for Sonarr import, proves source/imported inode identity, authenticates to Jellyfin, discovers the exact imported episode, and requires direct-play readiness. Supply both legal fixture flags to prove both libraries in one run. Use only in a disposable Staging Environment. |
+| `media-stack promote --site home --instance media-homelab --environment production --verification path --backup path --jellyfin-refresh-evidence path [--output human\|json]` | Available, preview | Checks the matching Staging verification report, backup manifest, and passing Jellyfin refresh evidence before previewing Promotion. |
 | `media-stack destroy` | Implemented on the selected Ubuntu Host with local Docker | Removes owned containers/networks/generated runtime files after exact saved-plan approval. Independent opt-ins select application volumes, downloads, media, and application credentials. Volume reset captures a protected final-state backup. See [destroy and reset](#destroy-and-reset). |
 
 Operational commands require explicit Site, Stack Instance and Environment selection; Production is never inferred. An explicit standalone `--config` path is resolved from the working directory and cannot be combined with Site selectors. `config describe`, `test`, and the all-Environment `migrate-secrets` command do not require an Environment selector.
