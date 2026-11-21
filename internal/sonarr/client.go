@@ -8,8 +8,10 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 
+	"github.com/adkulas/homelab/internal/arrconnect"
 	"github.com/adkulas/homelab/internal/qbittorrent"
 )
 
@@ -62,6 +64,10 @@ func (client *Client) Ready(ctx context.Context) error {
 		return fmt.Errorf("Sonarr API reported application %q", status.AppName)
 	}
 	return nil
+}
+
+func (client *Client) ReconcileJellyfinConnection(ctx context.Context, key string) error {
+	return arrconnect.ReconcileJellyfin(ctx, key, []string{"onImportComplete", "onSeriesDelete", "onEpisodeFileDelete"}, client.getJSON, client.sendJSON)
 }
 
 func (client *Client) ReconcileSeriesLibrary(ctx context.Context, qbittorrentConfiguration qbittorrent.DeclaredConfiguration) (bool, error) {
@@ -162,7 +168,7 @@ func (client *Client) getJSON(ctx context.Context, endpoint string, target any) 
 	return nil
 }
 
-func (client *Client) sendJSON(ctx context.Context, method, endpoint string, body any) error {
+func (client *Client) sendJSON(ctx context.Context, method, endpoint string, body any, additionalSuccess ...int) error {
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -177,7 +183,7 @@ func (client *Client) sendJSON(ctx context.Context, method, endpoint string, bod
 		return fmt.Errorf("reconcile Sonarr API %s: %w", endpoint, err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated && !slices.Contains(additionalSuccess, response.StatusCode) {
 		return responseError("reconcile", endpoint, response)
 	}
 	return nil

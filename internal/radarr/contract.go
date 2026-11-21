@@ -11,6 +11,8 @@ func ConfigurationContract() []contractmodel.Setting {
 		contractmodel.Fixed("downloadClient.category", "Movie acquisition category", "movies", "Radarr submits acquisition to the movies category.", "reconcile"),
 		contractmodel.SensitiveDerived("apiKey", "Generated Radarr API key", "Radarr generated credential", "Radarr generates this sensitive API credential; media-stack observes it from Environment-specific mutable state.", "Rotate it through Radarr; media-stack observes the replacement on the next reconciliation.", "reconcile"),
 		contractmodel.Secret("downloadClient.credentials", "qBittorrent client credentials", "selected Stack Instance Environment SOPS document#qbittorrent", "reconcile"),
+		contractmodel.Fixed("connect.jellyfinRefresh", "Jellyfin targeted refresh", "http://jellyfin:8096", "Use the native Jellyfin connection for completed imports, upgrades, renames, movie deletions and movie-file deletions. Use shared paths and native batching and retries with notifications disabled.", "reconcile"),
+		contractmodel.Secret("connect.jellyfinRefresh.apiKey", "Jellyfin refresh API key", "selected Stack Instance Environment SOPS document#jellyfinRefresh.apiKey", "reconcile"),
 	}
 	for _, item := range []struct{ id, name string }{
 		{"profile", "Movie quality profile"},

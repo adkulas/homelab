@@ -36,14 +36,15 @@ type ApplyReport struct {
 }
 
 type environmentSecrets struct {
-	Scope           *config.SecretScope
-	Houndarr        companions.AdminCredentials
-	CleanuparrKey   string
-	CleanuparrAdmin companions.AdminCredentials
-	OpenVPN         openVPNCredentials
-	ProfilarrKey    string
-	Jellyfin        jellyfin.Credentials
-	QBittorrent     qbittorrent.Credentials
+	Scope              *config.SecretScope
+	Houndarr           companions.AdminCredentials
+	CleanuparrKey      string
+	CleanuparrAdmin    companions.AdminCredentials
+	OpenVPN            openVPNCredentials
+	ProfilarrKey       string
+	Jellyfin           jellyfin.Credentials
+	JellyfinRefreshKey string
+	QBittorrent        qbittorrent.Credentials
 }
 
 func NewApplyRequest(workingDirectory, environment, configPath string) (ApplyRequest, error) {
@@ -221,12 +222,15 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if err := verifyDelays(ctx); err != nil {
 		return ApplyReport{}, fmt.Errorf("manual action required: open %s, synchronize the Default zero-delay profile for both Arr services, then rerun media-stack apply: %w", "http://"+profilarrAddress, err)
 	}
+	if err := ensureJellyfinLibraryMarkers(ctx, plan, declared.Spec.Defaults, environment); err != nil {
+		return ApplyReport{}, err
+	}
 	if output, err := runDockerCompose(ctx, plan, "up", "-d", "jellyfin"); err != nil {
 		return ApplyReport{}, fmt.Errorf("start Jellyfin: %w: %s", err, redactCredentials(output, credentials))
 	}
 	jellyfinAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Jellyfin)
 	jellyfinClient := jellyfin.New("http://"+jellyfinAddress, &http.Client{Timeout: 10 * time.Second})
-	if err := waitForJellyfinLibraries(ctx, jellyfinClient, secrets.Jellyfin, 120*time.Second); err != nil {
+	if err := reconcileJellyfinRefresh(ctx, plan, request.plan, declared.Spec.Defaults, environment, jellyfinClient, radarrClient, sonarrClient, secrets); err != nil {
 		return ApplyReport{}, err
 	}
 	if output, err := runDockerCompose(ctx, plan, "up", "-d", "seerr"); err != nil {
@@ -287,11 +291,11 @@ func waitForSeerrAuthentication(ctx context.Context, client *seerr.Client, crede
 		}
 	}
 }
-func waitForJellyfinLibraries(ctx context.Context, client *jellyfin.Client, credentials jellyfin.Credentials, timeout time.Duration) error {
+func waitForJellyfinLibraries(ctx context.Context, client *jellyfin.Client, credentials jellyfin.Credentials, timeout time.Duration, prepareMonitorChange func() error) error {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	for {
-		err := client.ReconcileLibraries(ctx, credentials)
+		err := client.ReconcileWatchedLibraries(ctx, credentials, prepareMonitorChange)
 		if err == nil {
 			return nil
 		}
@@ -568,7 +572,7 @@ func environmentSecretsFromDocument(document environmentSecretDocument) (environ
 	if document.QBittorrent.Username == "" || document.QBittorrent.Password == "" {
 		return environmentSecrets{}, fmt.Errorf("selected Environment secrets require qbittorrent.username and qbittorrent.password; run media-stack init with the new keys to migrate this SOPS document without overwriting existing values")
 	}
-	return environmentSecrets{Scope: document.Scope, Houndarr: companions.AdminCredentials{Username: document.Houndarr.Username, Password: document.Houndarr.Password}, CleanuparrKey: document.Cleanuparr.APIKey, CleanuparrAdmin: companions.AdminCredentials{Username: document.Cleanuparr.Username, Password: document.Cleanuparr.Password}, OpenVPN: credentials, ProfilarrKey: document.Profilarr.APIKey, Jellyfin: jellyfin.Credentials{Username: document.Jellyfin.Username, Password: document.Jellyfin.Password}, QBittorrent: qbittorrent.Credentials{Username: document.QBittorrent.Username, Password: document.QBittorrent.Password}}, nil
+	return environmentSecrets{Scope: document.Scope, Houndarr: companions.AdminCredentials{Username: document.Houndarr.Username, Password: document.Houndarr.Password}, CleanuparrKey: document.Cleanuparr.APIKey, CleanuparrAdmin: companions.AdminCredentials{Username: document.Cleanuparr.Username, Password: document.Cleanuparr.Password}, OpenVPN: credentials, ProfilarrKey: document.Profilarr.APIKey, Jellyfin: jellyfin.Credentials{Username: document.Jellyfin.Username, Password: document.Jellyfin.Password}, JellyfinRefreshKey: document.JellyfinRefresh.APIKey, QBittorrent: qbittorrent.Credentials{Username: document.QBittorrent.Username, Password: document.QBittorrent.Password}}, nil
 }
 
 func decryptSelectedEnvironmentSecrets(ctx context.Context, configPath string, environment config.Environment) (environmentSecrets, error) {

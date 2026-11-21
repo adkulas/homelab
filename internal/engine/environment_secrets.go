@@ -33,6 +33,9 @@ type environmentSecretDocument struct {
 		Username string `yaml:"username"`
 		Password string `yaml:"password"`
 	} `yaml:"jellyfin"`
+	JellyfinRefresh struct {
+		APIKey string `yaml:"apiKey"`
+	} `yaml:"jellyfinRefresh,omitempty"`
 	QBittorrent struct {
 		Username string `yaml:"username"`
 		Password string `yaml:"password"`

@@ -25,11 +25,12 @@ type MediaStackSpec struct {
 }
 
 type Defaults struct {
-	Timezone        string          `yaml:"timezone"`
-	RuntimeUID      int             `yaml:"runtimeUID"`
-	RuntimeGID      int             `yaml:"runtimeGID"`
-	LANBindAddress  string          `yaml:"lanBindAddress"`
-	BackupRetention BackupRetention `yaml:"backupRetention"`
+	JellyfinRecoveryScanTime string          `yaml:"jellyfinRecoveryScanTime,omitempty"`
+	Timezone                 string          `yaml:"timezone"`
+	RuntimeUID               int             `yaml:"runtimeUID"`
+	RuntimeGID               int             `yaml:"runtimeGID"`
+	LANBindAddress           string          `yaml:"lanBindAddress"`
+	BackupRetention          BackupRetention `yaml:"backupRetention"`
 }
 
 type BackupRetention struct {
@@ -165,6 +166,9 @@ func (declared MediaStack) validateEnvironment(name string, allowMissingHardware
 	}
 	if _, exists := declared.Spec.Environments[name]; !exists {
 		return fmt.Errorf("environment %q is not declared", name)
+	}
+	if _, err := declared.Spec.Defaults.JellyfinRecoveryScanMinutes(name); err != nil {
+		return err
 	}
 	for environmentName, environment := range declared.Spec.Environments {
 		if environment.ProjectName != "" && !composeProjectName.MatchString(environment.ProjectName) {

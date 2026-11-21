@@ -318,6 +318,8 @@ func TestRestoreDrillRestoresSafeStagingStateWithRotatedCredentials(t *testing.T
 			case recoveredBehaviorObserved <- struct{}{}:
 			default:
 			}
+		case "GET /Auth/Keys":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"Items": []any{}})
 		default:
 			http.NotFound(writer, request)
 		}

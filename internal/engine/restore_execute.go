@@ -212,6 +212,9 @@ func (engine localEngine) executeRestore(ctx context.Context, request RestoreReq
 		if err := client.PrepareRestoreDrill(ctx, sourceSecrets.Jellyfin, drillSecrets.Jellyfin); err != nil {
 			return RestoreReport{}, fmt.Errorf("rotate credentials and verify recovered Jellyfin behavior: %w", err)
 		}
+		if err := client.RemoveForeignRefreshAPIKeys(ctx, drillSecrets.Jellyfin, environment.ProjectName); err != nil {
+			return RestoreReport{}, fmt.Errorf("isolate recovered Jellyfin refresh credentials: %w", err)
+		}
 		report.StartedServices = []string{"jellyfin"}
 	} else if err := runCompose(ctx, composePath, report.ProjectName, "up", "-d"); err != nil {
 		return RestoreReport{}, fmt.Errorf("start restored services in dependency order: %w", err)

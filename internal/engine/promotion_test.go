@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -30,6 +31,28 @@ func TestPromoteAcceptsMatchingVerificationAndBackupArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := New().Promote(context.Background(), request); err == nil || !strings.Contains(err.Error(), "Jellyfin refresh evidence") {
+		t.Fatalf("Promotion without Jellyfin refresh evidence returned %v", err)
+	}
+	evidencePath := filepath.Join(temporary, "jellyfin-refresh.json")
+	request = request.WithJellyfinRefreshEvidence(evidencePath)
+	evidence := map[string]any{
+		"schemaVersion": "homelab.media-stack/jellyfin-refresh-evidence/v1alpha1", "environment": "staging",
+		"configDigest": verification.ConfigDigest, "versionsDigest": verification.VersionsDigest,
+		"pinnedRehearsal": "pass", "nativeArrChanges": "fail",
+	}
+	writeJSON(t, evidencePath, evidence)
+	if _, err := New().Promote(context.Background(), request); err == nil || !strings.Contains(err.Error(), "Jellyfin refresh evidence") {
+		t.Fatalf("Promotion with failed Jellyfin refresh evidence returned %v", err)
+	}
+	evidence["nativeArrChanges"] = "pass"
+	evidence["configDigest"] = "other-config"
+	writeJSON(t, evidencePath, evidence)
+	if _, err := New().Promote(context.Background(), request); err == nil || !strings.Contains(err.Error(), "must match") {
+		t.Fatalf("Promotion with stale Jellyfin refresh evidence returned %v", err)
+	}
+	evidence["configDigest"] = verification.ConfigDigest
+	writeJSON(t, evidencePath, evidence)
 	report, err := New().Promote(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
