@@ -52,6 +52,7 @@ func TestInitWizardExplainsAndCollectsSupportedOpenVPNChoices(t *testing.T) {
 		"service-user",     // Nord manual-setup username
 		"service-password", // Nord manual-setup password
 		"fixture-profilarr-api-key-32-characters", // Profilarr API key
+		"",                             // default to separate administrator credentials
 		"household",                    // Jellyfin administrator username
 		"fixture-jellyfin-password",    // Jellyfin administrator password
 		"household",                    // qBittorrent Web UI username
@@ -68,9 +69,9 @@ func TestInitWizardExplainsAndCollectsSupportedOpenVPNChoices(t *testing.T) {
 		fmt.Sprintf("Runtime UID for intended operator [%d]", os.Getuid()),
 		fmt.Sprintf("Runtime GID for intended operator [%d]", os.Getgid()),
 		fmt.Sprintf("Confirm runtime identity %d:%d [y/N]", selectedUID, selectedGID),
-		"Nord Account manual-setup area",
-		"not your Nord account email/password",
+		"Use the OpenVPN service credentials from Nord Account manual setup.",
 		"Profilarr API key",
+		"Use one admin username and password for Jellyfin, qBittorrent, Houndarr, and Cleanuparr? [y/N]",
 		"Jellyfin administrator username",
 		"Jellyfin administrator password",
 		"qBittorrent Web UI username",
