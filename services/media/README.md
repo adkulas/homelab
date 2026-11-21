@@ -252,7 +252,7 @@ The currently available `apply` phase decrypts the selected Environment's NordVP
 Gluetun, and waits up to two minutes for its built-in health check. Only after Gluetun is healthy does `apply` start
 qBittorrent, which shares Gluetun's network namespace. It then reconciles qBittorrent through its Web API: the default
 save path is `/data/torrents`; Automatic Torrent Management relocates downloads when their torrent, save path, or category
-changes; the exact `movies` and `series` categories use relative `movies` and `series` save paths; and global seeding stops
+changes; torrent queueing is disabled; the exact `movies` and `series` categories use relative `movies` and `series` save paths; and global seeding stops
 at ratio 1.0 or seven days, whichever is reached first. Repeating `apply` observes those values and makes no API writes when
 they already match the Declared Configuration. On a fresh config volume, a bounded bootstrap state machine considers only the temporary administrator password emitted after the current container start, waits through transient connection resets, accepts the pinned image's `204 No Content` login only after a protected API observation, installs the selected Environment's declared username and password, reauthenticates with them, and proves protected access. On an existing config volume it tries the declared credential first and never uses historical log credentials as recovery. Neither temporary nor declared credentials are written to command output, Compose, process arguments, or repository plaintext. No remote path mappings are created. A transient unhealthy state is polled so Gluetun can try
 another catalogue endpoint; a persistent failure exits `1`. The runtime files remain while the service is running so Docker

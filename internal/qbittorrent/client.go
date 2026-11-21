@@ -45,6 +45,7 @@ type preferences struct {
 	RelocateOnTorrentChange  bool    `json:"torrent_changed_tmm_enabled"`
 	RelocateOnSavePathChange bool    `json:"save_path_changed_tmm_enabled"`
 	RelocateOnCategoryChange bool    `json:"category_changed_tmm_enabled"`
+	QueueingEnabled          bool    `json:"queueing_enabled"`
 	RatioLimitEnabled        bool    `json:"max_ratio_enabled"`
 	RatioLimit               float64 `json:"max_ratio"`
 	SeedingTimeLimitEnabled  bool    `json:"max_seeding_time_enabled"`
@@ -142,6 +143,7 @@ func (client *Client) ReconcileAcquisitionPolicy(ctx context.Context) (bool, err
 	declared := preferences{
 		SavePath: defaultSavePath, AutomaticManagement: true,
 		RelocateOnTorrentChange: true, RelocateOnSavePathChange: true, RelocateOnCategoryChange: true,
+		QueueingEnabled:   false,
 		RatioLimitEnabled: true, RatioLimit: 1,
 		SeedingTimeLimitEnabled: true, SeedingTimeLimitMinutes: sevenDaysMinutes,
 		LimitReachedAction: 0,

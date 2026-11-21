@@ -187,6 +187,7 @@ func TestReconcileAcquisitionPolicyConvergesContractFixture(t *testing.T) {
 		"torrent_changed_tmm_enabled":   true,
 		"save_path_changed_tmm_enabled": true,
 		"category_changed_tmm_enabled":  true,
+		"queueing_enabled":              false,
 		"max_ratio_enabled":             true,
 		"max_ratio":                     float64(1),
 		"max_seeding_time_enabled":      true,
@@ -194,7 +195,20 @@ func TestReconcileAcquisitionPolicyConvergesContractFixture(t *testing.T) {
 		"max_ratio_act":                 float64(0),
 	}
 	if !reflect.DeepEqual(gotPreferences, wantPreferences) {
-		t.Errorf("preferences = %#v, want %#v", gotPreferences, wantPreferences)
+		t.Fatalf("preferences = %#v, want %#v", gotPreferences, wantPreferences)
+	}
+
+	gotPreferences["queueing_enabled"] = true
+	preferences, err = json.Marshal(gotPreferences)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err = client.ReconcileAcquisitionPolicy(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed || !reflect.DeepEqual(mutations, []string{"/api/v2/app/setPreferences"}) {
+		t.Fatalf("queueing drift reconciliation: changed=%v mutations=%v", changed, mutations)
 	}
 }
 
