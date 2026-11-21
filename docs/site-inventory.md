@@ -45,7 +45,8 @@ the reusable acquisition policy in `services/media/media-stack.yaml` and the che
 For the network Stack, a Stack Instance selects `stack: network`, binds a listed Host, and declares `network.role` as
 `primary` or `secondary`. The Site's `spec.dnsCluster` names one of each on distinct Hosts. A Site may then declare
 `spec.network` with semantic references to its subnet, gateway, DHCP bands, and MAC reservations; each DNS Host declares
-`spec.networkAddress`. The concrete values live in the Site's SOPS document. `site validate --output json` includes a
+`spec.networkAddress`. A non-DNS Host can use an existing DHCP reservation by sharing its exact address reference.
+The concrete values live in the Site's SOPS document. `site validate --output json` includes a
 `networkPlan` with only semantic IDs and `<redacted>` values, and diagnostics identify invalid entries without exposing
 decrypted addresses or MACs. See the [home topology guide](../sites/home/docs/topology.md) for the declaration shape.
 

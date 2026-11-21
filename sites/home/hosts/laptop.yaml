@@ -1,0 +1,10 @@
+apiVersion: homelab.site/v1alpha1
+kind: Host
+metadata:
+    name: laptop
+spec:
+    capabilities:
+        - containers.compose
+        - network.tun
+        - network.net-admin
+    networkAddress: media-laptop-address

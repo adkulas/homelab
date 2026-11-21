@@ -53,11 +53,48 @@ func TestHomeDeclaresTwoHostAssignedDNSInstances(t *testing.T) {
 	if err == nil {
 		t.Fatalf("home Site decrypted with unrelated identity: %s", output)
 	}
-	for _, expected := range []string{`"hosts":3`, `"stackInstances":3`, `"code":"SITE_NETWORK_DECRYPT_FAILED"`, `"primary":"homelab-dns"`, `"secondary":"raspberrypi-dns"`, `"id":"media-laptop-mac","value":"<redacted>"`} {
+	for _, expected := range []string{`"hosts":4`, `"stackInstances":3`, `"code":"SITE_NETWORK_DECRYPT_FAILED"`, `"primary":"homelab-dns"`, `"secondary":"raspberrypi-dns"`, `"id":"media-laptop-mac","value":"<redacted>"`} {
 		if !strings.Contains(string(output), expected) {
 			t.Fatalf("missing %s: %s", expected, output)
 		}
 	}
+}
+
+func TestNetworkTopologyAllowsHostUsingReservedAddress(t *testing.T) {
+	root, identity, site := networkTopologyFixture(t, nil)
+	sitePath := filepath.Join(site, "site.yaml")
+	contents := readFile(t, sitePath)
+	writeFile(t, sitePath, []byte(strings.Replace(string(contents), "hosts/secondary.yaml]", "hosts/secondary.yaml, hosts/laptop.yaml]", 1)), 0o600)
+	writeFile(t, filepath.Join(site, "hosts", "laptop.yaml"), []byte("apiVersion: homelab.site/v1alpha1\nkind: Host\nmetadata:\n    name: laptop\nspec:\n    capabilities: []\n    networkAddress: printer-address\n"), 0o600)
+	command := homelabCommand(t, "site", "validate", "--site", "topology", "--output", "json")
+	command.Env = append(command.Environ(), "HOMELAB_REPOSITORY_ROOT="+root, "SOPS_AGE_KEY_FILE="+identity)
+	if output, err := command.CombinedOutput(); err != nil || !strings.Contains(string(output), `"valid":true`) {
+		t.Fatalf("Host sharing the reservation's address reference was rejected: %v\n%s", err, output)
+	}
+
+	t.Run("DNS Host requires a static address", func(t *testing.T) {
+		secondaryPath := filepath.Join(site, "hosts", "secondary.yaml")
+		secondary := readFile(t, secondaryPath)
+		writeFile(t, secondaryPath, []byte(strings.Replace(string(secondary), "secondary-address", "printer-address", 1)), 0o600)
+		t.Cleanup(func() { writeFile(t, secondaryPath, secondary, 0o600) })
+		command := homelabCommand(t, "site", "validate", "--site", "topology", "--output", "json")
+		command.Env = append(command.Environ(), "HOMELAB_REPOSITORY_ROOT="+root, "SOPS_AGE_KEY_FILE="+identity)
+		if output, err := command.CombinedOutput(); err == nil || !strings.Contains(string(output), `"code":"SITE_NETWORK_STATIC_OVERLAP"`) {
+			t.Fatalf("DNS Host using a reservation was not rejected: %v\n%s", err, output)
+		}
+	})
+
+	t.Run("two non-DNS Hosts cannot share a reservation", func(t *testing.T) {
+		contents := readFile(t, sitePath)
+		writeFile(t, sitePath, []byte(strings.Replace(string(contents), "hosts/laptop.yaml]", "hosts/laptop.yaml, hosts/other.yaml]", 1)), 0o600)
+		laptop := readFile(t, filepath.Join(site, "hosts", "laptop.yaml"))
+		writeFile(t, filepath.Join(site, "hosts", "other.yaml"), []byte(strings.Replace(string(laptop), "name: laptop", "name: other", 1)), 0o600)
+		command := homelabCommand(t, "site", "validate", "--site", "topology", "--output", "json")
+		command.Env = append(command.Environ(), "HOMELAB_REPOSITORY_ROOT="+root, "SOPS_AGE_KEY_FILE="+identity)
+		if output, err := command.CombinedOutput(); err == nil || !strings.Contains(string(output), `"code":"SITE_NETWORK_ADDRESS_DUPLICATE"`) {
+			t.Fatalf("reservation shared by two Hosts was not rejected: %v\n%s", err, output)
+		}
+	})
 }
 
 func networkTopologyFixture(t *testing.T, overrides map[string]string) (string, string, string) {

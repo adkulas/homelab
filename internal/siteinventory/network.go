@@ -157,6 +157,7 @@ func validateNetwork(ctx context.Context, siteDirectory string, network *Network
 		return address
 	}
 	gateway := claim(network.Gateway)
+	dnsHosts := map[HostName]bool{}
 	for _, role := range []struct {
 		name StackInstanceName
 		want DNSRole
@@ -166,6 +167,7 @@ func validateNetwork(ctx context.Context, siteDirectory string, network *Network
 			add("SITE_NETWORK_CLUSTER_INVALID", string(role.name), "Reference a listed network Stack Instance with the matching DNS role.")
 			continue
 		}
+		dnsHosts[instance.Spec.Host] = true
 		if hosts[instance.Spec.Host].Spec.NetworkAddress == "" {
 			add("SITE_NETWORK_RESOLVER_INVALID", string(role.name), "Give the selected Host a networkAddress reference.")
 		}
@@ -178,10 +180,23 @@ func validateNetwork(ctx context.Context, siteDirectory string, network *Network
 		hostNames = append(hostNames, string(name))
 	}
 	sort.Strings(hostNames)
+	reservedReferences := map[SensitiveValueID]bool{}
+	for _, reservation := range network.DHCP.Reservations {
+		reservedReferences[reservation.Address] = true
+	}
+	usedReservationReferences := map[SensitiveValueID]bool{}
 	for _, name := range hostNames {
-		if id := hosts[HostName(name)].Spec.NetworkAddress; id != "" {
-			claim(id)
+		host := HostName(name)
+		id := hosts[host].Spec.NetworkAddress
+		if id == "" {
+			continue
 		}
+		// The reservation validates and claims its address for the Host as well.
+		if reservedReferences[id] && !dnsHosts[host] && !usedReservationReferences[id] {
+			usedReservationReferences[id] = true
+			continue
+		}
+		claim(id)
 	}
 	reservedStart := parseAddress(network.DHCP.ReservationStart)
 	reservedEnd := parseAddress(network.DHCP.ReservationEnd)

@@ -55,6 +55,25 @@ class DHCPTests(unittest.TestCase):
         self.cli('apply', '--plan', plan['plan'], success=False)  # no backup
         self.assertEqual(self.writes, [])
 
+    def test_host_with_reserved_address_preserves_existing_scope(self):
+        import yaml
+        self.topology()
+        path = self.site / 'site.yaml'
+        site = yaml.safe_load(path.read_text())
+        site['spec']['hosts'].append('hosts/media.yaml')
+        path.write_text(yaml.safe_dump(site))
+        host = self.site / 'hosts' / 'media.yaml'
+        host.write_text(yaml.safe_dump({
+            'apiVersion': 'homelab.site/v1alpha1', 'kind': 'Host',
+            'metadata': {'name': 'media'}, 'spec': {'networkAddress': 'laptop'}}))
+        self.scopes = [self.configured_scope()]
+        self.assertEqual(self.cli('plan')['changes'], [])
+        self.assertEqual(self.writes, [])
+
+        self.values['spec']['values'].append({'id': 'other', 'value': '192.0.2.30'})
+        host.write_text(host.read_text().replace('networkAddress: laptop', 'networkAddress: other'))
+        self.cli('plan', success=False)
+
     def configured_scope(self):
         # Independent worked example of the validated fixture topology.
         return {'name': 'home', 'enabled': False, 'startingAddress': '192.0.2.20',
