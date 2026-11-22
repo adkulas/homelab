@@ -75,6 +75,230 @@ that instance. Give it distinct application secret paths, even on another Host.
 Compose project names, ports, and storage roots must be distinct on the same Host.
 Application credentials follow an instance if its Host assignment changes.
 
+## Upgrading image pins
+
+Use [`$media-stack-upgrade`](../../.agents/skills/media-stack-upgrade/SKILL.md) to prepare the pin change, rehearse a
+merged candidate on the deployment Host, or hand off a Production rollout.
+
+### Prepare the pin update
+
+1. Read [`versions.yaml`](versions.yaml) and list the current pins and latest stable release candidates for the selected
+   images. Read upstream release and image packaging notes from each deployed version through its proposed version.
+   Record required intermediate versions, database migrations, configuration changes, and rollback limitations with
+   source links. Rehearse required hops in order, with a backup before each hop.
+2. Inspect each stable image tag in its registry. Copy the top-level `Digest` for the manifest or multi-platform index
+   and confirm the image supports the deployment Host architecture. Verify the resulting immutable reference resolves.
+
+   ```bash
+   docker buildx imagetools inspect "$image_repository:$release_tag"
+   docker buildx imagetools inspect "$image_repository@$registry_digest"
+   ```
+
+   Keep `image@sha256:…` in `versions.yaml`. In the upgrade summary, map each service to its old pin, new release tag,
+   and new digest. See [Docker's image digest guide](https://docs.docker.com/dhi/explore/security-concepts/digests/).
+3. For a Profilarr image change, review the candidate's migration identities and actual migrated schema fingerprint
+   against the [bootstrap contract](../../docs/adr/0009-bootstrap-fresh-profilarr-state.md). Update the compatibility
+   adapter if required. Use the pinned-image acceptance check below for fresh bootstrap and public Arr synchronization,
+   and use populated Staging for existing-state migration and repeat apply. Review `policy.profilarrPcdRevision` as its
+   own change with its own upstream revision and evidence.
+4. Run `go test ./...` and review CI for the candidate. The workflow covers Go checks, example Compose rendering,
+   and the live qBittorrent contract. Record each result as CI or development evidence. Continue to Staging for
+   deployment Host behavior.
+
+### Resolve the Host and freeze the checkout
+
+Read the selected Site's declared Host and Stack Instance references in [Site Inventory](../../docs/site-inventory.md).
+Choose the Environment independently. Use a local shell if the current machine is the assigned Host. Otherwise connect
+with `ssh "$ssh_destination"` using the operator's known destination for that Host. Confirm the machine's identity
+against that assignment. Record the known OS hostname for the assigned Host as `expected_hostname`. The inventory
+Host is a logical ID and can differ from the OS hostname and SSH alias. Stop if any selection, assignment, or
+destination cannot be verified.
+
+Run the following commands in Bash **on the assigned Host**, from its trusted repository clone. Select the Host's
+local Docker context and make sure its storage mounts and SOPS identities are available to the operator. Use the
+daemon on this Host with its filesystem paths. If a required command fails, stop that phase and record the result.
+
+```bash
+unset DOCKER_HOST HOMELAB_REPOSITORY_ROOT
+export DOCKER_CONTEXT="$local_docker_context"
+hostname
+docker context inspect "$DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}'
+docker info --format '{{.Name}} {{.Architecture}}'
+```
+
+Verify that the Docker endpoint is the selected Host's local daemon socket. Record the Host, context and daemon identity.
+For a new post-merge rehearsal, fetch and resolve `origin/main` once. Save the resulting SHA. To resume a rehearsal or
+run the Production phase, supply the recorded SHA and reuse the detached checkout even if `origin/main` has moved.
+
+```bash
+git fetch origin
+candidate_sha=$(git rev-parse --verify 'origin/main^{commit}')
+git worktree add --detach "$candidate_dir" "$candidate_sha"
+cd "$candidate_dir"
+test "$(git rev-parse HEAD)" = "$candidate_sha"
+CGO_ENABLED=0 go build -o ./bin/homelab ./cmd/homelab
+CGO_ENABLED=0 go build -o ./bin/media-stack ./cmd/media-stack
+```
+
+Set `media_stack="$PWD/bin/media-stack"` in each checkout. For a pin-only candidate, an existing static Media Stack
+CLI is suitable when its source revision or compatibility with the candidate CLI is known and recorded. Set
+`media_stack` to its absolute path and run it from the candidate checkout.
+For inventory resolution, use the candidate's `homelab` build. Make the selected Environment's current encrypted
+credential documents available at their declared paths on the Host. Move or preserve any encrypted writeback through
+the normal credential workflow. Set `evidence_dir` to an absolute path to a private directory on the Host outside both checkouts and backup archives.
+
+Set `site`, `instance`, `assigned_host`, and `environment` from the verified selection. For rehearsal, set
+`environment=staging`. Run this check in each checkout before operations there. Set `expected_sha` to the revision
+required for that phase.
+
+```bash
+target=(--site "$site" --instance "$instance" --environment "$environment")
+checkout_hostname=$(hostname) &&
+  test -n "$expected_hostname" &&
+  test "$checkout_hostname" = "$expected_hostname" &&
+  checkout_sha=$(git rev-parse --verify HEAD) &&
+  test "$checkout_sha" = "$expected_sha" &&
+  git diff --quiet HEAD -- services/media/{versions,media-stack}.yaml \
+    "sites/$site/site.yaml" "sites/$site/hosts" "sites/$site/instances" &&
+  ./bin/homelab plan "${target[@]}" --output json |
+  jq -e --arg site "$site" --arg instance "$instance" --arg host "$assigned_host" \
+    --arg env "$environment" --arg sha "$checkout_sha" --arg hostname "$checkout_hostname" '
+      select(.site == $site and .instance == $instance and .host == $host
+        and .stack == "media" and .environment == $env)
+      | {host, hostname: $hostname, site, instance, environment, commit: $sha}'
+```
+
+Proceed only when the check prints the matching target and SHA. A failed check or empty output stops the upgrade.
+Keep the checked-in pins and declared configuration at that revision. For the baseline backup and rollback, use a separate checkout and static CLI for
+the revision actually deployed in the selected Environment. Resolve the target there too. If the deployed revision
+is unknown, establish it and compare its pins with the running services before proceeding.
+
+### Rehearse in Staging
+
+1. Use a declared, disposable Staging Environment on the selected Stack Instance with existing application state
+   from the old revision. Check that the deployed revision's project and service images match that state. From its
+   checkout, take a protected [application-state backup](#backups-restore-and-restore-drills).
+
+   ```bash
+   "$media_stack" backup "${target[@]}" --protect --label before-upgrade --output json \
+     > "$evidence_dir/staging-before-upgrade.json"
+   jq -er 'select(.environment == "staging" and .complete and .protected) | .manifestPath' \
+     "$evidence_dir/staging-before-upgrade.json"
+   ```
+
+   Verify the manifest exists, belongs to the selected Site, Stack Instance and project, and records the deployed
+   pins. Stop before apply if the backup is missing, incomplete, mismatched, or unprotected.
+2. Switch to the detached candidate checkout and repeat the target check. Pull the immutable candidate images
+   for the selected deployment on its Docker daemon (`docker pull "$immutable_image"` for each image).
+   Run the preflight and review the live plan before reconciling. Check app startup and upstream migration
+   diagnostics after apply, and repeat apply to confirm reconciliation against the upgraded state.
+
+   ```bash
+   "$media_stack" doctor "${target[@]}"
+   "$media_stack" plan "${target[@]}"
+   "$media_stack" apply "${target[@]}"
+   ```
+
+3. Run applicable opt-in tests using the candidate pins and disposable state. See the
+   [Jellyfin refresh procedure](#staging-verification-before-promotion) and the
+   [series companion procedure](#verification-and-troubleshooting). For a Profilarr or Seerr image change,
+   use the corresponding test below. Record each actual test outcome, including skips.
+
+   ```bash
+   MEDIA_STACK_LIVE_PROFILARR=1 go test ./tests/acceptance \
+     -run '^TestDisposablePinnedProfilarr(Apply|Recovery)$' -count=1 -v
+   MEDIA_STACK_LIVE_SEERR=1 go test ./tests/acceptance \
+     -run '^TestDisposableSeerrAuthenticatesHouseholdAndEmergencyLocalUsers$' -count=1 -v
+   ```
+
+4. Follow the [legal request-to-playback procedure](#5-verify-staging-vpn-behavior-and-legal-request-to-playback-paths).
+   Run the Promotion suite with both legal fixtures. When series automation is enabled, prepare the
+   [controlled companion recovery fixture](#verification-and-troubleshooting) and add it to the same run.
+   This suite exercises VPN fail-closed and recovery behavior before acquisition and playback.
+
+   ```bash
+   recovery_args=()
+   # When series automation is enabled, use:
+   # recovery_args=(--recovery-fixture "$recovery_fixture")
+   "$media_stack" verify "${target[@]}" --suite promotion \
+     --legal-fixture services/media/fixtures/legal-movie.yaml \
+     --legal-series-fixture services/media/fixtures/legal-series.yaml \
+     "${recovery_args[@]}" --output json > "$evidence_dir/staging-verification.json"
+   ```
+
+   Record the exit status and diagnostics. Require successful VPN recovery, movie and series hardlink and direct-play
+   evidence, and controlled companion recovery where enabled. Complete the
+   [Jellyfin pinned rehearsal and native Arr cases](#staging-verification-before-promotion) and save the
+   matching `staging-jellyfin-refresh.json`. Back up the proven Staging state from the candidate checkout and
+   retain that complete manifest for the preview, including both companion volumes when enabled.
+
+   ```bash
+   "$media_stack" backup "${target[@]}" --label verified-upgrade --output json \
+     > "$evidence_dir/staging-verified-backup.json"
+   ```
+
+### Hand off Promotion and rollback
+
+Include the resolved Host, Site, Stack Instance, Environment, candidate SHA, baseline SHA, release tags and pins,
+and CLI provenance in the upgrade record. Save the candidate version manifest with the evidence
+(`git show "$candidate_sha:services/media/versions.yaml"`). List each CI and live check with its result (`pass`, `fail`, `skipped`,
+or `not applicable`), reason, and evidence path. Include the Staging backup manifests, verification report and digests,
+and Jellyfin and companion proof where applicable. Keep credentials out of the record. Treat any required check without
+passing evidence as incomplete and hold Promotion.
+
+Require the recorded Staging evidence to match the assigned Host, Site, Stack Instance, and exact candidate SHA.
+A passing rehearsal on another Host or Stack Instance can inform compatibility review. The existing command checks
+configuration and versions digests, so also check the SHA recorded by the rehearsal before requesting the preview.
+In the candidate checkout set `environment=production`, repeat the target check, and pass the **verified Staging**
+manifest to the preview.
+
+```bash
+"$media_stack" promote "${target[@]}" \
+  --verification "$evidence_dir/staging-verification.json" \
+  --backup "$staging_verified_manifest" \
+  --jellyfin-refresh-evidence "$evidence_dir/staging-jellyfin-refresh.json"
+```
+
+End preparation or rehearsal with the evidence status, any available preview, and the commands below filled in
+for the selected target.
+For an explicit Production deployment, identify the currently deployed **Production** SHA independently of the
+Staging baseline. In its checkout, repeat the Production target check and take the protected backup:
+
+```bash
+"$media_stack" backup "${target[@]}" --protect --label before-upgrade --output json \
+  > "$evidence_dir/production-before-upgrade.json"
+jq -er 'select(.environment == "production" and .complete and .protected) | .manifestPath' \
+  "$evidence_dir/production-before-upgrade.json"
+```
+
+Set `production_before_upgrade_manifest` to the validated manifest path. Verify that it exists, matches the
+selected Production Site, Stack Instance and project, and records the deployed pins. Stop before apply if the
+backup is missing, incomplete, mismatched, or unprotected. In the exact tested candidate checkout on the same
+Host, check the target and SHA again, pull the candidate pins, and run `doctor` and `plan`. After reviewing the
+plan and Promotion preview, run the explicit apply:
+
+```bash
+"$media_stack" apply "${target[@]}"
+```
+
+If apply or migration fails, stop the rollout. Use the old Production checkout and CLI to recover the old pins
+and the protected pre-upgrade application state together. Check the old target and SHA, then preview and confirm
+the [matching-Environment restore](#backups-restore-and-restore-drills) with the same manifest:
+
+```bash
+"$media_stack" restore "${target[@]}" --backup "$production_before_upgrade_manifest"
+```
+
+A successful preview prints the replacement details and exits with status 1 and `restore requires --confirm`.
+Review the details and proceed only if that is the reported result and the target and manifest match.
+
+```bash
+"$media_stack" restore "${target[@]}" --backup "$production_before_upgrade_manifest" --confirm
+```
+
+Restore validates the archive against the old pins and restarts the old services. Verify service health and the
+restored image references before resuming normal operation.
+
 ## Quick start
 
 ### 1. Prepare a supported host
