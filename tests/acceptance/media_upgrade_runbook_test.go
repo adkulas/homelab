@@ -108,3 +108,29 @@ func TestUpgradeRunbookChecksHostAndRevisionBeforeApply(t *testing.T) {
 		})
 	}
 }
+
+func TestHomeDeclaresMediaUpgradeTargetsOnBothHosts(t *testing.T) {
+	command := homelabCommand(t)
+	for _, host := range []string{"homelab", "laptop"} {
+		for _, environment := range []string{"staging", "production"} {
+			t.Run(host+"/"+environment, func(t *testing.T) {
+				instance := "media-" + host
+				plan := exec.Command(command.Path, "plan", "--site", "home", "--instance", instance,
+					"--environment", environment, "--output", "json")
+				plan.Dir = command.Dir
+				output, err := plan.CombinedOutput()
+				if err != nil {
+					t.Fatalf("resolve target: %v\n%s", err, output)
+				}
+				var target sitePlanOutput
+				if err := json.Unmarshal(output, &target); err != nil {
+					t.Fatalf("decode target: %v\n%s", err, output)
+				}
+				if target.Site != "home" || target.Host != host || target.Instance != instance ||
+					target.Environment != environment || !strings.HasPrefix(target.Plan, "name: media-"+environment+"\n") {
+					t.Fatalf("unexpected Media Stack target for %s %s", instance, environment)
+				}
+			})
+		}
+	}
+}

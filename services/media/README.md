@@ -60,8 +60,9 @@ Sonarr and Radarr naming are Externally Synchronized Policies owned by the pinne
 ## Selecting a deployment
 
 Every operational command requires `--site <site> --instance <instance>` and
-`--environment production|staging`. The home Media Stack Instance is
-`media-homelab`, assigned to Host `homelab`. An explicit standalone `--config`
+`--environment production|staging`. Site `home` assigns `media-homelab` to Host
+`homelab` and `media-laptop` to Host `laptop`. Select the instance for the machine
+that runs the command. An explicit standalone `--config`
 remains supported for legacy installations and migration; it cannot be combined
 with Site selectors, and there is no implicit global configuration fallback.
 `config describe` and `test` do not select a deployment.
@@ -74,6 +75,14 @@ Host and Stack Instance, add both references to `site.yaml`, and run `init` for
 that instance. Give it distinct application secret paths, even on another Host.
 Compose project names, ports, and storage roots must be distinct on the same Host.
 Application credentials follow an instance if its Host assignment changes.
+
+
+The laptop declaration uses the existing `media-production` and `media-staging`
+projects on Host `laptop`. It keeps backups under `/srv/media/backups`, with a
+separate directory per Environment. Before using an existing project through
+`media-laptop`, provide its current application credentials in the corresponding
+laptop-scoped SOPS document. Confirm that the document authenticates to the
+running services before the first upgrade.
 
 ## Upgrading image pins
 
@@ -112,7 +121,8 @@ Choose the Environment independently. Use a local shell if the current machine i
 with `ssh "$ssh_destination"` using the operator's known destination for that Host. Confirm the machine's identity
 against that assignment. Record the known OS hostname for the assigned Host as `expected_hostname`. The inventory
 Host is a logical ID and can differ from the OS hostname and SSH alias. Stop if any selection, assignment, or
-destination cannot be verified.
+destination cannot be verified. For the home Site, use `media-laptop` on the laptop or `media-homelab` on the
+Homelab Host. Each uses its own Environment-scoped SOPS documents.
 
 Run the following commands in Bash **on the assigned Host**, from its trusted repository clone. Select the Host's
 local Docker context and make sure its storage mounts and SOPS identities are available to the operator. Use the
