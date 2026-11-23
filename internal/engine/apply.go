@@ -96,18 +96,14 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 		}
 	}
 	credentials := secrets.OpenVPN
-	if err := materializeRuntimeSecrets(environmentRuntimeSecretDirectory(environment), secrets); err != nil {
-		return ApplyReport{}, fmt.Errorf("materialize runtime secrets: %w", err)
+	// Register recovery before the first Compose up can change restart policies.
+	if nativeBootRecovery() {
+		if err := installRecovery(ctx, request.plan, declared, plan); err != nil {
+			return ApplyReport{}, fmt.Errorf("register boot recovery: %w", err)
+		}
 	}
-
-	if output, err := runDockerCompose(ctx, plan, "up", "-d", "gluetun"); err != nil {
-		return ApplyReport{}, fmt.Errorf("start healthy Gluetun: %w: %s", err, redactCredentials(output, credentials))
-	}
-	if err := waitForHealthyGluetun(ctx, plan, 120*time.Second); err != nil {
+	if err := startVPNPair(ctx, plan, environmentRuntimeSecretDirectory(environment), secrets, []string{"up", "-d"}); err != nil {
 		return ApplyReport{}, err
-	}
-	if output, err := runDockerCompose(ctx, plan, "up", "-d", "qbittorrent"); err != nil {
-		return ApplyReport{}, fmt.Errorf("start qBittorrent after healthy Gluetun: %w: %s", err, redactCredentials(output, credentials))
 	}
 	qbittorrentStart, err := qbittorrentContainerStart(ctx, plan)
 	if err != nil {
@@ -270,6 +266,24 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 		}
 	}
 	return ApplyReport{Environment: request.plan.environment}, nil
+}
+
+// Recovery starts only existing containers. Apply also creates or reconciles them.
+func startVPNPair(ctx context.Context, plan Plan, directory string, secrets environmentSecrets, operation []string) error {
+	if err := materializeRuntimeSecrets(directory, secrets); err != nil {
+		return fmt.Errorf("materialize runtime secrets: %w", err)
+	}
+
+	if output, err := runDockerCompose(ctx, plan, append(operation, "gluetun")...); err != nil {
+		return fmt.Errorf("start healthy Gluetun: %w: %s", err, redactCredentials(output, secrets.OpenVPN))
+	}
+	if err := waitForHealthyGluetun(ctx, plan, 120*time.Second); err != nil {
+		return err
+	}
+	if output, err := runDockerCompose(ctx, plan, append(operation, "qbittorrent")...); err != nil {
+		return fmt.Errorf("start qBittorrent after healthy Gluetun: %w: %s", err, redactCredentials(output, secrets.OpenVPN))
+	}
+	return nil
 }
 
 func waitForSeerrAuthentication(ctx context.Context, client *seerr.Client, credentials seerr.Credentials, timeout time.Duration) error {

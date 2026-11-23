@@ -9,12 +9,16 @@ import (
 
 func topologySettings(definition serviceDefinition) []contractmodel.Setting {
 	service := definition.name
+	restartPolicy := contractmodel.Fixed("restartPolicy", "Restart policy", "unless-stopped", "Docker restarts this service unless explicitly stopped.", "render")
+	if service == "gluetun" || service == "qbittorrent" {
+		restartPolicy = contractmodel.Derived("restartPolicy", "Restart policy", "Host boot recovery support", "Native systemd hosts use on-failure with ordered boot recovery. Other hosts use unless-stopped.", "render")
+	}
 	settings := []contractmodel.Setting{
 		contractmodel.Declared("image", "Pinned container image", "versions.yaml#images."+service, "immutable image digest", nil, "Update the service image digest in versions.yaml.", "render"),
 		contractmodel.Declared("timezone", "Container timezone", "StackInstance#spec.media.defaults.timezone", "IANA timezone", nil, "Change spec.media.defaults.timezone in the selected Stack Instance.", "initialize", "render"),
 		contractmodel.Declared("project", "Compose project identity", "StackInstance#spec.media.environments.<environment>.projectName", "string", nil, "Change the selected Environment projectName in the selected Stack Instance.", "render"),
 		contractmodel.Derived("configVolume", "Environment-scoped configuration volume", "spec.environments.<environment>.projectName + service identity", "Compose derives a distinct mutable configuration volume for this service; backup and restore preserve it. Destroy retains it by default; --volumes removes surviving owned volumes after a protected, independently verified final-state backup.", "render", "preserve"),
-		contractmodel.Fixed("restartPolicy", "Restart policy", "unless-stopped", "Every long-running service restarts unless explicitly stopped.", "render"),
+		restartPolicy,
 		contractmodel.Fixed("logging", "Bounded logging policy", "json-file; max-size=10m; max-file=3", "The json-file driver keeps three 10 MiB files.", "render"),
 		contractmodel.Derived("applicationNetwork", "Environment application network", "spec.environments.<environment>.projectName + application", "Compose scopes the application network to the selected Environment. Confirmed destroy removes the owned network after its containers.", "render"),
 	}

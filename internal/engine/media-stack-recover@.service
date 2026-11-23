@@ -1,0 +1,17 @@
+[Unit]
+Description=Recover the media VPN and qBittorrent for %i
+After=docker.service network-online.target
+Wants=network-online.target
+PartOf=docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart="%E/media-stack/boot/%i/media-stack" __boot-recover "%E/media-stack/boot/%i/recovery.json"
+Restart=on-failure
+RestartSec=30s
+RemainAfterExit=yes
+
+[Install]
+WantedBy=docker.service

@@ -112,7 +112,7 @@ func (localEngine) Plan(ctx context.Context, request PlanRequest) (Plan, error) 
 		declared.Spec.Acquisition.VPN,
 		versions.Images,
 		environmentRuntimeSecretDirectory(environment),
-		transcoding,
+		transcoding, nativeBootRecovery(),
 	)
 	if err != nil {
 		return Plan{}, err
@@ -122,6 +122,9 @@ func (localEngine) Plan(ctx context.Context, request PlanRequest) (Plan, error) 
 
 func runtimeSecretDirectory(projectName string) string {
 	root := os.Getenv("XDG_RUNTIME_DIR")
+	if os.Geteuid() == 0 && nativeBootRecovery() {
+		root = "/run"
+	}
 	if root == "" {
 		root = filepath.Join(os.TempDir(), "media-stack-"+strconv.Itoa(os.Getuid()))
 	}

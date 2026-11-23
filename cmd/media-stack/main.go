@@ -88,6 +88,11 @@ func run(ctx context.Context, arguments []string) error {
 		return runVerify(ctx, arguments[1:])
 	case "test":
 		return runTest(arguments[1:])
+	case "__boot-recover":
+		if len(arguments) != 2 {
+			return fmt.Errorf("expected recovery manifest")
+		}
+		return engine.RecoverBoot(ctx, arguments[1])
 	case "__storage-probe":
 		return runStorageProbe(arguments[1:])
 	default:

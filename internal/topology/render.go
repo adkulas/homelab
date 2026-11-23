@@ -92,7 +92,7 @@ type composeSecret struct {
 	File string `yaml:"file"`
 }
 
-func Render(defaults config.Defaults, environment config.Environment, vpn config.VPN, images map[string]string, runtimeSecretDirectory string, transcoding hardware.Transcoding) ([]byte, error) {
+func Render(defaults config.Defaults, environment config.Environment, vpn config.VPN, images map[string]string, runtimeSecretDirectory string, transcoding hardware.Transcoding, bootRecovery bool) ([]byte, error) {
 	if defaults.Timezone == "" {
 		return nil, fmt.Errorf("declared timezone is required")
 	}
@@ -188,6 +188,10 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 			devices = []string{transcoding.RenderDevice + ":" + transcoding.RenderDevice}
 			groups = []string{strconv.Itoa(transcoding.GroupID)}
 		}
+		restart := "unless-stopped"
+		if bootRecovery && (definition.name == "gluetun" || definition.name == "qbittorrent") {
+			restart = "on-failure"
+		}
 		project.Services[definition.name] = composeService{
 			Image:       reference,
 			User:        user,
@@ -196,7 +200,7 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 			CapAdd:      capabilities,
 			Devices:     devices,
 			GroupAdd:    groups,
-			Restart:     "unless-stopped",
+			Restart:     restart,
 			Logging: composeLogging{
 				Driver: "json-file",
 				Options: map[string]string{
