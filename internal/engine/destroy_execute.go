@@ -295,6 +295,11 @@ func (e localEngine) executeDestroy(ctx context.Context, r DestroyRequest) (repo
 	if err := saveDestroyJournal(journalPath, j); err != nil {
 		return report, err
 	}
+	if nativeBootRecovery() {
+		if err := removeRecovery(ctx, environment.ProjectName); err != nil {
+			return report, err
+		}
+	}
 	for index := range j.Actions {
 		action := &j.Actions[index]
 		if action.Status == "completed" {

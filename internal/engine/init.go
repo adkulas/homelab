@@ -252,6 +252,10 @@ func encryptSecrets(ctx context.Context, destination string, answers initAnswers
 }
 
 func writeSecretAtomic(path string, contents []byte) error {
+	return writeFileAtomic(path, contents, 0600)
+}
+
+func writeFileAtomic(path string, contents []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -261,7 +265,7 @@ func writeSecretAtomic(path string, contents []byte) error {
 	}
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(0o600); err != nil {
+	if err := temporary.Chmod(mode); err != nil {
 		temporary.Close()
 		return err
 	}

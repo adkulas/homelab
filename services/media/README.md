@@ -526,7 +526,7 @@ rerunning similar commands in Production.
 unique across environments.
 
 The first milestone intentionally excludes Bazarr, Usenet, FlareSolverr, Recyclarr, a public reverse proxy, SSO, and a full
-metrics/logging stack. Every long-running service uses `restart: unless-stopped` and bounded `json-file` logs by default.
+metrics/logging stack. Long-running services use bounded `json-file` logs. On native systemd hosts, Gluetun and qBittorrent use `restart: on-failure`. Other services use `unless-stopped` and can recover independently during a VPN outage. WSL and hosts without systemd retain `unless-stopped` for all services.
 
 ## Configuration model
 
@@ -591,6 +591,14 @@ invariants.
 
 `versions.yaml` pins every container image by digest and pins the Profilarr PCD policy input. A version-only change is still a
 reviewable, verifiable change and invalidates evidence created for older digests.
+
+### Boot recovery on native systemd hosts
+
+A successful `apply` enables `media-stack-recover@<compose-project>.service` for the selected environment. At boot the oneshot restores private runtime files from SOPS, starts the existing Gluetun container, waits for a healthy tunnel, and starts the existing qBittorrent container. Systemd retries failed recovery after 30 seconds. Application configuration and image updates run during explicit applies.
+
+Run lifecycle commands under the same deployment account. With sudo, apply installs a system service. With a Docker-enabled user, apply enables user lingering and installs a user service so recovery can run before login. The account needs an unattended SOPS identity. Use its normal age key location or an absolute `SOPS_AGE_KEY_FILE` during apply. Keep the encrypted source files at their applied paths. The registration stores the applied Compose topology and a copy of the running CLI in the account's configuration directory. A confirmed destroy disables and removes that project's registration.
+
+For production, inspect `journalctl -b -u media-stack-recover@media-production.service` (add `--user` for a user deployment). To exercise recovery on a disposable host, apply staging, reboot, and verify that the oneshot succeeds before logging in as the deployment user. Repeat with the VPN unavailable and verify Jellyfin responds while qBittorrent remains stopped.
 
 ### Configuration ownership
 

@@ -69,6 +69,11 @@ ansible-playbook -i inventory.yml playbook.yml --tags base --ask-become-pass
 - Docker Engine and Compose from Docker's signed stable Ubuntu package repository.
   Existing conflicting runtimes stop provisioning for review. Normal runs install
   missing packages without requesting upgrades to installed packages.
+- The `docker` and `media-stack` tags install the systemd boot recovery template.
+  A successful `media-stack apply` with sudo enables the selected Compose project.
+  For unattended decryption with the provisioned Site identity, run apply with
+  `sudo env SOPS_AGE_KEY_FILE=/etc/sops/age/keys.txt` before the CLI command.
+  Inspect `journalctl -b -u media-stack-recover@media-production.service` after boot.
 - Docker JSON logs limited to three 10 MB files per container. Other daemon
   configuration is preserved. Logging defaults apply to newly created containers;
   existing containers need recreation to adopt them.

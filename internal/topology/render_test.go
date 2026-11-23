@@ -16,7 +16,7 @@ func TestRenderUsesEnvironmentQBittorrentPortEndToEnd(t *testing.T) {
 	rendered, err := topology.Render(
 		config.Defaults{Timezone: "America/Toronto", RuntimeUID: 1000, RuntimeGID: 1000, LANBindAddress: "127.0.0.1"},
 		config.Environment{ProjectName: "media-staging", DataRoot: "/srv/media/staging", Ports: config.Ports{QBittorrent: port}},
-		config.VPN{}, imageFixtures(), "/run/media-stack/media-staging", hardware.Transcoding{},
+		config.VPN{}, imageFixtures(), "/run/media-stack/media-staging", hardware.Transcoding{}, true,
 	)
 	if err != nil {
 		t.Fatalf("Render() error = %v", err)
@@ -24,11 +24,21 @@ func TestRenderUsesEnvironmentQBittorrentPortEndToEnd(t *testing.T) {
 	var project struct {
 		Services map[string]struct {
 			Environment map[string]string `yaml:"environment"`
+			Restart     string            `yaml:"restart"`
 			Ports       []string          `yaml:"ports"`
 		} `yaml:"services"`
 	}
 	if err := yaml.Unmarshal(rendered, &project); err != nil {
 		t.Fatalf("decode rendered Compose: %v", err)
+	}
+	for name, service := range project.Services {
+		want := "unless-stopped"
+		if name == "gluetun" || name == "qbittorrent" {
+			want = "on-failure"
+		}
+		if service.Restart != want {
+			t.Errorf("%s restart = %s, want %s", name, service.Restart, want)
+		}
 	}
 	wantPort := strconv.Itoa(port)
 	if got := project.Services["qbittorrent"].Environment["WEBUI_PORT"]; got != wantPort {
@@ -66,7 +76,7 @@ func TestRenderAppliesDetectedHardwareTranscodingOverlay(t *testing.T) {
 				config.VPN{},
 				imageFixtures(),
 				"/run/media-stack/media-staging",
-				test.transcoding,
+				test.transcoding, false,
 			)
 			if err != nil {
 				t.Fatalf("Render() error = %v", err)

@@ -285,6 +285,16 @@
             enabled: true
             state: started
 
+    - name: Install the Media Stack boot recovery service template
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../../../../internal/engine/media-stack-recover@.service'
+        dest: /etc/systemd/system/media-stack-recover@.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reload systemd
+      tags: [docker, media-stack]
+
     - name: Report deferred Docker bootstrap in check mode
       ansible.builtin.debug:
         msg: Docker is not installed. Check mode defers Docker bootstrap; run normally to install, then check again.

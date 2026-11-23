@@ -23,19 +23,27 @@ func destroyDocker(ctx context.Context, args ...string) ([]byte, error) {
 	return output, nil
 }
 
-func destroyHostIdentity(ctx context.Context, deployment *Deployment) (string, string, string, error) {
+func localDockerEndpoint(ctx context.Context) (string, error) {
 	endpoint := os.Getenv("DOCKER_HOST")
 	if endpoint == "" || os.Getenv("DOCKER_CONTEXT") != "" {
 		output, err := destroyDocker(ctx, "context", "inspect", "--format", "{{json .Endpoints.docker.Host}}")
 		if err != nil {
-			return "", "", "", err
+			return "", err
 		}
 		if err := json.Unmarshal(output, &endpoint); err != nil {
-			return "", "", "", fmt.Errorf("ambiguous Docker context")
+			return "", fmt.Errorf("ambiguous Docker context")
 		}
 	}
 	if !strings.HasPrefix(endpoint, "unix:///") {
-		return "", "", "", fmt.Errorf("destroy requires a local Unix Docker socket; remote Docker contexts are refused")
+		return "", fmt.Errorf("operation requires a local Unix Docker socket; remote Docker contexts are refused")
+	}
+	return endpoint, nil
+}
+
+func destroyHostIdentity(ctx context.Context, deployment *Deployment) (string, string, string, error) {
+	endpoint, err := localDockerEndpoint(ctx)
+	if err != nil {
+		return "", "", "", err
 	}
 	hostname, err := os.Hostname()
 	if err != nil {
