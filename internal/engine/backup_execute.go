@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -102,15 +103,12 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 	runningNames := sortedSet(running)
 	resumePending := false
 	if len(runningNames) > 0 {
-		if err := runCompose(ctx, composePath, environment.ProjectName, "stop", runningNames...); err != nil {
-			return BackupReport{}, fmt.Errorf("quiesce mutable services: %w", err)
-		}
 		resumePending = true
 		defer func() {
 			if !resumePending {
 				return
 			}
-			resumeError := runCompose(context.WithoutCancel(ctx), composePath, environment.ProjectName, "start", runningNames...)
+			resumeError := resumeBackupServices(ctx, plan, composePath, environment.ProjectName, runningNames)
 			if resumeError != nil {
 				resumeError = fmt.Errorf("resume quiesced services: %w", resumeError)
 				if returnErr == nil {
@@ -120,6 +118,9 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 				}
 			}
 		}()
+		if err := runCompose(ctx, composePath, environment.ProjectName, "stop", runningNames...); err != nil {
+			return BackupReport{}, fmt.Errorf("quiesce mutable services: %w", err)
+		}
 	}
 
 	services := make([]BackupService, 0, len(sources))
@@ -148,10 +149,10 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 	}
 
 	if resumePending {
-		if err := runCompose(context.WithoutCancel(ctx), composePath, environment.ProjectName, "start", runningNames...); err != nil {
+		resumePending = false
+		if err := resumeBackupServices(ctx, plan, composePath, environment.ProjectName, runningNames); err != nil {
 			return BackupReport{}, fmt.Errorf("resume quiesced services: %w", err)
 		}
-		resumePending = false
 	}
 	if err := os.Remove(composePath); err != nil {
 		return BackupReport{}, fmt.Errorf("remove temporary backup Compose plan: %w", err)
@@ -300,6 +301,24 @@ func sortedSet(values map[string]bool) []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+func resumeBackupServices(ctx context.Context, plan Plan, composePath, project string, names []string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Minute)
+	defer cancel()
+	if !slices.Contains(names, "qbittorrent") {
+		return runCompose(ctx, composePath, project, "start", names...)
+	}
+	independent := slices.DeleteFunc(slices.Clone(names), func(name string) bool { return name == "qbittorrent" })
+	if len(independent) != 0 {
+		if err := runCompose(ctx, composePath, project, "start", independent...); err != nil {
+			return err
+		}
+	}
+	if err := waitForHealthyGluetun(ctx, plan, 2*time.Minute); err != nil {
+		return fmt.Errorf("resume qbittorrent after Gluetun health: %w", err)
+	}
+	return runCompose(ctx, composePath, project, "start", "qbittorrent")
 }
 
 func runCompose(ctx context.Context, composePath, projectName, operation string, serviceNames ...string) error {

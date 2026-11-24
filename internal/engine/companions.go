@@ -30,7 +30,7 @@ func bootstrapSeriesCompanions(ctx context.Context, configPath string, environme
 		}
 		cleanup := companions.NewCleanuparr(companionAddress(environment.Ports.Cleanuparr), "", &http.Client{})
 		var key string
-		err := waitForCompanionBootstrap(ctx, func(ctx context.Context) error {
+		err := waitForCompanionAPI(ctx, func(ctx context.Context) error {
 			var err error
 			key, err = cleanup.Bootstrap(ctx, secrets.CleanuparrAdmin)
 			return err
@@ -45,12 +45,12 @@ func bootstrapSeriesCompanions(ctx context.Context, configPath string, environme
 		secrets.CleanuparrKey = key
 	}
 	hound := companions.NewHoundarr(companionAddress(environment.Ports.Houndarr), &http.Client{})
-	return waitForCompanionBootstrap(ctx, func(ctx context.Context) error {
+	return waitForCompanionAPI(ctx, func(ctx context.Context) error {
 		return hound.Bootstrap(ctx, secrets.Houndarr, *environment.SeriesAutomation, sonarrKey)
 	})
 }
 
-func waitForCompanionBootstrap(ctx context.Context, bootstrap func(context.Context) error) error {
+func waitForCompanionAPI(ctx context.Context, bootstrap func(context.Context) error) error {
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	for {
