@@ -24,7 +24,8 @@ usage:
   media-stack doctor --environment production|staging [--config path] [--output human|json]
   media-stack plan --environment production|staging [--config path]
   media-stack apply --environment production|staging [--config path]
-  media-stack promote --environment production [--config path] --verification path --backup path --jellyfin-refresh-evidence path [--output human|json]
+  media-stack upgrade preflight|evidence --site name --instance name --environment staging|production --hostname name --commit SHA [options]
+  media-stack promote --environment production [--config path] [--upgrade-evidence path | --verification path --backup path] [--jellyfin-refresh-evidence path] [--output human|json]
   media-stack destroy --environment production|staging [--config path] --plan path [--volumes] [--downloads] [--media] [--secrets] [--resume journal] [--output human|json]
   media-stack destroy --environment production|staging [--config path] --execute path --confirm SHA256 [--target identity] [--acknowledge-loss token] [--output human|json]
   media-stack backup --environment production|staging [--config path] [--label text] [--protect] [--now RFC3339] [--output human|json]
@@ -76,6 +77,8 @@ func run(ctx context.Context, arguments []string) error {
 		return runPlan(ctx, arguments[1:])
 	case "apply":
 		return runApply(ctx, arguments[1:])
+	case "upgrade":
+		return runUpgrade(ctx, arguments[1:])
 	case "promote":
 		return runPromote(ctx, arguments[1:])
 	case "destroy":
@@ -340,6 +343,7 @@ func runPromote(ctx context.Context, arguments []string) error {
 	environmentName := flags.String("environment", "", "Production Environment")
 	configPath := flags.String("config", "", "Explicit standalone Declared Configuration path")
 	selection := deploymentFlags(flags)
+	upgradePath := flags.String("upgrade-evidence", "", "Staging upgrade evidence manifest")
 	verificationPath := flags.String("verification", "", "verification artifact path")
 	backupPath := flags.String("backup", "", "backup manifest path")
 	refreshEvidencePath := flags.String("jellyfin-refresh-evidence", "", "Staging Jellyfin refresh evidence path")
@@ -353,8 +357,11 @@ func runPromote(ctx context.Context, arguments []string) error {
 	if *environmentName != "production" {
 		return fmt.Errorf("promotion requires the production Environment")
 	}
-	if *verificationPath == "" || *backupPath == "" {
-		return fmt.Errorf("promotion requires --verification and --backup")
+	if *upgradePath == "" && (*verificationPath == "" || *backupPath == "") {
+		return fmt.Errorf("promotion requires --upgrade-evidence or both --verification and --backup")
+	}
+	if *upgradePath != "" && (*verificationPath != "" || *backupPath != "" || *configPath != "") {
+		return fmt.Errorf("--upgrade-evidence requires Site selection and supplies the verification and backup paths")
 	}
 	if *output != "human" && *output != "json" {
 		return fmt.Errorf("output must be human or json")
@@ -366,6 +373,19 @@ func runPromote(ctx context.Context, arguments []string) error {
 	deployment, err := selection.resolve(ctx, workingDirectory, *environmentName, *configPath)
 	if err != nil {
 		return err
+	}
+	if *upgradePath != "" {
+		var attachedRefresh string
+		*verificationPath, *backupPath, attachedRefresh, err = upgradePromotionPaths(ctx, *upgradePath, workingDirectory, *selection.site, *selection.instance, deployment.HostName)
+		if err != nil {
+			return operationalFailure{cause: err}
+		}
+		if attachedRefresh != "" {
+			if *refreshEvidencePath != "" {
+				return fmt.Errorf("the upgrade manifest already supplies Jellyfin refresh evidence")
+			}
+			*refreshEvidencePath = attachedRefresh
+		}
 	}
 	request, err := engine.NewPromoteRequest(workingDirectory, *environmentName, *configPath, *verificationPath, *backupPath)
 	if err != nil {

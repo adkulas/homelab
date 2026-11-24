@@ -363,6 +363,7 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 			case "POST /api/v1/indexer":
 				var indexer map[string]any
 				_ = json.NewDecoder(request.Body).Decode(&indexer)
+				indexer["id"] = len(indexers) + 1
 				indexers = append(indexers, indexer)
 				writer.WriteHeader(http.StatusCreated)
 			case "GET /api/v1/applications":

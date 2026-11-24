@@ -110,9 +110,9 @@ merged candidate on the deployment Host, or hand off a Production rollout.
    adapter if required. Use the pinned-image acceptance check below for fresh bootstrap and public Arr synchronization,
    and use populated Staging for existing-state migration and repeat apply. Review `policy.profilarrPcdRevision` as its
    own change with its own upstream revision and evidence.
-4. Run `go test ./...` and review CI for the candidate. The workflow covers Go checks, example Compose rendering,
-   and the live qBittorrent contract. Record each result as CI or development evidence. Continue to Staging for
-   deployment Host behavior.
+4. Run `go test ./...` once on the final local candidate and redirect output to a private log. For a pull request,
+   run `gh pr checks --watch --interval 30` once and retain the result. Record check names, outcomes and log paths.
+   The workflow validates Go, example Compose rendering and the pinned qBittorrent contract.
 
 ### Resolve the Host and freeze the checkout
 
@@ -185,6 +185,18 @@ is unknown, establish it and compare its pins with the running services before p
 
 ### Rehearse in Staging
 
+From the candidate checkout, run preflight with the old pin file and both legal fixtures. The report includes the
+running image references, credential scope, backup destination and Prowlarr indexer identity. Run it before stopping
+services. Failed fixture checks block the corresponding Promotion proof.
+
+```bash
+"$media_stack" upgrade preflight "${target[@]}" --hostname "$expected_hostname" \
+  --commit "$candidate_sha" --baseline-versions "$baseline_dir/services/media/versions.yaml" \
+  --legal-fixture services/media/fixtures/legal-movie.yaml \
+  --legal-series-fixture services/media/fixtures/legal-series.yaml --output json \
+  > "$evidence_dir/staging-preflight.json"
+```
+
 1. Use a declared, disposable Staging Environment on the selected Stack Instance with existing application state
    from the old revision. Check that the deployed revision's project and service images match that state. From its
    checkout, take a protected [application-state backup](#backups-restore-and-restore-drills).
@@ -209,43 +221,27 @@ is unknown, establish it and compare its pins with the running services before p
    "$media_stack" apply "${target[@]}"
    ```
 
-3. Run applicable opt-in tests using the candidate pins and disposable state. See the
-   [Jellyfin refresh procedure](#staging-verification-before-promotion) and the
-   [series companion procedure](#verification-and-troubleshooting). For a Profilarr or Seerr image change,
-   use the corresponding test below. Record each actual test outcome, including skips.
-
-   ```bash
-   MEDIA_STACK_LIVE_PROFILARR=1 go test ./tests/acceptance \
-     -run '^TestDisposablePinnedProfilarr(Apply|Recovery)$' -count=1 -v
-   MEDIA_STACK_LIVE_SEERR=1 go test ./tests/acceptance \
-     -run '^TestDisposableSeerrAuthenticatesHouseholdAndEmergencyLocalUsers$' -count=1 -v
-   ```
-
-4. Follow the [legal request-to-playback procedure](#5-verify-staging-vpn-behavior-and-legal-request-to-playback-paths).
-   Run the Promotion suite with both legal fixtures. When series automation is enabled, prepare the
-   [controlled companion recovery fixture](#verification-and-troubleshooting) and add it to the same run.
-   This suite exercises VPN fail-closed and recovery behavior before acquisition and playback.
+3. Prepare the controlled companion recovery fixture when series automation is enabled. See the
+   [legal request-to-playback procedure](#5-verify-staging-vpn-behavior-and-legal-request-to-playback-paths)
+   and [companion recovery procedure](#verification-and-troubleshooting). Run one evidence command from the
+   candidate checkout. It checks exact release availability, pulls any missing candidate pins, runs doctor and applicable
+   pinned-image tests, then executes Promotion verification and captures the verified Staging backup. The evidence
+   directory must be new and located outside the checkout, data root and backup root.
 
    ```bash
    recovery_args=()
-   # When series automation is enabled, use:
-   # recovery_args=(--recovery-fixture "$recovery_fixture")
-   "$media_stack" verify "${target[@]}" --suite promotion \
+   # When series automation is enabled, set recovery_args=(--recovery-fixture "$recovery_fixture").
+   "$media_stack" upgrade evidence "${target[@]}" --hostname "$expected_hostname" \
+     --commit "$candidate_sha" --baseline-versions "$baseline_dir/services/media/versions.yaml" \
      --legal-fixture services/media/fixtures/legal-movie.yaml \
      --legal-series-fixture services/media/fixtures/legal-series.yaml \
-     "${recovery_args[@]}" --output json > "$evidence_dir/staging-verification.json"
+     "${recovery_args[@]}" --evidence-dir "$evidence_dir/staging"
    ```
 
-   Record the exit status and diagnostics. Require successful VPN recovery, movie and series hardlink and direct-play
-   evidence, and controlled companion recovery where enabled. Complete the
-   [Jellyfin pinned rehearsal and native Arr cases](#staging-verification-before-promotion) and save the
-   matching `staging-jellyfin-refresh.json`. Back up the proven Staging state from the candidate checkout and
-   retain that complete manifest for the preview, including both companion volumes when enabled.
-
-   ```bash
-   "$media_stack" backup "${target[@]}" --label verified-upgrade --output json \
-     > "$evidence_dir/staging-verified-backup.json"
-   ```
+4. Complete the [native Arr cases](#staging-verification-before-promotion). Save the matching
+   `staging-jellyfin-refresh.json` using the verification digests. Pass it to the Promotion preview below.
+   If it already exists when collecting evidence, pass `--jellyfin-refresh-evidence` to the collector to record
+   its path and checksum in the manifest.
 
 ### Hand off Promotion and rollback
 
@@ -260,12 +256,11 @@ Require the recorded Staging evidence to match the assigned Host, Site, Stack In
 A passing rehearsal on another Host or Stack Instance can inform compatibility review. The existing command checks
 configuration and versions digests, so also check the SHA recorded by the rehearsal before requesting the preview.
 In the candidate checkout set `environment=production`, repeat the target check, and pass the **verified Staging**
-manifest to the preview.
+manifest to the preview. Supply Jellyfin refresh evidence here if the collector did not attach it.
 
 ```bash
 "$media_stack" promote "${target[@]}" \
-  --verification "$evidence_dir/staging-verification.json" \
-  --backup "$staging_verified_manifest" \
+  --upgrade-evidence "$evidence_dir/staging/upgrade.json" \
   --jellyfin-refresh-evidence "$evidence_dir/staging-jellyfin-refresh.json"
 ```
 

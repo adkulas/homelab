@@ -1,10 +1,12 @@
 ---
 name: media-stack-upgrade
-description: Prepare immutable Media Stack image upgrades, rehearse a merged candidate on a selected Staging Host, or hand off Promotion with evidence and rollback steps.
+description: Update immutable Media Stack image pins, rehearse the merged upgrade in Staging, or prepare Promotion and rollback.
 ---
 
-Follow the phases authorized by the request. The [Media Stack upgrade runbook](../../../services/media/README.md#upgrading-image-pins) is the source for commands and evidence requirements.
+Run the phases the operator authorized. Use only the relevant section of the [upgrade runbook](../../../services/media/README.md#upgrading-image-pins).
 
-1. **Prepare the update.** Use [Prepare the pin update](../../../services/media/README.md#prepare-the-pin-update) to produce the reviewed pin changes and release summary.
-2. **Rehearse the candidate.** Use [Resolve the Host and freeze the checkout](../../../services/media/README.md#resolve-the-host-and-freeze-the-checkout), then [Rehearse in Staging](../../../services/media/README.md#rehearse-in-staging) to upgrade existing disposable Staging state and collect evidence.
-3. **Hand off the rollout.** Use [Hand off Promotion and rollback](../../../services/media/README.md#hand-off-promotion-and-rollback) to report the evidence, preview status, and rollout and recovery commands. Perform the Production deployment phase only upon an explicit deployment request.
+1. [Prepare](../../../services/media/README.md#prepare-the-pin-update). Resolve stable tags and digests, review migration notes, and run the full Go suite once on the final local candidate. Save the log and watch candidate CI with one command.
+2. [Rehearse](../../../services/media/README.md#rehearse-in-staging). Freeze the merged SHA and verify the selected Host. Run `upgrade preflight` with both legal fixtures and the baseline pins before taking the protected backup. Apply and repeat apply, then run `upgrade evidence` for the candidate. Report missing fixtures and the checks they block.
+3. [Hand off](../../../services/media/README.md#hand-off-promotion-and-rollback). Use the evidence manifest for the Promotion preview. Report the target, SHA, failed or skipped checks, and evidence and rollback paths. Production apply requires explicit authorization.
+
+Keep verbose output in files. Read failed check names and the relevant log excerpt. Report state changes and blockers when a long-running command completes.

@@ -29,9 +29,21 @@ func TestReconcileLibraryDiscoveryConvergesPinnedContractFixtures(t *testing.T) 
 			_, _ = writer.Write(indexers)
 		case "POST /api/v1/indexer":
 			body, _ := io.ReadAll(request.Body)
-			indexers = []byte("[" + string(body) + "]")
+			var created indexer
+			_ = json.Unmarshal(body, &created)
+			created.ID = 1
+			indexers, _ = json.Marshal([]indexer{created})
 			mutations = append(mutations, "internet-archive")
 			writer.WriteHeader(http.StatusCreated)
+		case "PUT /api/v1/indexer/1":
+			var updated indexer
+			if err := json.NewDecoder(request.Body).Decode(&updated); err != nil || updated.ID != 1 || !updated.Enable {
+				http.Error(writer, "invalid in-place update", http.StatusBadRequest)
+				return
+			}
+			indexers, _ = json.Marshal([]indexer{updated})
+			mutations = append(mutations, "update internet-archive")
+			writer.WriteHeader(http.StatusOK)
 		case "GET /api/v1/applications":
 			_, _ = writer.Write(applications)
 		case "POST /api/v1/applications":
@@ -112,6 +124,21 @@ func TestReconcileLibraryDiscoveryConvergesPinnedContractFixtures(t *testing.T) 
 	if changed || len(mutations) != 0 {
 		t.Fatalf("repeated reconciliation changed state: changed=%v mutations=%v", changed, mutations)
 	}
+	var existing []indexer
+	if err := json.Unmarshal(indexers, &existing); err != nil {
+		t.Fatal(err)
+	}
+	existing[0].Enable = false
+	existing[0].Tags = []int{7}
+	indexers, _ = json.Marshal(existing)
+	changed, err = client.ReconcileLibraryDiscovery(context.Background(), "fixture-radarr-api-key", "fixture-sonarr-api-key")
+	if err != nil || !changed || !reflect.DeepEqual(mutations, []string{"update internet-archive"}) {
+		t.Fatalf("reconcile disabled indexer = %v, %v, %v", changed, err, mutations)
+	}
+	if err := json.Unmarshal(indexers, &existing); err != nil || !reflect.DeepEqual(existing[0].Tags, []int{7}) {
+		t.Fatalf("existing indexer tags changed: %v, %v", existing, err)
+	}
+
 }
 
 func fieldValues(raw any) map[string]any {

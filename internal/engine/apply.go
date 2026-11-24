@@ -256,8 +256,10 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 				return ApplyReport{}, err
 			}
 		}
-		if err := reconcileSeriesCompanions(ctx, environment, secrets, sonarrAPIKey, false); err != nil {
-			return ApplyReport{}, err
+		if err := waitForCompanionAPI(ctx, func(ctx context.Context) error {
+			return reconcileSeriesCompanions(ctx, environment, secrets, sonarrAPIKey, false)
+		}); err != nil {
+			return ApplyReport{}, fmt.Errorf("reconcile series companions: %w", err)
 		}
 	}
 	if restoreDrillConfirmed {

@@ -491,6 +491,9 @@ case "$1" in
 		;;
   compose)
     case " $* " in
+      *" ps --format json gluetun "*)
+        printf '%s\n' '{"Health":"healthy","State":"running"}'
+        ;;
 	  *" down "*)
 		[ -z "${FAKE_DOCKER_COMPOSE_DOWN_MARKER:-}" ] || touch "$FAKE_DOCKER_COMPOSE_DOWN_MARKER"
 		if [ -n "${FAKE_DOCKER_FAIL_COMPOSE_DOWN_ONCE_MARKER:-}" ] && [ ! -e "$FAKE_DOCKER_FAIL_COMPOSE_DOWN_ONCE_MARKER" ]; then

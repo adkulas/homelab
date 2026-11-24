@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -81,24 +82,15 @@ func (client *Client) Ready(ctx context.Context) error {
 }
 
 func (client *Client) ReconcileLibraryDiscovery(ctx context.Context, radarrAPIKey, sonarrAPIKey string) (bool, error) {
-	var indexers []indexer
-	if err := client.getJSON(ctx, "/api/v1/indexer", &indexers); err != nil {
+	desiredIndexer, method, path, err := client.internetArchiveChange(ctx)
+	if err != nil {
 		return false, err
 	}
-	changed := false
-	desiredIndexer := declaredInternetArchive()
-	foundIndexer := false
-	for _, current := range indexers {
-		if current.DefinitionName == internetArchiveDefinition && indexerMatches(current, desiredIndexer) {
-			foundIndexer = true
-			break
-		}
-	}
-	if !foundIndexer {
-		if err := client.sendJSON(ctx, http.MethodPost, "/api/v1/indexer", desiredIndexer); err != nil {
+	changed := method != ""
+	if changed {
+		if err := client.sendJSON(ctx, method, path, desiredIndexer); err != nil {
 			return false, err
 		}
-		changed = true
 	}
 
 	var applications []application
@@ -123,6 +115,55 @@ func (client *Client) ReconcileLibraryDiscovery(ctx context.Context, radarrAPIKe
 		changed = true
 	}
 	return changed, nil
+}
+
+// InternetArchiveStatus observes the managed identity without writing to Prowlarr.
+func (client *Client) InternetArchiveStatus(ctx context.Context) (string, error) {
+	_, method, _, err := client.internetArchiveChange(ctx)
+	switch method {
+	case http.MethodPost:
+		return "create", err
+	case http.MethodPut:
+		return "update in place", err
+	default:
+		return "matches", err
+	}
+}
+
+func (client *Client) internetArchiveChange(ctx context.Context) (indexer, string, string, error) {
+	const path = "/api/v1/indexer"
+	desired := declaredInternetArchive()
+	var indexers []indexer
+	if err := client.getJSON(ctx, path, &indexers); err != nil {
+		return indexer{}, "", "", err
+	}
+	var existing indexer
+	for _, current := range indexers {
+		if strings.EqualFold(current.Name, desired.Name) && current.DefinitionName != desired.DefinitionName {
+			return indexer{}, "", "", fmt.Errorf("Prowlarr indexer %q belongs to another definition", desired.Name)
+		}
+		if current.DefinitionName != desired.DefinitionName {
+			continue
+		}
+		if existing.ID != 0 || current.ID <= 0 {
+			return indexer{}, "", "", fmt.Errorf("Prowlarr Internet Archive identity is ambiguous")
+		}
+		existing = current
+	}
+	if existing.ID == 0 {
+		return desired, http.MethodPost, path, nil
+	}
+	if indexerMatches(existing, desired) {
+		return desired, "", "", nil
+	}
+	desired.ID = existing.ID
+	desired.Tags = existing.Tags
+	for _, current := range existing.Fields {
+		if !slices.ContainsFunc(desired.Fields, func(field field) bool { return field.Name == current.Name }) {
+			desired.Fields = append(desired.Fields, current)
+		}
+	}
+	return desired, http.MethodPut, fmt.Sprintf("%s/%d", path, existing.ID), nil
 }
 
 func declaredInternetArchive() indexer {
