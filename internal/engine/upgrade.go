@@ -138,6 +138,7 @@ func InspectUpgrade(ctx context.Context, request PlanRequest, hostname, baseline
 		base := "http://" + environmentAddress(declared.Spec.Defaults.LANBindAddress, env.Ports.Prowlarr)
 		client := &http.Client{Timeout: 12 * time.Second}
 		status, err := prowlarr.New(base, key, client).InternetArchiveStatus(prowlarrCtx)
+		client.Timeout = 90 * time.Second
 		add("Prowlarr identity", status, err, false)
 		if movie != "" {
 			f, _, err := loadLegalMovieFixture(movie)
@@ -203,7 +204,10 @@ func checkUpgradeRelease(ctx context.Context, client *http.Client, base, key, ti
 		req.Header.Set("X-Api-Key", key)
 		response, err := client.Do(req)
 		if err != nil {
-			return fmt.Errorf("Internet Archive query unavailable: %w", err)
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("Internet Archive query did not return a response")
 		}
 		defer response.Body.Close()
 		if response.StatusCode != http.StatusOK {
