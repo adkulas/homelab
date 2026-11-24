@@ -161,7 +161,7 @@ func TestPromotionVerifyRequestsAndPlaysLegalSeriesEpisodeThroughSeerr(t *testin
 		case "POST /Users/AuthenticateByName":
 			_ = json.NewEncoder(writer).Encode(map[string]any{"AccessToken": "fixture-jellyfin-token", "User": map[string]any{"Id": "jellyfin-user", "Policy": map[string]any{}}})
 		case "GET /Users/jellyfin-user/Items":
-			if request.Header.Get("X-Emby-Token") != "fixture-jellyfin-token" || request.URL.Query().Get("IncludeItemTypes") != "Episode" {
+			if request.Header.Get("Authorization") != `MediaBrowser Client="media-stack", Device="media-stack", DeviceId="media-stack-cli", Version="1", Token="fixture-jellyfin-token"` || request.URL.Query().Get("IncludeItemTypes") != "Episode" {
 				http.Error(writer, "unexpected Jellyfin episode discovery", http.StatusBadRequest)
 				return
 			}

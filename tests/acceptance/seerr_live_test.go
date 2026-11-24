@@ -145,10 +145,11 @@ func jellyfinRequest(t *testing.T, baseURL, method, path string, input any, toke
 		t.Fatal(err)
 	}
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", `MediaBrowser Client="media-stack", Device="media-stack", DeviceId="media-stack-cli", Version="1"`)
+	authorization := `MediaBrowser Client="media-stack", Device="media-stack", DeviceId="media-stack-cli", Version="1"`
 	if token != "" {
-		request.Header.Set("X-Emby-Token", token)
+		authorization += `, Token="` + url.PathEscape(token) + `"`
 	}
+	request.Header.Set("Authorization", authorization)
 	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
 	if err != nil {
 		t.Fatal(err)

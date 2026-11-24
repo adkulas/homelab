@@ -250,7 +250,7 @@ func TestEpisodeIsDiscoverableAndPlaybackReadyForAuthenticatedUser(t *testing.T)
 
 func requireToken(t *testing.T, request *http.Request) {
 	t.Helper()
-	if request.Header.Get("X-Emby-Token") != "fixture-access-token" {
-		t.Errorf("token = %q", request.Header.Get("X-Emby-Token"))
+	if request.Header.Get("Authorization") != `MediaBrowser Client="media-stack", Device="media-stack", DeviceId="media-stack-cli", Version="1", Token="fixture-access-token"` {
+		t.Error("missing expected Jellyfin authorization")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -306,7 +307,7 @@ func (fixture *refreshJellyfin) requestJSON(method, path string, input, output a
 	if err != nil {
 		return err
 	}
-	request.Header.Set("X-Emby-Token", fixture.key)
+	request.Header.Set("Authorization", `MediaBrowser Client="media-stack", Device="media-stack", DeviceId="media-stack-cli", Version="1", Token="`+url.PathEscape(fixture.key)+`"`)
 	if input != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}

@@ -1059,7 +1059,7 @@ directly. Movie requests and Radarr recovery ownership are unchanged.
 
 ### Installation and automatic first run
 
-The checked-in versions pin Houndarr **v1.13.3** and Cleanuparr **v2.10.12** by
+The checked-in versions pin Houndarr **v1.13.3** and Cleanuparr **v2.11.1** by
 registry manifest SHA-256 digest. Both use their own Environment configuration
 volume, bounded logs, PUID/PGID identity and application network. They receive no
 media mount, additional Linux capability, or public proxy route. Their management
