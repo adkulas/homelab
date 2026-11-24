@@ -27,6 +27,8 @@ def episode(number, **changes):
     return result
 
 class API(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def log_message(self, *_):
         pass
 
@@ -142,9 +144,11 @@ class API(BaseHTTPRequestHandler):
             self.send({"unknown": path}, 404)
 
     def send_text(self, text):
+        data = text.encode()
         self.send_response(200)
+        self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(text.encode())
+        self.wfile.write(data)
 
     def do_POST(self):
         with lock:
@@ -164,6 +168,7 @@ class API(BaseHTTPRequestHandler):
                 self.send(entry, 201)
             elif parsed.path == "/api/v2/auth/login":
                 self.send_response(200)
+                self.send_header("Content-Length", "3")
                 self.send_header("Set-Cookie", "SID=fixture-session; Path=/")
                 self.end_headers()
                 self.wfile.write(b"Ok.")

@@ -82,6 +82,13 @@ func TestDisposableJellyfinRestoreDrillRotatesCredentialsAndServesRecoveredMedia
 		t.Fatalf("rotate Restore Drill credentials and verify recovered libraries: %v", err)
 	}
 	credentials = drillCredentials
+	// Jellyfin 12 requires a full scan after migration to rediscover library items.
+	var session struct{ AccessToken string }
+	jellyfinRequest(t, address, http.MethodPost, "/Users/AuthenticateByName", map[string]string{
+		"Username": credentials.Username, "Pw": credentials.Password,
+	}, "", &session)
+	jellyfinRequest(t, address, http.MethodPost, "/Library/Refresh", nil, session.AccessToken, nil)
+	deadline = time.Now().Add(2 * time.Minute)
 	pollJellyfin(t, deadline, "discover the legal movie with direct-play readiness", func() (bool, error) {
 		return client.MoviePlaybackReady(context.Background(), credentials, "/data/media/movies/legal-fixture.mp4")
 	})
