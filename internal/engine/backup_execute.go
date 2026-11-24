@@ -103,9 +103,6 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 	runningNames := sortedSet(running)
 	resumePending := false
 	if len(runningNames) > 0 {
-		if err := runCompose(ctx, composePath, environment.ProjectName, "stop", runningNames...); err != nil {
-			return BackupReport{}, fmt.Errorf("quiesce mutable services: %w", err)
-		}
 		resumePending = true
 		defer func() {
 			if !resumePending {
@@ -121,6 +118,9 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 				}
 			}
 		}()
+		if err := runCompose(ctx, composePath, environment.ProjectName, "stop", runningNames...); err != nil {
+			return BackupReport{}, fmt.Errorf("quiesce mutable services: %w", err)
+		}
 	}
 
 	services := make([]BackupService, 0, len(sources))
