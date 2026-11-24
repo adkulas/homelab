@@ -53,7 +53,7 @@ func TestHomeDeclaresTwoHostAssignedDNSInstances(t *testing.T) {
 	if err == nil {
 		t.Fatalf("home Site decrypted with unrelated identity: %s", output)
 	}
-	for _, expected := range []string{`"hosts":4`, `"stackInstances":3`, `"code":"SITE_NETWORK_DECRYPT_FAILED"`, `"primary":"homelab-dns"`, `"secondary":"raspberrypi-dns"`, `"id":"media-laptop-mac","value":"<redacted>"`} {
+	for _, expected := range []string{`"hosts":4`, `"stackInstances":4`, `"code":"SITE_NETWORK_DECRYPT_FAILED"`, `"primary":"homelab-dns"`, `"secondary":"raspberrypi-dns"`, `"id":"media-laptop-mac","value":"<redacted>"`} {
 		if !strings.Contains(string(output), expected) {
 			t.Fatalf("missing %s: %s", expected, output)
 		}

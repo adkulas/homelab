@@ -10,6 +10,7 @@ spec:
         - hosts/raspberrypi.yaml
     stackInstances:
         - instances/media-homelab.yaml
+        - instances/media-laptop.yaml
         - instances/homelab-dns.yaml
         - instances/raspberrypi-dns.yaml
     dnsCluster:

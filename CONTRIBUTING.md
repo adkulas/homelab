@@ -41,6 +41,10 @@ To run only the certificate checks, use
 For the optional Docker rehearsal and offline CA workflow, see
 [the network guide](services/network/docs/management-https.md).
 
+The Media Stack upgrade runbook acceptance check uses Git, Bash, and `jq`. It runs the documented target check
+against disposable Site Inventory and Git history on the development Host. Install `jq` to include this check in
+`go test ./...`.
+
 ## Notes
 
 - Use the local build for day-to-day development and debugging.
