@@ -322,13 +322,14 @@ func (client *Client) doJSON(ctx context.Context, method, path string, input any
 	if err != nil {
 		return err
 	}
-	request.Header.Set("Authorization", `MediaBrowser Client="media-stack", Device="media-stack", DeviceId="media-stack-cli", Version="1"`)
+	authorization := `MediaBrowser Client="media-stack", Device="media-stack", DeviceId="media-stack-cli", Version="1"`
 	if input != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
 	if token != "" {
-		request.Header.Set("X-Emby-Token", token)
+		authorization += `, Token="` + url.PathEscape(token) + `"`
 	}
+	request.Header.Set("Authorization", authorization)
 	response, err := client.http.Do(request)
 	if err != nil {
 		return err
