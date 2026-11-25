@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+
+mount_path=$1
+library_path=$2
+if ! expected=$(findmnt --fstab --evaluate --noheadings --output SOURCE,FSTYPE --mountpoint "$mount_path") ||
+    ! mounted=$(findmnt --uniq --noheadings --output SOURCE,FSTYPE --mountpoint "$mount_path") ||
+    [ "$expected" != "$mounted" ] ||
+    [ "$(realpath -e -- "$library_path")" != "$library_path" ] ||
+    [ "$(findmnt --noheadings --output TARGET --target "$library_path")" != "$mount_path" ]; then
+    echo 'Mount the Production media filesystem declared in fstab and verify the library path before enabling Samba.' >&2
+    exit 1
+fi
+
+if ! runuser -u smb-media -- /bin/sh -ec '
+    test -r "$1" && test -x "$1" || exit 1
+    for library in "$1/movies" "$1/series"; do
+        test -d "$library" && test ! -L "$library" || exit 1
+        unreadable=$(find "$library" \( -type d \( ! -readable -o ! -executable \) \
+            -o -type f ! -readable \) -print -quit)
+        test -z "$unreadable" || exit 1
+    done
+' check-media-access "$library_path" 2>/dev/null; then
+    echo 'Inspect the Production library ownership, modes and ACLs as smb-media before changing access.' >&2
+    exit 1
+fi

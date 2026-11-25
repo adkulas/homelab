@@ -45,3 +45,11 @@ host_traefik_source_root: '{{ playbook_dir }}/../../../../..'
 host_traefik_deploy_root: /opt/homelab
 host_traefik_wait_timeout: 60
 host_traefik_probe_url: http://127.0.0.1/
+
+host_samba_site_root: '{{ playbook_dir }}/../../..'
+host_samba_site: "{{ (lookup('ansible.builtin.file', host_samba_site_root ~ '/site.yaml') | from_yaml).spec }}"
+host_samba_instance_path: instances/media-homelab.yaml
+host_samba_instance: >-
+  {{ (lookup('ansible.builtin.file', host_samba_site_root ~ '/' ~ host_samba_instance_path) | from_yaml).spec }}
+host_samba_library: '{{ host_samba_instance.media.environments.production.dataRoot }}/media'
+host_samba_firewall_table: homelab_smb
