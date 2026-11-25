@@ -238,7 +238,7 @@ services. Failed fixture checks block the corresponding Promotion proof.
      "${recovery_args[@]}" --evidence-dir "$evidence_dir/staging"
    ```
 
-4. Complete the [native Arr cases](#staging-verification-before-promotion). Save the matching
+4. Verify the [pinned Jellyfin refresh cases](#staging-verification-before-promotion). Save the matching
    `staging-jellyfin-refresh.json` using the verification digests. Pass it to the Promotion preview below.
    If it already exists when collecting evidence, pass `--jellyfin-refresh-evidence` to the collector to record
    its path and checksum in the manifest.
@@ -512,26 +512,28 @@ other services and application reconciliation.
 
 The built-in **Scan Media Library** task has one daily trigger. It defaults to 03:00 Production and 04:00 Staging in the configured timezone. Change `spec.media.defaults.jellyfinRecoveryScanTime` on the Stack Instance and run `apply` for each Environment to change the base time. Staging's trigger is one hour later on the local clock, with midnight rollover.
 
-For missed updates, open the selected Jellyfin **Dashboard → Scheduled Tasks → Scan Media Library** and check the last run time and result. Use that task's run button for urgent recovery. If a scheduled run fails or is missed, the next daily run or a manual run can recover it. Check the selected Radarr or Sonarr **System → Logs** for errors from **Emby / Jellyfin** and Jellyfin's dashboard logs for library watcher errors. A successful connector request only acknowledges the update. Confirm recovery by checking the current item and file path in Jellyfin.
+For missed updates, open the selected Jellyfin **Dashboard → Scheduled Tasks → Scan Media Library** and check the last run time and result. Use that task's run button for urgent recovery. If a scheduled run fails or is missed, the next daily run or a manual run can recover it. Check the selected Radarr or Sonarr **System → Logs** for **Emby / Jellyfin** errors or `Unable to process notification queue for Media Stack Jellyfin Library Refresh`. Check Jellyfin's dashboard logs for library watcher errors. A successful connector request only acknowledges the update. Confirm recovery by checking the current item and file path in Jellyfin.
 
 #### Staging verification before Promotion
 
-Run the automated rehearsal on an Ubuntu Docker host with the three pinned images available locally. It uses disposable containers, loopback ports, and generated media. It checks the native connector APIs, watcher-driven path additions, bulk renames and deletions, the absence of routine full scans, scheduled outage recovery, and manual scan isolation.
+Run the rehearsal on an Ubuntu Docker Host with the three pinned images available locally. The temporary Radarr and Sonarr containers need outbound HTTPS for TMDB and SkyHook metadata. The test generates its video files locally and uses separate Docker networks, data directories, loopback ports, and Jellyfin keys for its disposable Staging and Production Environments.
 
 ```bash
 MEDIA_STACK_LIVE_JELLYFIN_REFRESH=1 go test ./tests/acceptance \
-  -run '^TestDisposablePinnedJellyfinLibraryRefresh$' -count=1 -timeout=12m -v
+  -run '^TestDisposablePinnedJellyfinLibraryRefresh$' -count=1 -timeout=35m -v
 ```
 
-Verify native Arr events with legal media fixtures in a disposable Staging Environment. These cases require Arr to recognize real movie and series metadata and accept the fixture imports and quality upgrades. The automated rehearsal uses generated files to exercise Jellyfin independently of metadata and acquisition services. Use the existing [Promotion verification](#5-verify-staging-vpn-behavior-and-legal-request-to-playback-paths) for the legal request-to-playback import path and run the following cases against the selected Staging Jellyfin only.
+The watcher cases add, replace, rename, and delete files on disk in the Movie Library and Series Library. The native connector cases disable real-time monitoring in disposable Staging, restart Jellyfin, then use Radarr and Sonarr's APIs for manual imports, a quality upgrade, renames, and file and title deletions. Sonarr imports all of season one of *The Lucy Show* in one command and renames the episode files in one command. The test measures from change completion, checks exact current and stale paths through Jellyfin, and uses the same direct-play checks as Promotion verification for current paths. The routine cases check that the **Scan Media Library** task history stays unchanged. The recovery case generates changes while Staging Jellyfin is stopped, observes an actual scheduled scan repair them after restart, runs the manual scan, and checks the isolated Production trigger and scan history for changes.
 
-1. Run `apply` for Staging. In both Arr services, use **Settings → Connect** to verify the managed connection and test it. In Jellyfin, check both libraries have real-time monitoring enabled and **Scan Media Library** shows one daily trigger at the expected Staging time. Record the pinned image versions, Environment, timezone, trigger time, and the task's most recent run. Start the event cases away from the daily scan window. In disposable Staging, temporarily disable Jellyfin's real-time monitoring on both managed libraries and restart only Staging Jellyfin. This isolates native connector delivery from watcher updates.
-2. Import a legal movie into Radarr and a multi-episode season into Sonarr. Record the time the movie and final episode imports complete in Arr history. Confirm that Jellyfin shows the exact movie and episode paths within two minutes and that the full scan's most recent run has not changed. Record the import and discovery timestamps and paths.
-3. Import higher-quality copies of that movie and an episode through Radarr and Sonarr. Record the old paths and upgrade completion times. Within two minutes, verify that Jellyfin shows the replacement paths and no stale copies. Repeat for a Radarr movie rename and a Sonarr bulk episode rename using each application's rename action. Record before and after paths, timestamps, and scan history.
-4. Delete the test movie file through Radarr and an episode file through Sonarr. Repeat with an entire movie and an entire series using each application's **delete files** option. Verify the removed media paths disappear from Jellyfin within two minutes, remaining episode paths stay present, and the full scan's most recent run has not changed. Record each deletion and the first Jellyfin observation showing the expected paths.
-5. Save the Arr event and connector log entries and the Jellyfin item paths and scan task history for each case, omitting API keys. Reapply to restore monitoring and verify both libraries show it enabled. A failed refresh or recovery case blocks Promotion until the native behavior is corrected or the design is revisited.
+Keep the verbose test output, which records the operation, completion time, elapsed time, exact paths, and Production isolation result. If you need to reproduce a failure manually, use a disposable Staging Environment and the following steps.
 
-Record both results in `staging-jellyfin-refresh.json` after running these checks and a successful `verify --suite promotion --output json`. Copy the two digest values from that Staging verification report and keep the test output, event timings, and scan observations alongside the evidence. `promote` requires both results to pass and the digests to match.
+1. Run `apply` for disposable Staging. In both Arr services, open **Settings → Connect** and test **Media Stack Jellyfin Library Refresh**. In Jellyfin, record the two libraries' real-time monitoring settings, the **Scan Media Library** task's daily trigger and last result, the time zone, and the image digests. Run event cases away from the daily scan window.
+2. With monitoring enabled, copy a playable fixture into each library, replace each file with a differently named copy, rename those copies, then delete them. After each completed operation, query the Staging Jellyfin paths or inspect each item's media info. Within two minutes, the current paths must appear and replaced, renamed, or deleted paths must disappear. Record filesystem completion and Jellyfin observation times, current and stale paths, and the unchanged full-scan task history.
+3. In disposable Staging, disable monitoring in both Jellyfin libraries and restart only Staging Jellyfin. In Radarr, use **Manual Import** to import a legal movie. In Sonarr, open **Wanted → Manual Import** and import a complete legal fixture season in one batch. Repeat with a higher-quality file for the movie and one episode. Then change the naming format under **Settings → Media Management** and use **Preview Rename** on the movie and series to rename their files. Record the completed Arr commands and event times. Within two minutes of each completion, check all expected paths, direct-play readiness, absent stale paths, and unchanged full-scan history.
+4. In the two Arr services, delete the movie file and one episode file using the title's file-management action. Reimport the movie, then delete the movie and series with **Delete Files** enabled. Record Arr completion times and confirm within two minutes that the matching paths disappear, untouched episodes remain after the individual file deletion, and the full-scan history stays unchanged. Save the relevant connector logs with API keys omitted. Reapply disposable Staging to restore real-time monitoring and verify both libraries show it enabled.
+5. In disposable Staging, set the recovery scan a few minutes ahead, stop only Staging Jellyfin, and place playable fixtures in both library roots. Start Staging Jellyfin before the scheduled time. Keep checking that the files stay absent from Jellyfin until the scheduled task begins. Capture the restart time, the successful scheduled task result, and both newly indexed paths. Run **Scan Media Library** manually and capture the next successful Staging result. Compare the Production task's trigger and last result before and after the exercise without changing Production. Reapply disposable Staging to restore its declared schedule.
+
+Hold Promotion if the refresh or recovery checks fail. Use the existing [Promotion verification](#5-verify-staging-vpn-behavior-and-legal-request-to-playback-paths) for the legal request-to-playback import path. After both the pinned rehearsal and `verify --suite promotion --output json` pass, save the following evidence with the two digests from the Staging verification report. Keep the rehearsal log with it. `promote` requires both results to pass and both digests to match.
 
 ```json
 {
@@ -1217,7 +1219,7 @@ The isolated real-image acceptance test is:
 
 ```bash
 MEDIA_STACK_LIVE_COMPANIONS=1 go test ./tests/acceptance \
-  -run '^TestDisposablePinnedSeriesCompanions$' -count=1 -timeout=25m -v
+  -run '^TestDisposablePinnedSeriesCompanions$' -count=1 -timeout=35m -v
 ```
 
 It creates disposable networks and volumes, uses pinned companion images with

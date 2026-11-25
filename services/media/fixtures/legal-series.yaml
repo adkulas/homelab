@@ -3,7 +3,7 @@ kind: LegalSeriesFixture
 spec:
   title: The Lucy Show
   tmdbId: 2144
-  tvdbId: 103354
+  tvdbId: 70695
   seasonNumber: 1
   episodeNumber: 1
   episodeNumbers: [1, 2]

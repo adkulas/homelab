@@ -19,8 +19,6 @@ import (
 
 	"github.com/adkulas/homelab/internal/config"
 	"github.com/adkulas/homelab/internal/jellyfin"
-	"github.com/adkulas/homelab/internal/radarr"
-	"github.com/adkulas/homelab/internal/sonarr"
 )
 
 func TestDisposablePinnedJellyfinLibraryRefresh(t *testing.T) {
@@ -32,37 +30,19 @@ func TestDisposablePinnedJellyfinLibraryRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	project := fmt.Sprintf("media-stack-refresh-test-%d-%d", os.Getpid(), time.Now().UnixNano())
-	refreshDocker(t, "network", "create", project)
-	t.Cleanup(func() { _ = exec.Command("docker", "network", "rm", project).Run() })
+	for _, network := range []string{project, project + "-production"} {
+		refreshDocker(t, "network", "create", network)
+		t.Cleanup(func() { _ = exec.Command("docker", "network", "rm", network).Run() })
+	}
 	ctx := context.Background()
 	staging := startRefreshJellyfin(t, versions.Images["jellyfin"], project, "staging", "jellyfin")
-	production := startRefreshJellyfin(t, versions.Images["jellyfin"], project, "production", "production-jellyfin")
+	production := startRefreshJellyfin(t, versions.Images["jellyfin"], project+"-production", "production", "jellyfin")
 	if staging.key == production.key {
 		t.Fatal("disposable Environments share a Jellyfin refresh credential")
 	}
 	staging.configureScan(t, (localClockMinutes(time.Now().UTC())+240)%1440)
 	production.configureScan(t, (localClockMinutes(time.Now().UTC())+180)%1440)
 	productionBaseline := production.scan(t)
-
-	for _, service := range []struct {
-		name    string
-		port    string
-		connect func(string, string) error
-	}{
-		{"radarr", "7878", func(address, key string) error {
-			return radarr.New(address, key, staging.http).ReconcileJellyfinConnection(ctx, staging.key)
-		}},
-		{"sonarr", "8989", func(address, key string) error {
-			return sonarr.New(address, key, staging.http).ReconcileJellyfinConnection(ctx, staging.key)
-		}},
-	} {
-		address, key := startRefreshArr(t, versions.Images[service.name], project, service.name, service.port)
-		for range 2 {
-			if err := service.connect(address, key); err != nil {
-				t.Fatalf("reconcile pinned %s connector: %v", service.name, err)
-			}
-		}
-	}
 
 	fixture := filepath.Join(t.TempDir(), "fixture.mp4")
 	refreshDocker(t, "run", "--rm", "--pull", "never", "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
@@ -74,14 +54,16 @@ func TestDisposablePinnedJellyfinLibraryRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, library := range []struct {
-		name             string
-		initial, renamed []string
+		name                       string
+		initial, upgraded, renamed []string
 	}{
 		{"Movie Library",
 			[]string{"movies/Refresh Test Movie (2024)/Refresh Test Movie (2024).mp4"},
+			[]string{"movies/Refresh Test Movie (2024)/Refresh Test Movie (2024) [720p].mp4"},
 			[]string{"movies/Refresh Test Movie (2024)/Refresh Test Movie (2024) [1080p].mp4"}},
 		{"Series Library",
 			[]string{"series/Refresh Test Show/Season 01/Refresh Test Show - S01E01.mp4", "series/Refresh Test Show/Season 01/Refresh Test Show - S01E02.mp4"},
+			[]string{"series/Refresh Test Show/Season 01/Refresh Test Show - S01E01 - 720p.mp4", "series/Refresh Test Show/Season 01/Refresh Test Show - S01E02 - 720p.mp4"},
 			[]string{"series/Refresh Test Show/Season 01/Refresh Test Show - S01E01 - Updated.mp4", "series/Refresh Test Show/Season 01/Refresh Test Show - S01E02 - Updated.mp4"}},
 	} {
 		t.Run(library.name, func(t *testing.T) {
@@ -91,11 +73,18 @@ func TestDisposablePinnedJellyfinLibraryRefresh(t *testing.T) {
 			}
 			staging.waitPaths(t, "discover additions", library.initial, nil, &baseline)
 			for i, old := range library.initial {
+				staging.publish(t, library.upgraded[i], contents)
+				if err := os.Remove(staging.file(old)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			staging.waitPaths(t, "discover replacements and clear stale paths", library.upgraded, library.initial, &baseline)
+			for i, old := range library.upgraded {
 				if err := os.Rename(staging.file(old), staging.file(library.renamed[i])); err != nil {
 					t.Fatal(err)
 				}
 			}
-			staging.waitPaths(t, "reflect renames and clear stale paths", library.renamed, library.initial, &baseline)
+			staging.waitPaths(t, "reflect renames and clear stale paths", library.renamed, library.upgraded, &baseline)
 			for _, file := range library.renamed {
 				if err := os.Remove(staging.file(file)); err != nil {
 					t.Fatal(err)
@@ -117,35 +106,69 @@ func TestDisposablePinnedJellyfinLibraryRefresh(t *testing.T) {
 		pollJellyfin(t, time.Now().Add(time.Minute), "restart after missing filesystem changes", func() (bool, error) {
 			return true, staging.client.Ready(ctx)
 		})
-		paths, err := staging.paths()
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, path := range missed {
-			if slices.Contains(paths, path) {
-				t.Fatalf("missed change %s was already visible before the recovery scan", path)
-			}
-		}
 		recoveryTime := time.Now().UTC().Add(5 * time.Second).Truncate(time.Minute).Add(time.Minute)
 		staging.configureScan(t, localClockMinutes(recoveryTime))
-		staging.waitPaths(t, "recover missed changes through the scheduled scan", missed, nil, nil)
+		t.Logf("waiting for the Staging recovery trigger at %s", recoveryTime)
 		var recovered refreshScan
-		pollJellyfin(t, time.Now().Add(time.Minute), "record a successful scheduled scan", func() (bool, error) {
+		pollJellyfin(t, recoveryTime.Add(2*time.Minute), "record a successful scheduled scan after missing the changes", func() (bool, error) {
 			recovered = staging.scan(t)
-			return recovered.Result.End.After(baseline.Result.End) && recovered.Result.Status == "Completed", nil
+			if recovered.Result.End.After(baseline.Result.End) {
+				if recovered.Result.Start.Before(recoveryTime) || recovered.Result.Status != "Completed" {
+					t.Fatalf("unexpected Staging recovery scan result: %+v", recovered.Result)
+				}
+				return true, nil
+			}
+			if recovered.State == "Idle" {
+				paths, err := staging.paths()
+				if err != nil {
+					return false, err
+				}
+				for _, path := range missed {
+					if slices.Contains(paths, path) {
+						// The scheduler can start between reading the task and reading the paths.
+						task := staging.scan(t)
+						if task.State == "Idle" && task.Result == baseline.Result {
+							t.Fatalf("missed change %s was visible before the recovery scan", path)
+						}
+					}
+				}
+			}
+			return false, nil
 		})
+		staging.waitPathsSince(t, "recover missed changes through the scheduled scan", recovered.Result.End, missed, nil, nil)
+		t.Logf("scheduled Staging scan finished at %s with result %s", recovered.Result.End, recovered.Result.Status)
 		staging.configureScan(t, (localClockMinutes(time.Now().UTC())+240)%1440)
 		if err := staging.request(http.MethodPost, "/ScheduledTasks/Running/"+recovered.ID, nil); err != nil {
 			t.Fatal(err)
 		}
 		pollJellyfin(t, time.Now().Add(2*time.Minute), "finish a manual Staging scan", func() (bool, error) {
 			current := staging.scan(t)
-			return current.Result.End.After(recovered.Result.End) && current.Result.Status == "Completed", nil
+			if current.Result.End.After(recovered.Result.End) && current.Result.Status == "Completed" {
+				t.Logf("manual Staging scan finished at %s with result %s", current.Result.End, current.Result.Status)
+				return true, nil
+			}
+			return false, nil
 		})
-		if after := production.scan(t); after.Result != productionBaseline.Result || !bytes.Equal(after.Triggers, productionBaseline.Triggers) {
-			t.Fatal("the isolated Production recovery schedule or scan history changed during Staging verification")
-		}
 	})
+	t.Run("native connectors", func(t *testing.T) {
+		staging.setLibraryOptions(t, false)
+		refreshDocker(t, "restart", staging.container)
+		staging.refreshAddress(t)
+		pollJellyfin(t, time.Now().Add(time.Minute), "restart with filesystem monitoring disabled", func() (bool, error) {
+			return true, staging.client.Ready(ctx)
+		})
+		staging.assertMonitoring(t, false)
+		t.Run("Radarr", func(t *testing.T) {
+			exerciseNativeArrRefresh(t, staging, versions.Images["radarr"], project, "radarr", "7878", contents)
+		})
+		t.Run("Sonarr", func(t *testing.T) {
+			exerciseNativeArrRefresh(t, staging, versions.Images["sonarr"], project, "sonarr", "8989", contents)
+		})
+	})
+	if after := production.scan(t); after.Result != productionBaseline.Result || !bytes.Equal(after.Triggers, productionBaseline.Triggers) {
+		t.Fatal("the isolated Production recovery schedule or scan history changed during Staging verification")
+	}
+	t.Log("the isolated Production recovery schedule and scan history remained stable")
 }
 
 func localClockMinutes(value time.Time) int { return value.Hour()*60 + value.Minute() }
@@ -163,11 +186,11 @@ func startRefreshJellyfin(t *testing.T, image, project, environment, alias strin
 	root := t.TempDir()
 	fixture := &refreshJellyfin{
 		container:   project + "-" + environment,
-		media:       filepath.Join(root, "media"),
+		media:       filepath.Join(root, "data", "media"),
 		credentials: jellyfin.Credentials{Username: "refresh-test-admin", Password: "disposable-refresh-test-password"},
 		http:        &http.Client{Timeout: 10 * time.Second},
 	}
-	for _, dir := range []string{"config", "cache", "media/movies", "media/series"} {
+	for _, dir := range []string{"config", "cache", "data/media/movies", "data/media/series"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o750); err != nil {
 			t.Fatal(err)
 		}
@@ -218,12 +241,13 @@ func startRefreshJellyfin(t *testing.T, image, project, environment, alias strin
 	pollJellyfin(t, time.Now().Add(time.Minute), "finish its initial library setup", func() (bool, error) {
 		return fixture.scan(t).State == "Idle", nil
 	})
-	fixture.disableRemoteMetadata(t)
+	fixture.setLibraryOptions(t, true)
 	refreshDocker(t, "restart", fixture.container)
 	fixture.refreshAddress(t)
 	pollJellyfin(t, time.Now().Add(time.Minute), "reload its watchers", func() (bool, error) {
 		return true, fixture.client.Ready(ctx)
 	})
+	fixture.assertMonitoring(t, true)
 	return fixture
 }
 
@@ -233,10 +257,12 @@ func (fixture *refreshJellyfin) refreshAddress(t *testing.T) {
 	fixture.client = jellyfin.New(fixture.address, fixture.http)
 }
 
-func startRefreshArr(t *testing.T, image, project, service, port string) (string, string) {
+func startRefreshArr(t *testing.T, image, project, service, port, data string, ready func(context.Context, string, string) error) (string, string) {
 	t.Helper()
 	container := project + "-" + service
-	refreshDocker(t, "run", "--detach", "--pull", "never", "--name", container, "--network", project, "--publish", "127.0.0.1::"+port, image)
+	refreshDocker(t, "run", "--detach", "--pull", "never", "--name", container, "--network", project, "--publish", "127.0.0.1::"+port,
+		"--env", fmt.Sprintf("PUID=%d", os.Getuid()), "--env", fmt.Sprintf("PGID=%d", os.Getgid()),
+		"--volume", data+":/data", image)
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-fv", container).Run() })
 	address := publishedAddress(t, container, port+"/tcp")
 	var settings struct{ ApiKey string }
@@ -251,10 +277,9 @@ func startRefreshArr(t *testing.T, image, project, service, port string) (string
 		if settings.ApiKey == "" {
 			return fmt.Errorf("missing generated API key")
 		}
-		if service == "radarr" {
-			return radarr.New(address, settings.ApiKey, &http.Client{Timeout: time.Second}).Ready(context.Background())
-		}
-		return sonarr.New(address, settings.ApiKey, &http.Client{Timeout: time.Second}).Ready(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		return ready(ctx, address, settings.ApiKey)
 	})
 	return address, settings.ApiKey
 }
@@ -270,6 +295,7 @@ type refreshScan struct {
 	ID, Key, State string
 	Triggers       json.RawMessage
 	Result         struct {
+		Start  time.Time `json:"StartTimeUtc"`
 		End    time.Time `json:"EndTimeUtc"`
 		Status string
 	} `json:"LastExecutionResult"`
@@ -326,7 +352,7 @@ func (fixture *refreshJellyfin) requestJSON(method, path string, input, output a
 	return nil
 }
 
-func (fixture *refreshJellyfin) disableRemoteMetadata(t *testing.T) {
+func (fixture *refreshJellyfin) setLibraryOptions(t *testing.T, monitoring bool) {
 	t.Helper()
 	var libraries []struct {
 		ItemID         string         `json:"ItemId"`
@@ -343,9 +369,32 @@ func (fixture *refreshJellyfin) disableRemoteMetadata(t *testing.T) {
 		// The generated files have no provider IDs. Keep public metadata and
 		// image services off the timing path of these local indexing checks.
 		library.LibraryOptions["TypeOptions"] = types
+		library.LibraryOptions["EnableRealtimeMonitor"] = monitoring
 		body := map[string]any{"Id": library.ItemID, "LibraryOptions": library.LibraryOptions}
 		if err := fixture.requestJSON(http.MethodPost, "/Library/VirtualFolders/LibraryOptions", body, nil); err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+func (fixture *refreshJellyfin) assertMonitoring(t *testing.T, enabled bool) {
+	t.Helper()
+	var libraries []struct {
+		Name           string
+		LibraryOptions struct {
+			EnableRealtimeMonitor *bool
+		}
+	}
+	if err := fixture.request(http.MethodGet, "/Library/VirtualFolders", &libraries); err != nil {
+		t.Fatal(err)
+	}
+	if len(libraries) != 2 {
+		t.Fatalf("expected two disposable Jellyfin libraries, got %d", len(libraries))
+	}
+	for _, library := range libraries {
+		actual := library.LibraryOptions.EnableRealtimeMonitor
+		if actual == nil || *actual != enabled {
+			t.Fatalf("%s real-time monitoring should be %t", library.Name, enabled)
 		}
 	}
 }
@@ -387,13 +436,24 @@ func (fixture *refreshJellyfin) publish(t *testing.T, name string, contents []by
 
 func (fixture *refreshJellyfin) waitPaths(t *testing.T, operation string, present, absent []string, baseline *refreshScan) {
 	t.Helper()
-	pollJellyfin(t, time.Now().Add(2*time.Minute), operation, func() (bool, error) {
+	fixture.waitPathsSince(t, operation, time.Now(), present, absent, baseline)
+}
+
+func (fixture *refreshJellyfin) waitPathsSince(t *testing.T, operation string, completed time.Time, present, absent []string, baseline *refreshScan) {
+	t.Helper()
+	deadline := completed.Add(2 * time.Minute)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	assertNoFullScan := func() {
 		if baseline != nil {
 			current := fixture.scan(t)
 			if current.State != "Idle" || current.Result != baseline.Result {
 				t.Fatalf("a full-library scan ran during %s", operation)
 			}
 		}
+	}
+	pollJellyfin(t, deadline, operation, func() (bool, error) {
+		assertNoFullScan()
 		paths, err := fixture.paths()
 		if err != nil {
 			return false, err
@@ -408,6 +468,24 @@ func (fixture *refreshJellyfin) waitPaths(t *testing.T, operation string, presen
 				return false, fmt.Errorf("stale path %q remains indexed", file)
 			}
 		}
+		for _, file := range present {
+			playback := fixture.client.MoviePlaybackReady
+			if strings.HasPrefix(file, "series/") {
+				playback = fixture.client.EpisodePlaybackReady
+			}
+			ready, err := playback(ctx, fixture.credentials, "/data/media/"+file)
+			if err != nil {
+				return false, err
+			}
+			if !ready {
+				return false, fmt.Errorf("%q is not ready for direct play", file)
+			}
+		}
+		assertNoFullScan()
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		t.Logf("%s completed at %s and converged after %s; current paths %v; stale paths absent %v", operation, completed.UTC().Format(time.RFC3339Nano), time.Since(completed).Round(time.Millisecond), present, absent)
 		return true, nil
 	})
 }
