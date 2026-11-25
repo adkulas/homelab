@@ -28,7 +28,7 @@ Docker is installed, check mode can inspect the Docker tasks too. A preview
 is not a substitute for the first real run and a second convergence run.
 
 The tags `storage`, `base`, `repo`, `power`, `docker`, `ssh`, `secrets`, `duckdns`,
-`backups`, `traefik`, and `security`
+`backups`, `traefik`, `samba`, and `security`
 select areas. The OS and package
 inspection preflight always runs. For example:
 
@@ -174,10 +174,10 @@ Use the existing Media Stack CLI to own application reconciliation rather than
 duplicating it in Ansible. Start with Staging, including hardware transcoding
 verification, before Promotion to Production.
 
-Firewall configuration needs confirmed management and trusted LAN ranges and
-must account for Docker's published-port rules. This playbook does not install
-or enable a firewall. It deploys the Site Traefik container and publishes TCP 80
-and UDP 19134; Media application deployment remains with the Media Stack CLI.
+The optional [Samba share](samba.md) manages a dedicated Host firewall table for
+TCP 445 using the approved home LAN range. Docker's published ports need their
+own firewall policy. This playbook deploys the Site Traefik container and publishes
+TCP 80 and UDP 19134. Media application deployment uses the Media Stack CLI.
 Disk health alert delivery also needs an agreed destination.
 
 Host addressing, DNS, DHCP, and router changes follow the separate exact-plan

@@ -305,6 +305,10 @@
       ansible.builtin.import_tasks: traefik.yml
       tags: [traefik]
 
+    - name: Configure the Samba share
+      ansible.builtin.import_tasks: samba.yml
+      tags: [samba]
+
     - name: Configure SSH key authentication
       tags: [ssh]
       block:

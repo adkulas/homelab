@@ -1,0 +1,172 @@
+---
+- name: Report deferred Samba enablement in check mode
+  ansible.builtin.debug:
+    msg: A normal run verifies the mounted library and applies the validated Samba configuration.
+  when: host_samba_enabled | bool and ansible_check_mode
+
+- name: Enable and configure the Production media share
+  when: host_samba_enabled | bool and not ansible_check_mode
+  block:
+    - name: Require the declared Media Stack Instance on this Host
+      ansible.builtin.assert:
+        that:
+          - host_samba_instance_path in host_samba_site.stackInstances
+          - host_samba_instance.host == inventory_hostname
+          - host_samba_instance.stack == 'media'
+        fail_msg: The Production library must belong to a Site Stack Instance assigned to this Host.
+
+    - name: Read the encrypted Site addresses on the controller
+      ansible.builtin.command:
+        argv:
+          - sops
+          - decrypt
+          - --output-type
+          - json
+          - '{{ host_samba_site_root }}/{{ host_samba_site.sensitiveValues.document }}'
+      delegate_to: localhost
+      become: false
+      register: host_samba_site_addresses
+      changed_when: false
+      no_log: true
+
+    - name: Select the approved home LAN source range
+      ansible.builtin.set_fact:
+        host_samba_lan: >-
+          {{ ((host_samba_site_addresses.stdout | from_json).spec['values']
+              | items2dict(key_name='id', value_name='value'))[host_samba_site.network.subnet] }}
+      no_log: true
+
+    - name: Require a specific IPv4 LAN prefix
+      ansible.builtin.assert:
+        that: host_samba_lan is match('(?:[0-9]{1,3}\.){3}[0-9]{1,3}/(?:[1-9]|[12][0-9]|3[0-2])\Z')
+        fail_msg: The encrypted Site LAN subnet must be an IPv4 CIDR with a nonzero prefix length.
+        quiet: true
+      no_log: true
+
+    - name: Create the group for individual SMB logins
+      ansible.builtin.group:
+        name: smb-media-readers
+        system: true
+
+    - name: Create the unprivileged Samba filesystem identity
+      ansible.builtin.user:
+        name: smb-media
+        groups: ['{{ host_admin_user }}']
+        append: false
+        system: true
+        create_home: false
+        home: /nonexistent
+        shell: /usr/sbin/nologin
+        password_lock: true
+
+    - name: Install the Production library preflight
+      ansible.builtin.copy:
+        src: check-samba-library
+        dest: /usr/local/sbin/check-samba-library
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Verify the mounted Production library and its read access
+      ansible.builtin.command:
+        argv:
+          - /usr/local/sbin/check-samba-library
+          - '{{ host_storage_mount }}'
+          - '{{ host_samba_library }}'
+      changed_when: false
+
+    - name: Create the Samba systemd override directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/smbd.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Tie Samba startup and shutdown to its firewall and storage
+      ansible.builtin.template:
+        src: samba.service.conf.j2
+        dest: /etc/systemd/system/smbd.service.d/homelab-media.conf
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Install Samba and nftables without starting package services
+      ansible.builtin.apt:
+        name: [samba, nftables]
+        state: present
+        install_recommends: false
+        policy_rc_d: 101
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Stop and disable NetBIOS discovery
+      ansible.builtin.systemd_service:
+        name: nmbd.service
+        state: stopped
+        enabled: false
+
+    - name: Validate and install the single read-only media share
+      ansible.builtin.template:
+        src: smb.conf.j2
+        dest: /etc/samba/smb.conf
+        owner: root
+        group: root
+        mode: '0600'
+        validate: /usr/bin/testparm -s %s
+      diff: false
+      no_log: true
+
+    - name: Validate and install the Samba-only firewall rules
+      ansible.builtin.template:
+        src: samba-firewall.nft.j2
+        dest: /etc/samba/homelab-media.nft
+        owner: root
+        group: root
+        mode: '0600'
+        validate: /usr/sbin/nft --check --file %s
+      diff: false
+      no_log: true
+
+    - name: Check the running Samba configuration and firewall against the startup record
+      ansible.builtin.shell: |
+        set -o pipefail
+        /usr/sbin/nft --stateless --numeric list table inet {{ host_samba_firewall_table | quote }} 2>/dev/null |
+          /usr/bin/sha256sum --check --status /run/homelab-samba.sha256 2>/dev/null
+      args:
+        executable: /bin/bash
+      register: host_samba_applied
+      changed_when: false
+      failed_when: false
+
+    - name: Start Samba and apply pending configuration
+      ansible.builtin.systemd_service:
+        name: smbd.service
+        enabled: true
+        daemon_reload: '{{ host_samba_applied.rc != 0 }}'
+        state: "{{ 'started' if host_samba_applied.rc == 0 else 'restarted' }}"
+
+- name: Disable installed Samba services and retain accounts
+  ansible.builtin.systemd_service:
+    name: '{{ item }}'
+    state: stopped
+    enabled: false
+  loop: [smbd.service, nmbd.service]
+  when: not (host_samba_enabled | bool) and 'samba' in ansible_facts.packages
+
+- name: Inspect firewall tables when Samba is disabled
+  ansible.builtin.command:
+    argv: [/usr/sbin/nft, list, tables]
+  register: host_samba_firewall_tables
+  changed_when: false
+  check_mode: false
+  when: not (host_samba_enabled | bool) and 'nftables' in ansible_facts.packages
+
+- name: Remove any remaining Samba firewall rules
+  ansible.builtin.command:
+    argv: [/usr/sbin/nft, destroy, table, inet, '{{ host_samba_firewall_table }}']
+  changed_when: true
+  when:
+    - not (host_samba_enabled | bool)
+    - not ansible_check_mode
+    - "('table inet ' ~ host_samba_firewall_table) in (host_samba_firewall_tables.stdout_lines | default([]))"

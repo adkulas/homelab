@@ -1,0 +1,20 @@
+# Managed by the homelab Host playbook.
+[global]
+    server role = standalone server
+    smb ports = 445
+    disable netbios = yes
+    multicast dns register = no
+    hosts allow = {{ host_samba_lan }}
+    hosts deny = ALL
+    map to guest = Never
+    load printers = no
+    disable spoolss = yes
+    printcap name = /dev/null
+
+[media]
+    path = {{ host_samba_library }}
+    guest ok = no
+    valid users = +smb-media-readers
+    force user = smb-media
+    read only = yes
+    follow symlinks = no

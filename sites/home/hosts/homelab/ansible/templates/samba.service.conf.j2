@@ -1,0 +1,13 @@
+# Managed by the homelab Host playbook.
+[Unit]
+RequiresMountsFor={{ host_storage_mount }}
+ConditionPathExists=/etc/samba/homelab-media.nft
+
+[Service]
+ReadOnlyPaths={{ host_storage_mount }}
+ExecStartPre=/usr/local/sbin/check-samba-library {{ host_storage_mount | quote }} {{ host_samba_library | quote }}
+ExecStartPre=/usr/sbin/nft --file /etc/samba/homelab-media.nft
+# Record the configuration files and live rules, excluding changing packet counters.
+ExecStartPost=/bin/bash -o pipefail -ec '{ /usr/bin/sha256sum /etc/samba/smb.conf /etc/samba/homelab-media.nft /etc/systemd/system/smbd.service.d/homelab-media.conf /usr/local/sbin/check-samba-library && /usr/sbin/nft --stateless --numeric list table inet {{ host_samba_firewall_table }} | /usr/bin/sha256sum; } > /run/homelab-samba.sha256'
+ExecStopPost=/usr/sbin/nft destroy table inet {{ host_samba_firewall_table }}
+ExecStopPost=/usr/bin/rm -f /run/homelab-samba.sha256
