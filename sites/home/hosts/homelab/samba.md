@@ -8,7 +8,8 @@ address if the client lacks home DNS. Connections use direct SMB on TCP 445.
 ## Enable or disable
 
 Set `host_samba_enabled` to `true` in [Host inventory](ansible/inventory.yml).
-Use a controller with SOPS and the age identity for the encrypted Site Inventory.
+Use a controller with SOPS and the age identity for the Site Inventory and Samba
+credential.
 Samba uses the same approved IPv4 LAN prefix as primary DNS and management.
 From `sites/home/hosts/homelab/ansible`, install the pinned collections and run:
 
@@ -44,8 +45,14 @@ The accounts remain registered and work again after re-enabling the share.
 
 ## Manage individual logins
 
-Run these commands on `homelab` after enabling Samba. Choose one new, dedicated
-Unix username per person and set their SMB password at the interactive prompt.
+The encrypted [Samba credential](secrets/samba.sops.yaml) declares the `smb-adam`
+login. Each enabled playbook run creates the dedicated Unix and Samba accounts
+if needed and applies the declared SMB password. To rotate the password, edit
+the file with `sops edit`, rerun the `samba` tag, and update saved credentials on
+the client. The same playbook recreates the declared account after a Host rebuild.
+
+Create additional readers on `homelab` after enabling Samba. Choose one new,
+dedicated Unix username per person and set their password at the interactive prompt.
 
 ```bash
 reader=smb-alex
@@ -53,7 +60,7 @@ sudo useradd --no-create-home --shell /usr/sbin/nologin --gid smb-media-readers 
 sudo smbpasswd -a "$reader"
 ```
 
-To revoke a reader, first remove their Samba password entry with
+To revoke an additional reader, first remove their Samba password entry with
 `sudo smbpasswd -x "$reader"`. Use `sudo smbstatus --processes` to find remaining
 client processes for that username, and run `sudo smbcontrol PID shutdown` for
 each matching PID. If a client connection is shared by multiple logins,
@@ -61,11 +68,9 @@ disconnecting it also interrupts the other logins on that connection. Then delet
 the dedicated Unix account with `sudo userdel "$reader"` and verify the revoked
 credentials fail in a fresh connection.
 
-Keep the approved username roster in the operator's private records. After a Host
-rebuild, enable Samba to recreate its service identity and reader group. Recreate
-each still-approved login with the add commands above, issue a fresh password,
-and update saved credentials on that person's clients. Passwords are entered on
-the Host and kept out of inventory and Git.
+Keep the roster of additional readers in the operator's private records. After
+a Host rebuild, recreate each still-approved additional login with the commands
+above and issue a fresh password. Store additional passwords privately.
 
 ## Verify playback and hardlinks
 

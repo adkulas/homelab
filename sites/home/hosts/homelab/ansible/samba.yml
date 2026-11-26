@@ -43,6 +43,20 @@
         quiet: true
       no_log: true
 
+    - name: Read the encrypted Samba login on the controller
+      ansible.builtin.command:
+        argv:
+          - sops
+          - decrypt
+          - --output-type
+          - json
+          - '{{ playbook_dir }}/../secrets/samba.sops.yaml'
+      delegate_to: localhost
+      become: false
+      register: host_samba_credentials
+      changed_when: false
+      no_log: true
+
     - name: Create the group for individual SMB logins
       ansible.builtin.group:
         name: smb-media-readers
@@ -91,9 +105,9 @@
         group: root
         mode: '0644'
 
-    - name: Install Samba and nftables without starting package services
+    - name: Install Samba, nftables and OpenSSL without starting package services
       ansible.builtin.apt:
-        name: [samba, nftables]
+        name: [samba, nftables, openssl]
         state: present
         install_recommends: false
         policy_rc_d: 101
@@ -115,6 +129,19 @@
         mode: '0600'
         validate: /usr/bin/testparm -s %s
       diff: false
+      no_log: true
+
+    - name: Reconcile the declared Samba reader login
+      vars:
+        ansible_pipelining: true
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/files/reconcile-samba-reader.py') }}"
+        stdin: '{{ host_samba_credentials.stdout }}'
+      register: host_samba_reader
+      changed_when: host_samba_reader.stdout == 'changed'
       no_log: true
 
     - name: Validate and install the Samba-only firewall rules
