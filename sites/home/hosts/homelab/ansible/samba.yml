@@ -43,21 +43,36 @@
         quiet: true
       no_log: true
 
+    - name: Read the encrypted Samba login on the controller
+      ansible.builtin.command:
+        argv:
+          - sops
+          - decrypt
+          - --output-type
+          - json
+          - '{{ playbook_dir }}/../secrets/samba.sops.yaml'
+      delegate_to: localhost
+      become: false
+      register: host_samba_credentials
+      changed_when: false
+      no_log: true
+
     - name: Create the group for individual SMB logins
       ansible.builtin.group:
         name: smb-media-readers
         system: true
 
-    - name: Create the unprivileged Samba filesystem identity
-      ansible.builtin.user:
-        name: smb-media
-        groups: ['{{ host_admin_user }}']
-        append: false
-        system: true
-        create_home: false
-        home: /nonexistent
-        shell: /usr/sbin/nologin
-        password_lock: true
+    - name: Find the Host account used for SMB file operations
+      ansible.builtin.getent:
+        database: passwd
+        key: '{{ host_admin_user }}'
+
+    - name: Verify the SMB filesystem identity matches the Media Stack runtime
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.getent_passwd[host_admin_user][1] | int == host_samba_instance.media.defaults.runtimeUID | int
+          - ansible_facts.getent_passwd[host_admin_user][2] | int == host_samba_instance.media.defaults.runtimeGID | int
+        fail_msg: The Samba filesystem account must match the declared Media Stack UID and GID.
 
     - name: Install the Production library preflight
       ansible.builtin.copy:
@@ -67,12 +82,13 @@
         group: root
         mode: '0755'
 
-    - name: Verify the mounted Production library and its read access
+    - name: Verify the mounted Production library and its read and write access
       ansible.builtin.command:
         argv:
           - /usr/local/sbin/check-samba-library
           - '{{ host_storage_mount }}'
           - '{{ host_samba_library }}'
+          - '{{ host_admin_user }}'
       changed_when: false
 
     - name: Create the Samba systemd override directory
@@ -91,9 +107,9 @@
         group: root
         mode: '0644'
 
-    - name: Install Samba and nftables without starting package services
+    - name: Install Samba, nftables and OpenSSL without starting package services
       ansible.builtin.apt:
-        name: [samba, nftables]
+        name: [samba, nftables, openssl]
         state: present
         install_recommends: false
         policy_rc_d: 101
@@ -106,7 +122,7 @@
         state: stopped
         enabled: false
 
-    - name: Validate and install the single read-only media share
+    - name: Validate and install the read-write media share
       ansible.builtin.template:
         src: smb.conf.j2
         dest: /etc/samba/smb.conf
@@ -115,6 +131,19 @@
         mode: '0600'
         validate: /usr/bin/testparm -s %s
       diff: false
+      no_log: true
+
+    - name: Reconcile the declared Samba reader login
+      vars:
+        ansible_pipelining: true
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/files/reconcile-samba-reader.py') }}"
+        stdin: '{{ host_samba_credentials.stdout }}'
+      register: host_samba_reader
+      changed_when: host_samba_reader.stdout == 'changed'
       no_log: true
 
     - name: Validate and install the Samba-only firewall rules
