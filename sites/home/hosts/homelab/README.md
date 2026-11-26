@@ -293,13 +293,18 @@ Changing the session secret signs out existing sessions.
 
 Provision Docker before the first run. Homepage needs Docker Compose 2.30 or
 later for the literal authentication environment. Run from the repository root
-with the pinned Ansible collections installed.
+with the pinned Ansible collections installed. The Host's default sudo-rs
+wraps the password prompt. These commands select the installed `sudo.ws`
+binary so Ansible can recognize the prompt.
 
 ```bash
 cd sites/home/hosts/homelab/ansible
-ansible-playbook -i inventory.yml playbook.yml --tags traefik,homepage --check --diff -K
-ansible-playbook -i inventory.yml playbook.yml --tags traefik,homepage -K
-ansible-playbook -i inventory.yml playbook.yml --tags traefik,homepage -K
+ansible-playbook -i inventory.yml playbook.yml --tags traefik,homepage --check --diff -K \
+  -e ansible_become_exe=/usr/bin/sudo.ws
+ansible-playbook -i inventory.yml playbook.yml --tags traefik,homepage -K \
+  -e ansible_become_exe=/usr/bin/sudo.ws
+ansible-playbook -i inventory.yml playbook.yml --tags traefik,homepage -K \
+  -e ansible_become_exe=/usr/bin/sudo.ws
 ```
 
 The second deployment should report zero changes. The `traefik` tag installs
