@@ -1,0 +1,156 @@
+---
+- name: Decrypt the dedicated Homepage SOPS document on the controller
+  ansible.builtin.command:
+    argv: [sops, decrypt, --output-type, json, '{{ host_homepage_sops_file }}']
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  changed_when: false
+  no_log: true
+  register: host_homepage_decrypted
+
+- name: Load Homepage credentials without logging them
+  ansible.builtin.set_fact:
+    host_homepage_credentials: '{{ host_homepage_decrypted.stdout | from_json }}'
+  no_log: true
+
+- name: Require a Homepage-only password and a session secret of at least 32 characters
+  ansible.builtin.assert:
+    that:
+      - host_homepage_credentials.password is string
+      - host_homepage_credentials.password | trim | length > 0
+      - host_homepage_credentials.session_secret is string
+      - host_homepage_credentials.session_secret | trim | length >= 32
+      - host_homepage_credentials.password is not search('[\r\n\x00]')
+      - host_homepage_credentials.session_secret is not search('[\r\n\x00]')
+  no_log: true
+
+- name: Require single-line widget API keys when configured
+  ansible.builtin.assert:
+    that:
+      - host_homepage_credentials[item] | default('') is string
+      - host_homepage_credentials[item] | default('') is not search('[\r\n\x00]')
+  loop: [jellyfin_api_key, seerr_api_key, qbittorrent_api_key, sonarr_api_key, radarr_api_key]
+  no_log: true
+
+- name: Create the private Homepage project directory
+  ansible.builtin.file:
+    path: '{{ host_homepage_project_dir }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Create the Homepage container configuration directory
+  ansible.builtin.file:
+    path: '{{ host_homepage_project_dir }}/config'
+    state: directory
+    owner: '1000'
+    group: '1000'
+    mode: '0700'
+
+- name: Install the pinned Homepage Compose definition
+  ansible.builtin.template:
+    src: homepage-compose.yaml.j2
+    dest: '{{ host_homepage_project_dir }}/compose.yaml'
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install the private Homepage authentication environment
+  ansible.builtin.copy:
+    dest: '{{ host_homepage_project_dir }}/auth.env'
+    content: |
+      HOMEPAGE_AUTH_PASSWORD={{ host_homepage_credentials.password }}
+      HOMEPAGE_AUTH_SECRET={{ host_homepage_credentials.session_secret }}
+    owner: root
+    group: root
+    mode: '0600'
+  diff: false
+  no_log: true
+
+- name: Install the Production links and configured widgets
+  ansible.builtin.template:
+    src: homepage-services.yaml.j2
+    dest: '{{ host_homepage_project_dir }}/config/services.yaml'
+    owner: root
+    group: '1000'
+    mode: '0640'
+  diff: false
+  no_log: true
+
+- name: Set up the dashboard without example bookmarks or information widgets
+  ansible.builtin.copy:
+    dest: '{{ host_homepage_project_dir }}/config/{{ item.name }}.yaml'
+    content: '{{ item.content }}'
+    owner: root
+    group: '1000'
+    mode: '0640'
+  loop:
+    - {name: settings, content: "title: Home\n"}
+    - {name: bookmarks, content: "[]\n"}
+    - {name: widgets, content: "[]\n"}
+
+- name: Install the qBittorrent activity adapter when configured
+  when: host_homepage_qbittorrent_configured
+  block:
+    - name: Install the read-only transfer summary script
+      ansible.builtin.copy:
+        src: '{{ host_homepage_source_dir }}/qbittorrent-activity.py'
+        dest: '{{ host_homepage_project_dir }}/qbittorrent-activity.py'
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Install the private qBittorrent API key
+      ansible.builtin.copy:
+        content: |
+          QBITTORRENT_API_KEY={{ host_homepage_credentials.qbittorrent_api_key }}
+        dest: '{{ host_homepage_project_dir }}/qbittorrent.env'
+        owner: root
+        group: root
+        mode: '0600'
+      diff: false
+      no_log: true
+
+- name: Reconcile the Homepage Compose project after rendering its configuration
+  when: not ansible_check_mode
+  block:
+    - name: Validate the installed Homepage Compose project
+      ansible.builtin.command:
+        argv: [docker, compose, --project-directory, '{{ host_homepage_project_dir }}', config, --quiet]
+      changed_when: false
+      no_log: true
+
+    - name: Ensure Homepage is running on the Site Traefik network
+      community.docker.docker_compose_v2:
+        project_src: '{{ host_homepage_project_dir }}'
+        state: present
+        pull: missing
+        build: never
+        remove_orphans: true
+        wait: true
+        wait_timeout: 60
+      no_log: true
+
+    - name: Verify that Traefik serves the Homepage sign-in gate
+      ansible.builtin.uri:
+        url: '{{ host_traefik_probe_url }}'
+        headers:
+          Host: homepage.home
+        follow_redirects: none
+        status_code: [307]
+        use_proxy: false
+      register: host_homepage_http
+      until: >-
+        host_homepage_http.status | default(0) == 307 and
+        '/auth/signin?' in host_homepage_http.location | default('')
+      retries: 10
+      delay: 2
+
+- name: Remove the retired activity adapter and its API key
+  ansible.builtin.file:
+    path: '{{ host_homepage_project_dir }}/{{ item }}'
+    state: absent
+  loop: [qbittorrent-activity.py, qbittorrent.env]
+  when: not host_homepage_qbittorrent_configured

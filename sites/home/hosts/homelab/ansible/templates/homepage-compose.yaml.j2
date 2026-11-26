@@ -1,0 +1,52 @@
+name: home-homepage
+
+services:
+  homepage:
+    image: ghcr.io/gethomepage/homepage:v2.8.0@sha256:019d8f063a7299e7c1c51ee4a70b692291809af3244894fbec2c2ac7d1f71b18
+    restart: unless-stopped
+    user: '1000:1000'
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      HOMEPAGE_ALLOWED_HOSTS: homepage.home
+      HOMEPAGE_AUTH_ENABLED: 'true'
+      HOMEPAGE_EXTERNAL_URL: http://homepage.home
+    env_file:
+      - path: ./auth.env
+        format: raw
+    volumes:
+      - ./config:/app/config
+{% if host_homepage_qbittorrent_configured %}
+    networks: [default, widgets]
+
+  qbittorrent-activity:
+    image: python:3.13-alpine@sha256:bf12ecc0bea3f171d55145dd02c78b5eeb09f30ee2ac9cc2b4c9e4e8f5e30741
+    command: [python, /app/qbittorrent-activity.py]
+    restart: unless-stopped
+    user: '1000:1000'
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    environment:
+      QBITTORRENT_HOST: homelab.home
+      QBITTORRENT_PORT: '{{ host_homepage_media_ports.qbittorrent }}'
+    env_file:
+      - path: ./qbittorrent.env
+        format: raw
+    volumes:
+      - ./qbittorrent-activity.py:/app/qbittorrent-activity.py:ro
+    labels:
+      org.homelab.qbittorrent-activity-sha256: '{{ lookup("ansible.builtin.file", host_homepage_source_dir ~ "/qbittorrent-activity.py", rstrip=false) | hash("sha256") }}'
+    networks: [widgets]
+{% endif %}
+
+networks:
+  default:
+    # This network is created by the Site's home-traefik Compose project.
+    name: home-traefik_default
+    external: true
+{% if host_homepage_qbittorrent_configured %}
+  widgets: {}
+{% endif %}

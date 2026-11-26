@@ -3,7 +3,8 @@
 The Host's [Site Inventory declaration](../homelab.yaml) remains separate from
 its [Ansible playbook](ansible/playbook.yml). Run the playbook from a controller
 with SSH access to `adam@homelab` and Ansible Core 2.20 or later. Install the
-pinned Ansible collections before running. Host key verification remains
+pinned Ansible collections and SOPS with the Home Site age identity on the
+controller before running. Host key verification remains
 enabled.
 
 From the repository root:
@@ -28,7 +29,7 @@ Docker is installed, check mode can inspect the Docker tasks too. A preview
 is not a substitute for the first real run and a second convergence run.
 
 The tags `storage`, `base`, `repo`, `power`, `docker`, `ssh`, `secrets`, `duckdns`,
-`backups`, `traefik`, `samba`, and `security`
+`backups`, `traefik`, `homepage`, `samba`, and `security`
 select areas. The OS and package
 inspection preflight always runs. For example:
 
@@ -273,3 +274,79 @@ refuses to run if `home-traefik` already exists on the local Docker daemon. It
 requires Docker, outbound access for test-tool installation, and free test ports.
 It does not deploy to the live Host; record live deployment and backend checks
 separately from this rehearsal.
+
+## Homepage deployment
+
+[Homepage](http://homepage.home) runs on `homelab` as the `home-homepage`
+Compose project. Traefik reaches it on `home-traefik_default`. Only Traefik
+publishes an HTTP port. Use the exact URL on the trusted LAN and keep it off
+internet forwarding. HTTP carries the Homepage password and session cookie
+without encryption. Use a unique Homepage password.
+
+The [dedicated SOPS document](../../secrets/homepage.sops.yaml) uses the Home
+Site age recipient. Its `password` and `session_secret` fields are required.
+The session secret must contain at least 32 characters. View the password
+privately with `sops decrypt --extract '["password"]' sites/home/secrets/homepage.sops.yaml`
+from the repository root. Use `sops edit sites/home/secrets/homepage.sops.yaml`
+to rotate credentials or enroll widget keys. Commit only the encrypted document.
+Changing the session secret signs out existing sessions.
+
+Provision Docker before the first run. Homepage needs Docker Compose 2.30 or
+later for the literal authentication environment. Run from the repository root
+with the pinned Ansible collections installed.
+
+```bash
+cd sites/home/hosts/homelab/ansible
+ansible-playbook -i inventory.yml playbook.yml --tags traefik,homepage --check --diff -K
+ansible-playbook -i inventory.yml playbook.yml --tags traefik,homepage -K
+ansible-playbook -i inventory.yml playbook.yml --tags traefik,homepage -K
+```
+
+The second deployment should report zero changes. The `traefik` tag installs
+the watched route and creates the shared network. After initial deployment,
+use `--tags homepage` to apply credential and dashboard updates. Check mode
+validates the encrypted input and previews file changes. Use a normal run to
+validate Compose and the sign-in redirect. The installed project is under
+`/opt/homelab/sites/home/homepage`. Inspect the containers with
+`sudo docker compose --project-directory /opt/homelab/sites/home/homepage ps`.
+An unfiltered `docker compose config` prints the authentication environment.
+
+Reconcile `homepage.home` using the [declared DNS procedure](../../../../services/network/docs/declared-dns.md).
+Review the plan for the new CNAME targeting `homelab.home`, apply it through the
+primary DNS Stack Instance and verify the answer from both LAN resolvers. Check
+that the browser opens `http://homepage.home` and redirects to the sign-in page.
+
+### Enroll and verify widgets
+
+Each optional field enables one widget. Omit the field to keep the link without
+its widget. Widget requests use the Production ports declared in Site
+Inventory. The Compose project must be able to resolve `homelab.home`.
+
+| SOPS field | Credential source | Expected data |
+| --- | --- | --- |
+| `jellyfin_api_key` | Jellyfin Administration Dashboard → API Keys | Current title, elapsed time and progress, viewer name, and pause/resume controls |
+| `seerr_api_key` | Seerr Settings → General → API Key | Pending, approved, and completed request counts |
+| `qbittorrent_api_key` | qBittorrent Options → WebUI → Authentication → API Key | Download and upload rates and downloading and seeding counts |
+| `sonarr_api_key` | Sonarr Settings → General → API Key | Series queue count |
+| `radarr_api_key` | Radarr Settings → General → API Key | Movie queue count |
+
+The qBittorrent key also enables a transfer summary container within the
+Homepage Compose project. It uses qBittorrent's global rates and counts
+torrents in the downloading and uploading states, including forced
+transfers. The container has no published ports and shares its Docker
+network only with Homepage. Removing the key and redeploying removes
+the widget and its transfer summary container.
+
+Verify the links-only deployment before adding keys. In a private browser
+window, confirm that both the dashboard and `/api/services` redirect to sign-in.
+A signed-out widget request to `/api/services/proxy` should also redirect to
+sign-in. Sign in with the Homepage password and open all seven Production media
+links plus the primary and secondary Technitium links. The Technitium links
+redirect to the existing HTTPS consoles and keep their existing access controls.
+
+Enroll the five keys and redeploy with `--tags homepage`. Compare each widget
+with the corresponding application's activity and queue data. Start a Jellyfin
+test playback, confirm its viewer and progress, and pause and resume it from
+Homepage. Anyone with the Homepage password can see viewer names and operate
+the playback controls. Sign out and retry the widget request to confirm that
+the data is protected after sign-out.

@@ -9,7 +9,7 @@ addresses and reservations before deployment.
 Follow the [ordered network setup and recovery walkthrough](../../services/network/docs/setup.md) before any live network change.
 
 The `homelab` Host's [provisioning guide and Ansible playbook](hosts/homelab/README.md)
-manage its operating system, container runtime, and the Site Traefik deployment.
+manage its operating system, container runtime, Traefik, and Homepage.
 Media application reconciliation remains with the Media Stack CLI.
 
 ## Name resolution
@@ -25,6 +25,7 @@ Traefik and its clients use these local DNS records:
 | The same seven names with `-staging` before `.home` | CNAME | `homelab.home` |
 | The same seven services as `<service>.laptop.home` and `<service>.staging.laptop.home` | CNAME | `homelab.home` |
 | `minecraft.home` | CNAME | `homelab.home` |
+| `homepage.home` | CNAME | `homelab.home` |
 | `technitium.home`, `technitium-pi.home` | CNAME | `homelab.home` |
 
 The A records hold the machine addresses for this routing setup. No machine address is stored in this routing project. The
@@ -82,6 +83,11 @@ before using them. Redirects preserve paths and query strings and keep managemen
 Technitium's existing HTTPS listeners with their Host certificates. Administrators still need
 to trust the [home CA](../../services/network/docs/management-https.md) and have access through
 the existing management firewall rules.
+
+Open [Homepage](http://homepage.home) on the LAN for the seven Production media
+links and both Technitium consoles. The
+[Homepage deployment guide](hosts/homelab/README.md#homepage-deployment)
+describes its separate sign-in and optional media widgets.
 
 Houndarr and Cleanuparr are administered through Host loopback ports and have no Traefik routes or DNS records.
 Production uses ports 8877 and 11011; Staging uses 18877 and 21011. Use the SSH tunnel described in the
