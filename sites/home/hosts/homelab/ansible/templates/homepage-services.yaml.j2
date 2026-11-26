@@ -1,0 +1,80 @@
+- Media:
+    - Jellyfin:
+        href: http://jellyfin.home
+        icon: jellyfin.png
+{% if host_homepage_credentials.jellyfin_api_key | default('') | trim %}
+        widget:
+          type: jellyfin
+          url: http://homelab.home:{{ host_homepage_media_ports.jellyfin }}
+          key: {{ host_homepage_credentials.jellyfin_api_key | to_json(ensure_ascii=false) }}
+          version: 2
+          enableNowPlaying: true
+          enableUser: true
+          enableMediaControl: true
+{% endif %}
+    - Seerr:
+        href: http://seerr.home
+        icon: seerr.png
+{% if host_homepage_credentials.seerr_api_key | default('') | trim %}
+        widget:
+          type: seerr
+          url: http://homelab.home:{{ host_homepage_media_ports.seerr }}
+          key: {{ host_homepage_credentials.seerr_api_key | to_json(ensure_ascii=false) }}
+          fields: [pending, approved, completed]
+{% endif %}
+    - qBittorrent:
+        href: http://qbittorrent.home
+        icon: qbittorrent.png
+{% if host_homepage_qbittorrent_configured %}
+        widget:
+          type: customapi
+          url: http://qbittorrent-activity:9100/transfer
+          mappings:
+            - field: downloading
+              label: Downloading
+              format: number
+            - field: downloadRate
+              label: Download rate
+              format: bytes
+              suffix: /s
+            - field: seeding
+              label: Seeding
+              format: number
+            - field: uploadRate
+              label: Upload rate
+              format: bytes
+              suffix: /s
+{% endif %}
+    - Sonarr:
+        href: http://sonarr.home
+        icon: sonarr.png
+{% if host_homepage_credentials.sonarr_api_key | default('') | trim %}
+        widget:
+          type: sonarr
+          url: http://homelab.home:{{ host_homepage_media_ports.sonarr }}
+          key: {{ host_homepage_credentials.sonarr_api_key | to_json(ensure_ascii=false) }}
+          fields: [queued]
+{% endif %}
+    - Radarr:
+        href: http://radarr.home
+        icon: radarr.png
+{% if host_homepage_credentials.radarr_api_key | default('') | trim %}
+        widget:
+          type: radarr
+          url: http://homelab.home:{{ host_homepage_media_ports.radarr }}
+          key: {{ host_homepage_credentials.radarr_api_key | to_json(ensure_ascii=false) }}
+          fields: [queued]
+{% endif %}
+    - Prowlarr:
+        href: http://prowlarr.home
+        icon: prowlarr.png
+    - Profilarr:
+        href: http://profilarr.home
+        icon: profilarr.png
+- Infrastructure:
+    - Technitium primary:
+        href: http://technitium.home
+        icon: technitium.png
+    - Technitium secondary:
+        href: http://technitium-pi.home
+        icon: technitium.png

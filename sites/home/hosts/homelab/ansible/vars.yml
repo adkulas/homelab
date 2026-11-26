@@ -46,6 +46,14 @@ host_traefik_deploy_root: /opt/homelab
 host_traefik_wait_timeout: 60
 host_traefik_probe_url: http://127.0.0.1/
 
+host_homepage_source_dir: '{{ playbook_dir }}/../../../homepage'
+host_homepage_project_dir: /opt/homelab/sites/home/homepage
+host_homepage_sops_file: '{{ playbook_dir }}/../../../secrets/homepage.sops.yaml'
+host_homepage_media_ports: >-
+  {{ (lookup('ansible.builtin.file', host_homepage_source_dir ~ '/../instances/media-homelab.yaml')
+      | from_yaml).spec.media.environments.production.ports }}
+host_homepage_qbittorrent_configured: '{{ host_homepage_credentials.qbittorrent_api_key | default("") | trim | length > 0 }}'
+
 host_samba_site_root: '{{ playbook_dir }}/../../..'
 host_samba_site: "{{ (lookup('ansible.builtin.file', host_samba_site_root ~ '/site.yaml') | from_yaml).spec }}"
 host_samba_instance_path: instances/media-homelab.yaml

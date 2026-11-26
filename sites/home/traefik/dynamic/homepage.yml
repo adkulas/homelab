@@ -1,0 +1,11 @@
+http:
+  routers:
+    homepage:
+      rule: Host(`homepage.home`)
+      entryPoints: [web]
+      service: homepage
+  services:
+    homepage:
+      loadBalancer:
+        servers:
+          - url: http://homepage:3000

@@ -30,7 +30,7 @@ type traefikService struct {
 
 func TestHomeTraefikRoutesTargetNamedHosts(t *testing.T) {
 	root := filepath.Join(repositoryRoot(t), "sites", "home", "traefik")
-	checkMediaTraefikRoutes(t, filepath.Join(root, "dynamic", "media-stack.yml"), "homelab.home", map[string]int{
+	checkHomeHTTPRoutes(t, filepath.Join(root, "dynamic", "media-stack.yml"), "homelab.home", map[string]int{
 		"qbittorrent.home": 8080, "prowlarr.home": 9696, "sonarr.home": 8989,
 		"radarr.home": 7878, "profilarr.home": 6868, "jellyfin.home": 8096, "seerr.home": 5055,
 		"qbittorrent-staging.home": 18080, "prowlarr-staging.home": 19696,
@@ -58,6 +58,17 @@ func TestHomeTraefikRoutesTargetNamedHosts(t *testing.T) {
 	}
 }
 
+func TestHomepageLANRouteAndDNSAlias(t *testing.T) {
+	site := filepath.Join(repositoryRoot(t), "sites", "home")
+	checkHomeHTTPRoutes(t, filepath.Join(site, "traefik", "dynamic", "homepage.yml"), "homepage", map[string]int{
+		"homepage.home": 3000,
+	})
+
+	if target := readHomeDNSAliases(t, site)["homepage.home"]; target != "homelab" {
+		t.Errorf("Homepage DNS alias targets %q, want homelab", target)
+	}
+}
+
 func TestLaptopMediaTraefikRoutesAndDNSAliases(t *testing.T) {
 	site := filepath.Join(repositoryRoot(t), "sites", "home")
 	want := map[string]int{
@@ -67,8 +78,18 @@ func TestLaptopMediaTraefikRoutesAndDNSAliases(t *testing.T) {
 		"sonarr.staging.laptop.home": 18989, "radarr.staging.laptop.home": 17878,
 		"profilarr.staging.laptop.home": 16868, "jellyfin.staging.laptop.home": 18096, "seerr.staging.laptop.home": 15055,
 	}
-	checkMediaTraefikRoutes(t, filepath.Join(site, "traefik", "dynamic", "media-laptop.yml"), "laptop.home", want)
+	checkHomeHTTPRoutes(t, filepath.Join(site, "traefik", "dynamic", "media-laptop.yml"), "laptop.home", want)
 
+	aliases := readHomeDNSAliases(t, site)
+	for host := range want {
+		if target := aliases[host]; target != "homelab" {
+			t.Errorf("DNS alias %s targets %q, want homelab", host, target)
+		}
+	}
+}
+
+func readHomeDNSAliases(t *testing.T, site string) map[string]string {
+	t.Helper()
 	var dns struct {
 		Spec struct {
 			Aliases map[string]string `json:"aliases"`
@@ -77,30 +98,26 @@ func TestLaptopMediaTraefikRoutesAndDNSAliases(t *testing.T) {
 	if err := json.Unmarshal(readFile(t, filepath.Join(site, "network.json")), &dns); err != nil {
 		t.Fatalf("decode Site DNS policy: %v", err)
 	}
-	for host := range want {
-		if target := dns.Spec.Aliases[host]; target != "homelab" {
-			t.Errorf("DNS alias %s targets %q, want homelab", host, target)
-		}
-	}
+	return dns.Spec.Aliases
 }
 
-func checkMediaTraefikRoutes(t *testing.T, path, upstream string, want map[string]int) {
+func checkHomeHTTPRoutes(t *testing.T, path, upstream string, want map[string]int) {
 	t.Helper()
-	var media struct {
+	var routes struct {
 		HTTP struct {
 			Routers  map[string]traefikRouter  `yaml:"routers"`
 			Services map[string]traefikService `yaml:"services"`
 		} `yaml:"http"`
 	}
-	if err := yaml.Unmarshal(readFile(t, path), &media); err != nil {
-		t.Fatalf("decode Media Stack routes: %v", err)
+	if err := yaml.Unmarshal(readFile(t, path), &routes); err != nil {
+		t.Fatalf("decode HTTP routes: %v", err)
 	}
-	if len(media.HTTP.Routers) != len(want) || len(media.HTTP.Services) != len(want) {
-		t.Fatalf("Media Stack has %d routers and %d services, want %d each",
-			len(media.HTTP.Routers), len(media.HTTP.Services), len(want))
+	if len(routes.HTTP.Routers) != len(want) || len(routes.HTTP.Services) != len(want) {
+		t.Fatalf("route file has %d routers and %d services, want %d each",
+			len(routes.HTTP.Routers), len(routes.HTTP.Services), len(want))
 	}
 	seen := map[string]bool{}
-	for name, router := range media.HTTP.Routers {
+	for name, router := range routes.HTTP.Routers {
 		if len(router.EntryPoints) != 1 || router.EntryPoints[0] != "web" {
 			t.Errorf("router %s entry points = %v, want [web]", name, router.EntryPoints)
 		}
@@ -115,7 +132,7 @@ func checkMediaTraefikRoutes(t *testing.T, path, upstream string, want map[strin
 			continue
 		}
 		seen[host] = true
-		service, exists := media.HTTP.Services[router.Service]
+		service, exists := routes.HTTP.Services[router.Service]
 		wantURL := fmt.Sprintf("http://%s:%d", upstream, port)
 		if !exists || len(service.LoadBalancer.Servers) != 1 || service.LoadBalancer.Servers[0].URL != wantURL {
 			t.Errorf("%s targets %+v, want %s", host, service.LoadBalancer.Servers, wantURL)

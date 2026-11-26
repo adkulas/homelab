@@ -305,6 +305,10 @@
       ansible.builtin.import_tasks: traefik.yml
       tags: [traefik]
 
+    - name: Deploy the Site Homepage project
+      ansible.builtin.import_tasks: homepage.yml
+      tags: [homepage]
+
     - name: Configure the Samba share
       ansible.builtin.import_tasks: samba.yml
       tags: [samba]
