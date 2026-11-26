@@ -39,6 +39,9 @@ ansible-playbook -i inventory.yml playbook.yml --tags base --ask-become-pass
 
 ## Managed configuration
 
+For owner access from outside the LAN, follow [Tailscale enrollment, DNS and NVR routing](tailscale.md).
+Select the opt-in installation with `--tags tailscale`.
+
 - Essential administration tools, age, checksum-verified SOPS 3.13.2, SMART
   monitoring, and LVM tools.
 - Password-based sudo for `adam`. The `security` tasks remove the temporary

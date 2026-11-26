@@ -1,0 +1,33 @@
+---
+- name: Install HTTPS certificates for the Tailscale package repository
+  ansible.builtin.apt:
+    name: ca-certificates
+    state: present
+
+- name: Install the Tailscale stable repository key
+  ansible.builtin.get_url:
+    url: https://pkgs.tailscale.com/stable/ubuntu/resolute.noarmor.gpg
+    dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+    mode: '0644'
+
+- name: Configure the signed Ubuntu 26.04 Tailscale repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/tailscale.list
+    content: |
+      deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu resolute main
+    mode: '0644'
+
+- name: Configure Tailscale when its package source is available
+  when: not ansible_check_mode or 'tailscale' in ansible_facts.packages
+  block:
+    - name: Install native Tailscale
+      ansible.builtin.apt:
+        name: tailscale
+        state: present
+        update_cache: "{{ 'tailscale' not in ansible_facts.packages }}"
+
+    - name: Enable the native Tailscale daemon
+      ansible.builtin.systemd_service:
+        name: tailscaled.service
+        enabled: true
+        state: started

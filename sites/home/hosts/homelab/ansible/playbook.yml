@@ -22,6 +22,10 @@
       tags: [always]
 
   tasks:
+    - name: Provision native Tailscale on explicit selection
+      ansible.builtin.import_tasks: tailscale.yml
+      tags: [never, tailscale]
+
     - name: Provision the dedicated storage disk
       ansible.builtin.import_tasks: storage.yml
       tags: [storage]
