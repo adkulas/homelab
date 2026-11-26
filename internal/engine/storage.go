@@ -9,6 +9,8 @@ import (
 const dataDirectoryMode = 0o750
 
 var dataLayout = []string{
+	"books",
+	filepath.Join("books", "audiobooks"),
 	"torrents",
 	filepath.Join("torrents", "movies"),
 	filepath.Join("torrents", "series"),

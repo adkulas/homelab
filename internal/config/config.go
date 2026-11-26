@@ -97,15 +97,59 @@ type Server struct {
 }
 
 type Ports struct {
-	QBittorrent int `yaml:"qbittorrent"`
-	Prowlarr    int `yaml:"prowlarr"`
-	Sonarr      int `yaml:"sonarr"`
-	Radarr      int `yaml:"radarr"`
-	Profilarr   int `yaml:"profilarr"`
-	Jellyfin    int `yaml:"jellyfin"`
-	Seerr       int `yaml:"seerr"`
-	Houndarr    int `yaml:"houndarr"`
-	Cleanuparr  int `yaml:"cleanuparr"`
+	Audiobookshelf int `yaml:"audiobookshelf,omitempty"`
+	QBittorrent    int `yaml:"qbittorrent"`
+	Prowlarr       int `yaml:"prowlarr"`
+	Sonarr         int `yaml:"sonarr"`
+	Radarr         int `yaml:"radarr"`
+	Profilarr      int `yaml:"profilarr"`
+	Jellyfin       int `yaml:"jellyfin"`
+	Seerr          int `yaml:"seerr"`
+	Houndarr       int `yaml:"houndarr"`
+	Cleanuparr     int `yaml:"cleanuparr"`
+}
+
+type PublishedPort struct {
+	Service string
+	Port    int
+}
+
+func (env Environment) PublishedPorts() []PublishedPort {
+	p := env.Ports
+	ports := []PublishedPort{{"qbittorrent", p.QBittorrent}, {"prowlarr", p.Prowlarr}, {"sonarr", p.Sonarr}, {"radarr", p.Radarr}, {"profilarr", p.Profilarr}, {"jellyfin", p.Jellyfin}, {"seerr", p.Seerr}, {"audiobookshelf", p.Audiobookshelf}}
+	if env.SeriesAutomation != nil {
+		ports = append(ports, PublishedPort{"houndarr", p.Houndarr}, PublishedPort{"cleanuparr", p.Cleanuparr})
+	}
+	return ports
+}
+
+func validatePortIsolation(environments map[string]Environment) error {
+	type publication struct {
+		PublishedPort
+		environment string
+	}
+	var publications []publication
+	for _, name := range []string{"production", "staging"} {
+		for _, port := range environments[name].PublishedPorts() {
+			if port.Port > 0 {
+				publications = append(publications, publication{port, name})
+			}
+		}
+	}
+	for i, left := range publications {
+		for _, right := range publications[i+1:] {
+			if left.Port != right.Port {
+				continue
+			}
+			if IsSeriesCompanion(left.Service) || IsSeriesCompanion(right.Service) {
+				return fmt.Errorf("companion port collision between %s/%s and %s/%s", left.environment, left.Service, right.environment, right.Service)
+			}
+			if left.Service == "audiobookshelf" || right.Service == "audiobookshelf" {
+				return fmt.Errorf("port collision between %s/%s and %s/%s", left.environment, left.Service, right.environment, right.Service)
+			}
+		}
+	}
+	return nil
 }
 
 type Versions struct {
@@ -141,7 +185,21 @@ func Load(path string) (MediaStack, error) {
 		}
 		seenSources[source.ID] = true
 	}
+	ApplyPortDefaults(declared.Spec.Environments)
 	return declared, nil
+}
+
+// ApplyPortDefaults resolves ports introduced after the original inventory schema.
+func ApplyPortDefaults(environments map[string]Environment) {
+	for name, env := range environments {
+		if env.Ports.Audiobookshelf == 0 {
+			env.Ports.Audiobookshelf = 13378
+			if name == "staging" {
+				env.Ports.Audiobookshelf = 23378
+			}
+			environments[name] = env
+		}
+	}
 }
 
 func Write(path string, declared MediaStack) error {
@@ -174,6 +232,9 @@ func (declared MediaStack) validateEnvironment(name string, allowMissingHardware
 		if environment.ProjectName != "" && !composeProjectName.MatchString(environment.ProjectName) {
 			return fmt.Errorf("environment %s requires a valid Compose project name", environmentName)
 		}
+		if environment.Ports.Audiobookshelf < 0 || environment.Ports.Audiobookshelf > 65535 {
+			return fmt.Errorf("environment %s audiobookshelf port must be a TCP port", environmentName)
+		}
 		if environment.SeriesAutomation != nil {
 			if err := environment.SeriesAutomation.Validate(); err != nil {
 				return fmt.Errorf("environment %s: %w", environmentName, err)
@@ -183,7 +244,7 @@ func (declared MediaStack) validateEnvironment(name string, allowMissingHardware
 			}
 		}
 	}
-	if err := validateCompanionPortIsolation(declared.Spec.Environments); err != nil {
+	if err := validatePortIsolation(declared.Spec.Environments); err != nil {
 		return err
 	}
 	preference := declared.Spec.Environments[name].HardwareTranscoding
@@ -195,10 +256,8 @@ func (declared MediaStack) validateEnvironment(name string, allowMissingHardware
 	if !productionExists || !stagingExists {
 		return fmt.Errorf("Production and Staging Environments must both be declared")
 	}
-	if production.SeriesAutomation != nil || staging.SeriesAutomation != nil {
-		if production.ProjectName == "" || staging.ProjectName == "" || production.ProjectName == staging.ProjectName || filepath.Clean(production.SecretsFile) == filepath.Clean(staging.SecretsFile) {
-			return fmt.Errorf("Production and Staging companion state and secrets require distinct project names and secret documents")
-		}
+	if production.ProjectName == "" || staging.ProjectName == "" || production.ProjectName == staging.ProjectName || production.SecretsFile == "" || staging.SecretsFile == "" || filepath.Clean(production.SecretsFile) == filepath.Clean(staging.SecretsFile) {
+		return fmt.Errorf("Production and Staging application state requires distinct project names and secret documents")
 	}
 	if !filepath.IsAbs(production.DataRoot) || !filepath.IsAbs(staging.DataRoot) {
 		return fmt.Errorf("Production and Staging data roots must be absolute")

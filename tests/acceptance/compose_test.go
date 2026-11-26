@@ -288,7 +288,7 @@ func TestPlanRendersCoexistingEnvironmentResources(t *testing.T) {
 				"gluetun": {Published: "8080", Target: 8080}, "prowlarr": {Published: "9696", Target: 9696},
 				"sonarr": {Published: "8989", Target: 8989}, "radarr": {Published: "7878", Target: 7878},
 				"profilarr": {Published: "6868", Target: 6868}, "jellyfin": {Published: "8096", Target: 8096},
-				"seerr": {Published: "5055", Target: 5055},
+				"seerr": {Published: "5055", Target: 5055}, "audiobookshelf": {Published: "13378", Target: 80},
 			},
 		},
 		"staging": {
@@ -299,7 +299,7 @@ func TestPlanRendersCoexistingEnvironmentResources(t *testing.T) {
 				"gluetun": {Published: "18080", Target: 18080}, "prowlarr": {Published: "19696", Target: 9696},
 				"sonarr": {Published: "18989", Target: 8989}, "radarr": {Published: "17878", Target: 7878},
 				"profilarr": {Published: "16868", Target: 6868}, "jellyfin": {Published: "18096", Target: 8096},
-				"seerr": {Published: "15055", Target: 5055},
+				"seerr": {Published: "15055", Target: 5055}, "audiobookshelf": {Published: "23378", Target: 80},
 			},
 		},
 	}
@@ -328,6 +328,13 @@ func TestPlanRendersCoexistingEnvironmentResources(t *testing.T) {
 				"radarr":      {Type: "bind", Source: expected.dataRoot, Target: "/data"},
 				"sonarr":      {Type: "bind", Source: expected.dataRoot, Target: "/data"},
 				"jellyfin":    {Type: "bind", Source: expected.dataRoot + "/media", Target: "/data/media", ReadOnly: true},
+			}
+			wantDataMounts["audiobookshelf"] = composeMount{Type: "bind", Source: expected.dataRoot + "/books/audiobooks", Target: "/audiobooks", ReadOnly: true}
+			for name, target := range map[string]string{"audiobookshelf-config": "/config", "audiobookshelf-metadata": "/metadata"} {
+				volume := project.Volumes[name].Name
+				if volume != expected.projectName+"_"+name || !containsMount(project.Services["audiobookshelf"].Volumes, composeMount{Type: "volume", Source: name, Target: target}) {
+					problems = append(problems, fmt.Sprintf("Audiobookshelf is missing scoped volume %s at %s", name, target))
+				}
 			}
 			for serviceName, mount := range wantDataMounts {
 				if !containsMount(project.Services[serviceName].Volumes, mount) {

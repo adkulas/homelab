@@ -115,7 +115,7 @@ func (engine localEngine) executeRestore(ctx context.Context, request RestoreReq
 
 	temporaryPrefix := strings.ReplaceAll(operationID, ".", "-")
 	for _, source := range sources {
-		service, archivePath, err := restoreServiceArchive(filepath.Dir(request.backupPath), backup.Services, source.serviceName)
+		service, archivePath, err := restoreVolumeArchive(filepath.Dir(request.backupPath), backup.Services, source.volumeName)
 		if err != nil {
 			return RestoreReport{}, err
 		}
@@ -174,7 +174,7 @@ func (engine localEngine) executeRestore(ctx context.Context, request RestoreReq
 		return RestoreReport{}, err
 	}
 	for index, source := range sources {
-		service, _, err := restoreServiceArchive(filepath.Dir(request.backupPath), backup.Services, source.serviceName)
+		service, _, err := restoreVolumeArchive(filepath.Dir(request.backupPath), backup.Services, source.volumeName)
 		if err != nil {
 			return RestoreReport{}, err
 		}
@@ -257,13 +257,13 @@ func restoreHelperImage(services []BackupService) (string, error) {
 	return "", fmt.Errorf("backup does not contain the Jellyfin restore helper image")
 }
 
-func restoreServiceArchive(root string, services []BackupService, name string) (BackupService, string, error) {
+func restoreVolumeArchive(root string, services []BackupService, name string) (BackupService, string, error) {
 	for _, service := range services {
-		if service.Name == name {
+		if service.Volume == name {
 			return service, filepath.Join(root, filepath.FromSlash(service.ArchivePath)), nil
 		}
 	}
-	return BackupService{}, "", fmt.Errorf("backup does not contain service %q", name)
+	return BackupService{}, "", fmt.Errorf("backup does not contain volume %q", name)
 }
 
 func replaceDockerVolumeFromVolume(ctx context.Context, sourceVolume, targetVolume, image string) error {
@@ -349,7 +349,7 @@ func rollbackRestore(ctx context.Context, composePath, projectName string, safet
 	var rollbackErr error
 	selectedServices := make([]BackupService, 0, len(sources))
 	for _, source := range sources {
-		service, _, err := restoreServiceArchive(filepath.Dir(safety.ManifestPath), safety.Services, source.serviceName)
+		service, _, err := restoreVolumeArchive(filepath.Dir(safety.ManifestPath), safety.Services, source.volumeName)
 		if err != nil {
 			return fmt.Errorf("verify safety backup coverage: %w", err)
 		}
@@ -370,7 +370,7 @@ func rollbackRestore(ctx context.Context, composePath, projectName string, safet
 	}
 	root := filepath.Dir(safety.ManifestPath)
 	for _, source := range sources {
-		service, archivePath, err := restoreServiceArchive(root, safety.Services, source.serviceName)
+		service, archivePath, err := restoreVolumeArchive(root, safety.Services, source.volumeName)
 		if err != nil {
 			rollbackErr = errors.Join(rollbackErr, err)
 			continue

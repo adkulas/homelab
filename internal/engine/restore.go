@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -180,7 +181,7 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	}
 	excludedServices := []string(nil)
 	if request.asRestoreDrill {
-		excludedServices = []string{"profilarr"}
+		excludedServices = []string{"audiobookshelf", "profilarr"}
 		sources = excludeRestoreSources(sources, excludedServices)
 	}
 	for _, source := range sources {
@@ -188,7 +189,7 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	}
 	preview := fmt.Sprintf("replace %s Environment state from %s backup", request.plan.environment, backup.Environment)
 	if request.asRestoreDrill {
-		preview = fmt.Sprintf("restore drill: replace %s Environment state from %s backup with acquisition disabled, integrations gated, rotated credentials, and Production Profilarr excluded", request.plan.environment, backup.Environment)
+		preview = fmt.Sprintf("restore drill: replace %s Environment state from %s backup with acquisition disabled, integrations gated, rotated credentials, and Production Audiobookshelf and Profilarr excluded", request.plan.environment, backup.Environment)
 	}
 	report := RestoreReport{
 		SchemaVersion:       backupSchemaVersion,
@@ -200,7 +201,7 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 		SourceEnvironment:   backup.Environment,
 		AcquisitionDisabled: request.asRestoreDrill,
 		IntegrationsGated:   request.asRestoreDrill,
-		Services:            serviceNames,
+		Services:            slices.Compact(serviceNames),
 		ExcludedServices:    excludedServices,
 	}
 	if request.asRestoreDrill {
@@ -250,14 +251,20 @@ func validateRestoreCoverage(services []BackupService, sources []backupSource, r
 		return fmt.Errorf("backup does not provide complete mutable service coverage: found %d services, require %d", len(services), len(sources))
 	}
 	covered := make(map[string]BackupService, len(services))
+	archivePaths := map[string]bool{}
 	for _, service := range services {
-		if _, duplicate := covered[service.Name]; duplicate {
-			return fmt.Errorf("backup does not provide complete mutable service coverage: service %q appears more than once", service.Name)
+		path := filepath.Clean(filepath.FromSlash(service.ArchivePath))
+		if archivePaths[path] {
+			return fmt.Errorf("backup volumes share archive path %q", path)
 		}
-		covered[service.Name] = service
+		archivePaths[path] = true
+		if _, duplicate := covered[service.Volume]; duplicate {
+			return fmt.Errorf("backup does not provide complete mutable service coverage: volume %q appears more than once", service.Volume)
+		}
+		covered[service.Volume] = service
 	}
 	for _, source := range sources {
-		service, ok := covered[source.serviceName]
+		service, ok := covered[source.volumeName]
 		if !ok {
 			return fmt.Errorf("backup does not provide complete mutable service coverage: service %q is missing", source.serviceName)
 		}
@@ -265,7 +272,7 @@ func validateRestoreCoverage(services []BackupService, sources []backupSource, r
 		if service.ArchivePath == "" || filepath.IsAbs(archivePath) || archivePath == ".." || strings.HasPrefix(archivePath, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("backup service %q has unsafe archive path %q", source.serviceName, service.ArchivePath)
 		}
-		if service.Volume != source.volumeName || service.MountPath != source.mountPath || service.Image != source.image {
+		if service.Name != source.serviceName || service.MountPath != source.mountPath || service.Image != source.image {
 			return fmt.Errorf("backup service %q is incompatible with the rendered mutable volume", source.serviceName)
 		}
 		if !restoreDrill && service.DockerVolume != source.dockerVolume {

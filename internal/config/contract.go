@@ -14,7 +14,7 @@ func ConfigurationContract(service string) []contractmodel.Setting {
 		contractmodel.Declared("backup.retention.weekly", "Weekly backup retention", "StackInstance#spec.media.defaults.backupRetention.weekly", "non-negative integer", nil, "Change spec.media.defaults.backupRetention.weekly in the selected Stack Instance.", "preserve"),
 		contractmodel.Declared("backup.retention.monthly", "Monthly backup retention", "StackInstance#spec.media.defaults.backupRetention.monthly", "non-negative integer", nil, "Change spec.media.defaults.backupRetention.monthly in the selected Stack Instance.", "preserve"),
 	}
-	if service == "gluetun" || service == "qbittorrent" || service == "profilarr" || service == "jellyfin" || service == "seerr" || IsSeriesCompanion(service) {
+	if service == "audiobookshelf" || service == "gluetun" || service == "qbittorrent" || service == "profilarr" || service == "jellyfin" || service == "seerr" || IsSeriesCompanion(service) {
 		settings = append(settings, contractmodel.Declared("secrets.document", "Environment secret document", "StackInstance#spec.media.environments.<environment>.secretsFile", "path", nil, "Change the selected Environment secretsFile path in the selected Stack Instance.", "initialize", "reconcile", "verify"))
 	}
 	if service == "gluetun" {

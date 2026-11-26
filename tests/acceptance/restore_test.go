@@ -121,12 +121,7 @@ func TestRestoreRejectsConfirmationWithoutAnUnchangedPreview(t *testing.T) {
 func TestRestoreReplacesMutableStateAndRecordsRecoveryOperation(t *testing.T) {
 	temporary := t.TempDir()
 	configPath, manifestPath, fixtureRoot := createRestorableBackup(t, temporary, "staging")
-	for _, serviceName := range backupFixtureServiceNames {
-		path := filepath.Join(fixtureRoot, "media-staging_"+serviceName+"-config", "identity.txt")
-		if err := os.WriteFile(path, []byte("drifted\n"), 0o600); err != nil {
-			t.Fatalf("mutate %s state: %v", serviceName, err)
-		}
-	}
+	writeRestoreFixtureState(t, fixtureRoot, "drifted-")
 
 	preview := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath, "--output", "json")
 	preview.Env = restoreEnvironment(t, temporary, fixtureRoot)
@@ -163,16 +158,7 @@ func TestRestoreReplacesMutableStateAndRecordsRecoveryOperation(t *testing.T) {
 	if !strings.Contains(string(journal), `"status": "completed"`) {
 		t.Fatalf("restore journal is not complete: %s", journal)
 	}
-	for _, serviceName := range backupFixtureServiceNames {
-		path := filepath.Join(fixtureRoot, "media-staging_"+serviceName+"-config", "identity.txt")
-		contents, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read recovered %s state: %v", serviceName, err)
-		}
-		if string(contents) != serviceName+"\n" {
-			t.Fatalf("recovered %s state = %q", serviceName, contents)
-		}
-	}
+	assertRestoreFixtureState(t, fixtureRoot, "")
 	dockerCalls, err := os.ReadFile(filepath.Join(temporary, "restore-docker.log"))
 	if err != nil {
 		t.Fatalf("read restore Docker calls: %v", err)
@@ -187,12 +173,7 @@ func TestRestoreReplacesMutableStateAndRecordsRecoveryOperation(t *testing.T) {
 func TestRestoreRollsBackPartialReplacementFromSafetyBackup(t *testing.T) {
 	temporary := t.TempDir()
 	configPath, manifestPath, fixtureRoot := createRestorableBackup(t, temporary, "staging")
-	for _, serviceName := range backupFixtureServiceNames {
-		path := filepath.Join(fixtureRoot, "media-staging_"+serviceName+"-config", "identity.txt")
-		if err := os.WriteFile(path, []byte("pre-restore-"+serviceName+"\n"), 0o600); err != nil {
-			t.Fatalf("write pre-restore %s state: %v", serviceName, err)
-		}
-	}
+	writeRestoreFixtureState(t, fixtureRoot, "pre-restore-")
 	preview := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath)
 	preview.Env = restoreEnvironment(t, temporary, fixtureRoot)
 	if output, err := preview.CombinedOutput(); err == nil || !strings.Contains(string(output), "restore requires --confirm") {
@@ -223,16 +204,7 @@ func TestRestoreRollsBackPartialReplacementFromSafetyBackup(t *testing.T) {
 	if !strings.Contains(string(journal), `"status": "rolled-back"`) {
 		t.Fatalf("restore did not record successful rollback: %s", journal)
 	}
-	for _, serviceName := range backupFixtureServiceNames {
-		path := filepath.Join(fixtureRoot, "media-staging_"+serviceName+"-config", "identity.txt")
-		contents, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read rolled-back %s state: %v", serviceName, err)
-		}
-		if string(contents) != "pre-restore-"+serviceName+"\n" {
-			t.Fatalf("rolled-back %s state = %q", serviceName, contents)
-		}
-	}
+	assertRestoreFixtureState(t, fixtureRoot, "pre-restore-")
 }
 
 func TestRestoreRejectsEnvironmentMismatch(t *testing.T) {
@@ -336,12 +308,7 @@ func TestRestoreDrillRestoresSafeStagingStateWithRotatedCredentials(t *testing.T
 		t.Fatalf("write drill Jellyfin port: %v", err)
 	}
 	createBackupVolumeFixtures(t, fixtureRoot, "media-staging")
-	for _, serviceName := range backupFixtureServiceNames {
-		path := filepath.Join(fixtureRoot, "media-staging_"+serviceName+"-config", "identity.txt")
-		if err := os.WriteFile(path, []byte("staging-"+serviceName+"\n"), 0o600); err != nil {
-			t.Fatalf("write pre-drill %s state: %v", serviceName, err)
-		}
-	}
+	writeRestoreFixtureState(t, fixtureRoot, "staging-")
 	credentialsPath, runtimeDirectory, drillEnvironment := prepareRestoreDrill(t, temporary, fixtureRoot, configPath, backupPath)
 	command := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", backupPath, "--confirm", "--as-restore-drill", "--credentials", credentialsPath, "--output", "json")
 	command.Env = drillEnvironment
@@ -355,7 +322,7 @@ func TestRestoreDrillRestoresSafeStagingStateWithRotatedCredentials(t *testing.T
 		`"sourceEnvironment":"production"`,
 		`"acquisitionDisabled":true`,
 		`"integrationsGated":true`,
-		`"excludedServices":["profilarr"]`,
+		`"excludedServices":["audiobookshelf","profilarr"]`,
 		`"startedServices":["jellyfin"]`,
 		`"completed":true`,
 	} {
@@ -368,18 +335,18 @@ func TestRestoreDrillRestoresSafeStagingStateWithRotatedCredentials(t *testing.T
 			t.Fatalf("restore drill report exposed sensitive credential reference %q: %s", sensitive, output)
 		}
 	}
-	for _, serviceName := range backupFixtureServiceNames {
-		path := filepath.Join(fixtureRoot, "media-staging_"+serviceName+"-config", "identity.txt")
+	for _, volume := range backupFixtureVolumes {
+		path := backupFixtureIdentity(fixtureRoot, "media-staging", volume)
 		contents, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatalf("read post-drill %s state: %v", serviceName, err)
+			t.Fatalf("read post-drill %s state: %v", volume, err)
 		}
-		want := serviceName + "\n"
-		if serviceName == "profilarr" {
-			want = "staging-profilarr\n"
+		want := volume + "\n"
+		if volume == "profilarr-config" || strings.HasPrefix(volume, "audiobookshelf-") {
+			want = "staging-" + volume + "\n"
 		}
 		if string(contents) != want {
-			t.Fatalf("post-drill %s state = %q, want %q", serviceName, contents, want)
+			t.Fatalf("post-drill %s state = %q, want %q", volume, contents, want)
 		}
 	}
 	secretRoot := filepath.Join(runtimeDirectory, "media-stack", "media-staging")
@@ -615,24 +582,24 @@ func TestRestoreRecoversKilledReplacementFromOperationJournal(t *testing.T) {
 
 func writeRestoreFixtureState(t *testing.T, fixtureRoot, prefix string) {
 	t.Helper()
-	for _, serviceName := range backupFixtureServiceNames {
-		path := filepath.Join(fixtureRoot, "media-staging_"+serviceName+"-config", "identity.txt")
-		if err := os.WriteFile(path, []byte(prefix+serviceName+"\n"), 0o600); err != nil {
-			t.Fatalf("write pre-restore %s state: %v", serviceName, err)
+	for _, volume := range backupFixtureVolumes {
+		path := backupFixtureIdentity(fixtureRoot, "media-staging", volume)
+		if err := os.WriteFile(path, []byte(prefix+volume+"\n"), 0o600); err != nil {
+			t.Fatalf("write pre-restore %s state: %v", volume, err)
 		}
 	}
 }
 
 func assertRestoreFixtureState(t *testing.T, fixtureRoot, prefix string) {
 	t.Helper()
-	for _, serviceName := range backupFixtureServiceNames {
-		path := filepath.Join(fixtureRoot, "media-staging_"+serviceName+"-config", "identity.txt")
+	for _, volume := range backupFixtureVolumes {
+		path := backupFixtureIdentity(fixtureRoot, "media-staging", volume)
 		contents, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatalf("read recovered %s state: %v", serviceName, err)
+			t.Fatalf("read recovered %s state: %v", volume, err)
 		}
-		if string(contents) != prefix+serviceName+"\n" {
-			t.Fatalf("recovered %s state = %q", serviceName, contents)
+		if string(contents) != prefix+volume+"\n" {
+			t.Fatalf("recovered %s state = %q", volume, contents)
 		}
 	}
 }

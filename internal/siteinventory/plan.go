@@ -95,6 +95,7 @@ func resolveMedia(ctx context.Context, repositoryRoot string, siteName SiteName,
 	for name, value := range instance.Spec.Media.Environments {
 		declared.Spec.Environments[name] = value
 	}
+	config.ApplyPortDefaults(declared.Spec.Environments)
 	originalInstance, err := os.ReadFile(filepath.Join(siteDirectory, instanceReference))
 	if err != nil {
 		return resolvedMedia{}, err

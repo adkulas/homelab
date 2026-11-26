@@ -17,7 +17,14 @@ func topologySupplement(definition serviceDefinition) []contractmodel.Setting {
 	if definition.identity == composeUserIdentity {
 		settings = append(settings, contractmodel.Derived("runtime.mode", "Runtime identity mechanism", "spec.defaults.runtimeUID + spec.defaults.runtimeGID", "Compose runs the service directly as the declared numeric user and group.", "render"))
 	}
-	if definition.dataMount != nil {
+	if definition.name == "audiobookshelf" {
+		settings = append(settings,
+			contractmodel.Fixed("setup.network", "First-run network", AudiobookshelfSetupNetwork, "The uninitialized service uses a separate project network until apply creates the household account.", "initialize"),
+			contractmodel.Fixed("setup.port.publication", "First-run port publication", "127.0.0.1::80", "During initial account setup Docker publishes a temporary loopback port. Apply then restores the Environment LAN port.", "initialize"),
+			contractmodel.Derived("dataMount", "Audiobook library mount", "selected Environment dataRoot + /books/audiobooks", "The operator imports books on the host. Audiobookshelf reads them at /audiobooks.", "initialize", "render", "verify"),
+			contractmodel.Derived("metadataVolume", "Audiobookshelf metadata volume", "selected Compose project + audiobookshelf-metadata", "Compose mounts this volume at /metadata. Backup and restore cover it alongside /config.", "render", "preserve"),
+		)
+	} else if definition.dataMount != nil {
 		readOnly := "read-write"
 		if definition.name == "jellyfin" {
 			readOnly = "read-only"

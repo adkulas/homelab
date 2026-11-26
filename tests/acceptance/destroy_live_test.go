@@ -84,7 +84,7 @@ func TestDisposableDestroyProtectsPartialStateAndIsolatesProduction(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Plan.MissingVolumes) != 9 {
+	if len(report.Plan.MissingVolumes) != len(backupFixtureVolumes)-1 {
 		t.Fatalf("missing declared volumes: %v", report.Plan.MissingVolumes)
 	}
 	request.Execute = true

@@ -3,6 +3,7 @@ package configcontract
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/adkulas/homelab/internal/contractmodel"
 	"github.com/adkulas/homelab/internal/topology"
@@ -20,7 +21,11 @@ func Describe(serviceName string) (contractmodel.Document, error) {
 				return contractmodel.Document{SchemaVersion: contractmodel.SchemaVersion, Services: []contractmodel.Service{service}}, nil
 			}
 		}
-		return contractmodel.Document{}, fmt.Errorf("unknown service %q; supported services: gluetun, jellyfin, profilarr, prowlarr, qbittorrent, radarr, seerr, sonarr", serviceName)
+		var names []string
+		for _, svc := range services {
+			names = append(names, svc.Name)
+		}
+		return contractmodel.Document{}, fmt.Errorf("unknown service %q; supported services: %s", serviceName, strings.Join(names, ", "))
 	}
 	return contractmodel.Document{SchemaVersion: contractmodel.SchemaVersion, Services: services}, nil
 }

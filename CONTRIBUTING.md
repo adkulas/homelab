@@ -82,6 +82,8 @@ scenarios.
 See the [series automation runbook](services/media/README.md#episode-searching-and-queue-recovery)
 for bootstrap, tuning, upstream safety limits and Staging recovery evidence.
 
+For the pinned Audiobookshelf import, playback, and per-account progress test, see the [audiobook rehearsal](services/media/README.md#import-and-listen-to-an-owned-audiobook).
+
 Run the optional pinned Jellyfin refresh acceptance test with Docker and the
 local image pins. The [Jellyfin verification runbook](services/media/README.md#staging-verification-before-promotion)
 includes the command and the Staging cases for native Arr events.

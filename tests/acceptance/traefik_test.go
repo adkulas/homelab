@@ -32,10 +32,10 @@ func TestHomeTraefikRoutesTargetNamedHosts(t *testing.T) {
 	root := filepath.Join(repositoryRoot(t), "sites", "home", "traefik")
 	checkHomeHTTPRoutes(t, filepath.Join(root, "dynamic", "media-stack.yml"), "homelab.home", map[string]int{
 		"qbittorrent.home": 8080, "prowlarr.home": 9696, "sonarr.home": 8989,
-		"radarr.home": 7878, "profilarr.home": 6868, "jellyfin.home": 8096, "seerr.home": 5055,
+		"radarr.home": 7878, "profilarr.home": 6868, "jellyfin.home": 8096, "seerr.home": 5055, "audiobookshelf.home": 13378,
 		"qbittorrent-staging.home": 18080, "prowlarr-staging.home": 19696,
 		"sonarr-staging.home": 18989, "radarr-staging.home": 17878,
-		"profilarr-staging.home": 16868, "jellyfin-staging.home": 18096, "seerr-staging.home": 15055,
+		"profilarr-staging.home": 16868, "jellyfin-staging.home": 18096, "seerr-staging.home": 15055, "audiobookshelf-staging.home": 23378,
 	})
 
 	var game struct {
@@ -73,10 +73,10 @@ func TestLaptopMediaTraefikRoutesAndDNSAliases(t *testing.T) {
 	site := filepath.Join(repositoryRoot(t), "sites", "home")
 	want := map[string]int{
 		"qbittorrent.laptop.home": 8080, "prowlarr.laptop.home": 9696, "sonarr.laptop.home": 8989,
-		"radarr.laptop.home": 7878, "profilarr.laptop.home": 6868, "jellyfin.laptop.home": 8096, "seerr.laptop.home": 5055,
+		"radarr.laptop.home": 7878, "profilarr.laptop.home": 6868, "jellyfin.laptop.home": 8096, "seerr.laptop.home": 5055, "audiobookshelf.laptop.home": 13378,
 		"qbittorrent.staging.laptop.home": 18080, "prowlarr.staging.laptop.home": 19696,
 		"sonarr.staging.laptop.home": 18989, "radarr.staging.laptop.home": 17878,
-		"profilarr.staging.laptop.home": 16868, "jellyfin.staging.laptop.home": 18096, "seerr.staging.laptop.home": 15055,
+		"profilarr.staging.laptop.home": 16868, "jellyfin.staging.laptop.home": 18096, "seerr.staging.laptop.home": 15055, "audiobookshelf.staging.laptop.home": 23378,
 	}
 	checkHomeHTTPRoutes(t, filepath.Join(site, "traefik", "dynamic", "media-laptop.yml"), "laptop.home", want)
 

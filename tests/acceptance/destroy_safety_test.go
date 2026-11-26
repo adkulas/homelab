@@ -170,7 +170,7 @@ func TestDestroyEveryIndependentDeletionSelection(t *testing.T) {
 			if (result.BackupPath != "") != options.Volumes {
 				t.Fatal("backup selection ignored")
 			}
-			if len(p.Plan.MissingVolumes) != 9 {
+			if len(p.Plan.MissingVolumes) != len(backupFixtureVolumes)-1 {
 				t.Fatal("partial inventory lost")
 			}
 			f.assertProduction()
@@ -345,7 +345,7 @@ func TestDestroyMissingTargetsDoNotCreateVolumesOrInventCompleteBackup(t *testin
 	os.Remove(filepath.Join(f.temporary, "runtime", "media-stack", e.ProjectName, "openvpn_user"))
 	f.save()
 	r, p := f.preview(engine.DestroyOptions{Volumes: true, Secrets: true})
-	if len(p.Plan.MissingVolumes) != 10 {
+	if len(p.Plan.MissingVolumes) != len(backupFixtureVolumes) {
 		t.Fatal("missing coverage not explicit")
 	}
 	result, err := engine.New().Destroy(context.Background(), r)
@@ -597,15 +597,15 @@ func TestDestroyCompleteVolumeCoverageAndUnknownDockerResources(t *testing.T) {
 	f := newDestroyFixture(t)
 	e := f.declared.Spec.Environments["staging"]
 	volumes := f.state["volumes"].(map[string]any)
-	for _, service := range backupFixtureServiceNames {
-		name := e.ProjectName + "_" + service + "-config"
+	for _, service := range backupFixtureVolumes {
+		name := e.ProjectName + "_" + service
 		if _, exists := volumes[name]; exists {
 			continue
 		}
 		storage := filepath.Join(f.temporary, "volumes", name)
 		os.MkdirAll(storage, 0700)
 		writeFile(t, filepath.Join(storage, "state"), []byte(service+" final state"), 0600)
-		volumes[name] = map[string]any{"Name": name, "CreatedAt": "2026-11-10T00:00:00Z", "Driver": "local", "Mountpoint": storage, "Labels": map[string]string{"com.docker.compose.project": e.ProjectName, "com.docker.compose.volume": service + "-config"}}
+		volumes[name] = map[string]any{"Name": name, "CreatedAt": "2026-11-10T00:00:00Z", "Driver": "local", "Mountpoint": storage, "Labels": map[string]string{"com.docker.compose.project": e.ProjectName, "com.docker.compose.volume": service}}
 	}
 	unknownVolume := e.ProjectName + "_operator-state"
 	volumes[unknownVolume] = map[string]any{"Name": unknownVolume}
@@ -624,7 +624,7 @@ func TestDestroyCompleteVolumeCoverageAndUnknownDockerResources(t *testing.T) {
 	if err := json.Unmarshal(readFile(t, result.BackupPath), &backup); err != nil {
 		t.Fatal(err)
 	}
-	if !backup.Complete || len(backup.Services) != 10 || len(backup.MissingVolumes) != 0 {
+	if !backup.Complete || len(backup.Services) != len(backupFixtureVolumes) || len(backup.MissingVolumes) != 0 {
 		t.Fatalf("complete coverage: %+v", backup)
 	}
 	f.load()

@@ -92,6 +92,7 @@ func TestConfigDescribePublishesACompleteValidatedContract(t *testing.T) {
 		"StackInstance#spec.media.environments.<environment>.ports.profilarr",
 		"StackInstance#spec.media.environments.<environment>.ports.jellyfin",
 		"StackInstance#spec.media.environments.<environment>.ports.seerr",
+		"StackInstance#spec.media.environments.<environment>.ports.audiobookshelf",
 		"media-stack.yaml#spec.acquisition.vpn.provider",
 		"media-stack.yaml#spec.acquisition.vpn.protocol",
 		"media-stack.yaml#spec.acquisition.vpn.openvpnProtocol",
@@ -202,7 +203,7 @@ func TestConfigDescribeReportsStableUsageForUnknownService(t *testing.T) {
 	if err == nil {
 		t.Fatalf("unknown service succeeded:\n%s", output)
 	}
-	want := "unknown service \"lidarr\"; supported services: gluetun, jellyfin, profilarr, prowlarr, qbittorrent, radarr, seerr, sonarr"
+	want := "unknown service \"lidarr\"; supported services: audiobookshelf, cleanuparr, gluetun, houndarr, jellyfin, profilarr, prowlarr, qbittorrent, radarr, seerr, sonarr"
 	if !strings.Contains(string(output), want) {
 		t.Fatalf("unknown-service error = %s", output)
 	}

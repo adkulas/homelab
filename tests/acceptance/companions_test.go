@@ -572,8 +572,10 @@ func writePassingJellyfinRefreshEvidence(t *testing.T, directory, configDigest, 
 func TestPlanRejectsSharedCompanionIdentityAndPorts(t *testing.T) {
 	original := string(readFile(t, filepath.Join(repositoryRoot(t), "tests/fixtures/media-stack.yaml")))
 	for _, scenario := range []struct{ name, old, new, diagnostic string }{
-		{"project", "projectName: media-staging", "projectName: media-production", "companion state"},
-		{"secrets", "secretsFile: secrets/staging.sops.yaml", "secretsFile: secrets/production.sops.yaml", "companion state"},
+		{"project", "projectName: media-staging", "projectName: media-production", "application state"},
+		{"secrets", "secretsFile: secrets/staging.sops.yaml", "secretsFile: secrets/production.sops.yaml", "application state"},
+		{"audiobook default port", "seerr: 15055", "seerr: 13378", "port collision"},
+		{"audiobook override", "seerr: 15055", "audiobookshelf: 5055\n                seerr: 15055", "port collision"},
 		{"port", "houndarr: 18877", "houndarr: 8877", "companion port collision"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {

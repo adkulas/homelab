@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-var backupFixtureServiceNames = []string{"gluetun", "qbittorrent", "prowlarr", "sonarr", "radarr", "profilarr", "jellyfin", "seerr", "houndarr", "cleanuparr"}
+var backupFixtureVolumes = []string{"audiobookshelf-config", "audiobookshelf-metadata", "gluetun-config", "qbittorrent-config", "prowlarr-config", "sonarr-config", "radarr-config", "profilarr-config", "jellyfin-config", "seerr-config", "houndarr-config", "cleanuparr-config"}
 
 func TestBackupAppliesConfiguredRetentionToPublishedEnvironmentArchives(t *testing.T) {
 	repository := repositoryRoot(t)
@@ -179,7 +179,7 @@ func TestBackupPublishesVerifiedArchivesForEveryMutableServiceVolume(t *testing.
 	backupRoot := filepath.Join(temporary, "backups", "staging")
 	configPath := backupConfig(t, repository, temporary)
 	fixtureRoot := filepath.Join(temporary, "volumes")
-	serviceNames := backupFixtureServiceNames
+	volumes := backupFixtureVolumes
 	createBackupVolumeFixtures(t, fixtureRoot, "media-staging")
 
 	dockerLog := filepath.Join(temporary, "docker.log")
@@ -240,14 +240,14 @@ func TestBackupPublishesVerifiedArchivesForEveryMutableServiceVolume(t *testing.
 	if published, err := os.ReadFile(report.ManifestPath); err != nil || !json.Valid(published) {
 		t.Fatalf("published manifest is missing or invalid: %v", err)
 	}
-	if len(report.Services) != len(serviceNames) {
-		t.Fatalf("services = %d, want %d", len(report.Services), len(serviceNames))
+	if len(report.Services) != len(volumes) {
+		t.Fatalf("services = %d, want %d", len(report.Services), len(volumes))
 	}
 
-	seen := make(map[string]bool, len(serviceNames))
+	seen := make(map[string]bool, len(volumes))
 	for _, service := range report.Services {
-		seen[service.Name] = true
-		if service.Volume != service.Name+"-config" || service.DockerVolume != "media-staging_"+service.Volume {
+		seen[service.Volume] = true
+		if (service.Volume != service.Name+"-config" && !(service.Name == "audiobookshelf" && service.Volume == "audiobookshelf-metadata" && service.MountPath == "/metadata")) || service.DockerVolume != "media-staging_"+service.Volume {
 			t.Fatalf("unexpected volume identity for %s: %#v", service.Name, service)
 		}
 		if service.MountPath == "" || !strings.Contains(service.Image, "@sha256:") {
@@ -268,11 +268,11 @@ func TestBackupPublishesVerifiedArchivesForEveryMutableServiceVolume(t *testing.
 		if got := hex.EncodeToString(digest[:]); got != service.ChecksumSHA256 {
 			t.Fatalf("%s checksum = %q, independently calculated %q", service.Name, service.ChecksumSHA256, got)
 		}
-		if got := archiveFile(t, archive, "identity.txt"); got != service.Name+"\n" {
+		if got := archiveFile(t, archive, "identity.txt"); got != service.Volume+"\n" {
 			t.Fatalf("%s restore fixture = %q", service.Name, got)
 		}
 	}
-	for _, serviceName := range serviceNames {
+	for _, serviceName := range volumes {
 		if !seen[serviceName] {
 			t.Fatalf("manifest omitted %s", serviceName)
 		}
@@ -296,6 +296,7 @@ func TestBackupPublishesVerifiedArchivesForEveryMutableServiceVolume(t *testing.
 		ProjectName  string `json:"projectName"`
 		Services     []struct {
 			Name         string `json:"name"`
+			Volume       string `json:"volume"`
 			DockerVolume string `json:"dockerVolume"`
 			ArchivePath  string `json:"archivePath"`
 		} `json:"services"`
@@ -313,18 +314,18 @@ func TestBackupPublishesVerifiedArchivesForEveryMutableServiceVolume(t *testing.
 	if productionReport.ManifestPath == report.ManifestPath {
 		t.Fatalf("Production and Staging share manifest path %q", productionReport.ManifestPath)
 	}
-	if len(productionReport.Services) != len(backupFixtureServiceNames) {
-		t.Fatalf("Production services = %d, want %d", len(productionReport.Services), len(backupFixtureServiceNames))
+	if len(productionReport.Services) != len(backupFixtureVolumes) {
+		t.Fatalf("Production services = %d, want %d", len(productionReport.Services), len(backupFixtureVolumes))
 	}
 	for _, service := range productionReport.Services {
-		if service.DockerVolume != "media-production_"+service.Name+"-config" {
+		if service.DockerVolume != "media-production_"+service.Volume {
 			t.Fatalf("Production Docker volume for %s = %q", service.Name, service.DockerVolume)
 		}
 		archive, err := os.ReadFile(filepath.Join(productionRoot, productionReport.ID, filepath.FromSlash(service.ArchivePath)))
 		if err != nil {
 			t.Fatalf("read Production %s archive: %v", service.Name, err)
 		}
-		if got := archiveFile(t, archive, "identity.txt"); got != service.Name+"\n" {
+		if got := archiveFile(t, archive, "identity.txt"); got != service.Volume+"\n" {
 			t.Fatalf("Production %s restore fixture = %q", service.Name, got)
 		}
 	}
@@ -432,15 +433,20 @@ func TestBackupRejectsNamespaceInsideOtherEnvironmentData(t *testing.T) {
 	}
 }
 
+func backupFixtureIdentity(root, project, volume string) string {
+	return filepath.Join(root, project+"_"+volume, "identity.txt")
+}
+
 func createBackupVolumeFixtures(t *testing.T, fixtureRoot, projectName string) {
 	t.Helper()
-	for _, serviceName := range backupFixtureServiceNames {
-		volumeRoot := filepath.Join(fixtureRoot, projectName+"_"+serviceName+"-config")
+	for _, volume := range backupFixtureVolumes {
+		identity := backupFixtureIdentity(fixtureRoot, projectName, volume)
+		volumeRoot := filepath.Dir(identity)
 		if err := os.MkdirAll(volumeRoot, 0o700); err != nil {
-			t.Fatalf("create %s restore fixture: %v", serviceName, err)
+			t.Fatalf("create %s restore fixture: %v", volume, err)
 		}
-		if err := os.WriteFile(filepath.Join(volumeRoot, "identity.txt"), []byte(serviceName+"\n"), 0o600); err != nil {
-			t.Fatalf("write %s restore fixture: %v", serviceName, err)
+		if err := os.WriteFile(identity, []byte(volume+"\n"), 0o600); err != nil {
+			t.Fatalf("write %s restore fixture: %v", volume, err)
 		}
 	}
 }
@@ -509,7 +515,7 @@ case "$1" in
 		fi
 		;;
       *" ps --status running --services "*)
-        printf '%s\n' gluetun qbittorrent prowlarr sonarr radarr profilarr jellyfin seerr houndarr cleanuparr
+        printf '%s\n' gluetun qbittorrent prowlarr sonarr radarr profilarr jellyfin seerr houndarr cleanuparr audiobookshelf
         ;;
     esac
     ;;

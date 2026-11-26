@@ -35,6 +35,8 @@ func TestInitProvisionsOnlyTheSelectedEnvironmentDataLayout(t *testing.T) {
 		".",
 		"torrents",
 		"media",
+		"books",
+		filepath.Join("books", "audiobooks"),
 		filepath.Join("torrents", "movies"),
 		filepath.Join("torrents", "series"),
 		filepath.Join("media", "movies"),

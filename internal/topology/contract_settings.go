@@ -29,7 +29,11 @@ func topologySettings(definition serviceDefinition) []contractmodel.Setting {
 		)
 	}
 	if definition.port != nil || service == "qbittorrent" {
-		settings = append(settings, contractmodel.Declared("port", "Environment LAN port", servicePortSource(service), "TCP port", nil, "Change the selected Environment service port in the selected Stack Instance.", "render", "reconcile"))
+		port := contractmodel.Declared("port", "Environment LAN port", servicePortSource(service), "TCP port", nil, "Change the selected Environment service port in the selected Stack Instance.", "render", "reconcile")
+		if service == "audiobookshelf" {
+			port.Description = "The optional Host port defaults to 13378 in Production and 23378 in Staging."
+		}
+		settings = append(settings, port)
 	}
 	if definition.port != nil && !config.IsSeriesCompanion(service) {
 		settings = append(settings, contractmodel.Declared("lanBindAddress", "LAN bind address", "StackInstance#spec.media.defaults.lanBindAddress", "IP address", nil, "Change spec.media.defaults.lanBindAddress in the selected Stack Instance.", "render", "reconcile", "verify"))

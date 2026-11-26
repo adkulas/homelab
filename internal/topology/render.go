@@ -39,6 +39,7 @@ var mandatoryServices = []serviceDefinition{
 	{name: "jellyfin", identity: composeUserIdentity, configTarget: "/config", port: func(ports config.Ports) int { return ports.Jellyfin }, targetPort: 8096, dataMount: func(root string) string { return path.Join(root, "media") + ":/data/media:ro" }},
 	{name: "houndarr", identity: puidIdentity, configTarget: "/data", port: func(ports config.Ports) int { return ports.Houndarr }, targetPort: 8877},
 	{name: "cleanuparr", identity: puidIdentity, configTarget: "/config", port: func(ports config.Ports) int { return ports.Cleanuparr }, targetPort: 11011},
+	{name: "audiobookshelf", configTarget: "/config", port: func(ports config.Ports) int { return ports.Audiobookshelf }, targetPort: 80, dataMount: func(root string) string { return path.Join(root, "books", "audiobooks") + ":/audiobooks:ro" }},
 	{name: "seerr", identity: composeUserIdentity, configTarget: "/app/config", port: func(ports config.Ports) int { return ports.Seerr }, targetPort: 5055},
 }
 
@@ -133,6 +134,10 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 		}
 		volumeName := definition.name + "-config"
 		mounts := []string{volumeName + ":" + definition.configTarget}
+		if definition.name == "audiobookshelf" {
+			mounts = append(mounts, "audiobookshelf-metadata:/metadata")
+			project.Volumes["audiobookshelf-metadata"] = composeVolume{}
+		}
 		if definition.dataMount != nil {
 			mounts = append(mounts, definition.dataMount(environment.DataRoot))
 		}
@@ -217,5 +222,22 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 		}
 		project.Volumes[volumeName] = composeVolume{}
 	}
+	return yaml.Marshal(project)
+}
+
+const AudiobookshelfSetupNetwork = "audiobookshelf-setup"
+
+// AudiobookshelfSetup restricts the unauthenticated first-run endpoint to a
+// temporary loopback port. Compose reuses the same project and application volumes.
+func AudiobookshelfSetup(compose []byte) ([]byte, error) {
+	var project composeProject
+	if err := yaml.Unmarshal(compose, &project); err != nil {
+		return nil, err
+	}
+	service := project.Services["audiobookshelf"]
+	project.Networks[AudiobookshelfSetupNetwork] = composeNetwork{}
+	service.Networks = map[string]composeServiceNetwork{AudiobookshelfSetupNetwork: {}}
+	service.Ports = []string{"127.0.0.1::80"}
+	project.Services["audiobookshelf"] = service
 	return yaml.Marshal(project)
 }
