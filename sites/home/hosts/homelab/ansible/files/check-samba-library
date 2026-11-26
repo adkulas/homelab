@@ -3,24 +3,43 @@ set -eu
 
 mount_path=$1
 library_path=$2
+filesystem_user=$3
+storage_error() {
+    echo 'Mount the Production media filesystem declared in fstab and verify the library path before enabling Samba.' >&2
+    exit 1
+}
+
 if ! expected=$(findmnt --fstab --evaluate --noheadings --output SOURCE,FSTYPE --mountpoint "$mount_path") ||
     ! mounted=$(findmnt --uniq --noheadings --output SOURCE,FSTYPE --mountpoint "$mount_path") ||
     [ "$expected" != "$mounted" ] ||
-    [ "$(realpath -e -- "$library_path")" != "$library_path" ] ||
-    [ "$(findmnt --noheadings --output TARGET --target "$library_path")" != "$mount_path" ]; then
-    echo 'Mount the Production media filesystem declared in fstab and verify the library path before enabling Samba.' >&2
-    exit 1
+    [ "$(realpath -e -- "$library_path")" != "$library_path" ]; then
+    storage_error
 fi
 
-if ! runuser -u smb-media -- /bin/sh -ec '
-    test -r "$1" && test -x "$1" || exit 1
+library_mount=$(findmnt --noheadings --output TARGET --target "$library_path") || storage_error
+if [ "$library_mount" != "$mount_path" ]; then
+    # ReadWritePaths creates a bind mount of the library inside Samba's namespace.
+    [ "$library_mount" = "$library_path" ] || storage_error
+    case "$library_path" in
+        "$mount_path"/*) ;;
+        *) storage_error ;;
+    esac
+    mount_root=$(findmnt --uniq --noheadings --output FSROOT --mountpoint "$mount_path") || storage_error
+    library_root=$(findmnt --noheadings --output FSROOT --mountpoint "$library_path") || storage_error
+    library_source=$(findmnt --noheadings --nofsroot --output SOURCE,FSTYPE --mountpoint "$library_path") || storage_error
+    [ "$library_source" = "$expected" ] &&
+        [ "$library_root" = "${mount_root%/}${library_path#"$mount_path"}" ] || storage_error
+fi
+
+if ! runuser -u "$filesystem_user" -- /bin/sh -ec '
+    test -r "$1" && test -w "$1" && test -x "$1" || exit 1
     for library in "$1/movies" "$1/series"; do
         test -d "$library" && test ! -L "$library" || exit 1
-        unreadable=$(find "$library" \( -type d \( ! -readable -o ! -executable \) \
-            -o -type f ! -readable \) -print -quit)
-        test -z "$unreadable" || exit 1
+        inaccessible=$(find "$library" \( -type d \( ! -readable -o ! -writable -o ! -executable \) \
+            -o -type f \( ! -readable -o ! -writable \) \) -print -quit)
+        test -z "$inaccessible" || exit 1
     done
 ' check-media-access "$library_path" 2>/dev/null; then
-    echo 'Inspect the Production library ownership, modes and ACLs as smb-media before changing access.' >&2
+    echo "Inspect the Production library ownership, modes and ACLs as $filesystem_user before changing access." >&2
     exit 1
 fi

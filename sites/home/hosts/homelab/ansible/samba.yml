@@ -62,16 +62,17 @@
         name: smb-media-readers
         system: true
 
-    - name: Create the unprivileged Samba filesystem identity
-      ansible.builtin.user:
-        name: smb-media
-        groups: ['{{ host_admin_user }}']
-        append: false
-        system: true
-        create_home: false
-        home: /nonexistent
-        shell: /usr/sbin/nologin
-        password_lock: true
+    - name: Find the Host account used for SMB file operations
+      ansible.builtin.getent:
+        database: passwd
+        key: '{{ host_admin_user }}'
+
+    - name: Verify the SMB filesystem identity matches the Media Stack runtime
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.getent_passwd[host_admin_user][1] | int == host_samba_instance.media.defaults.runtimeUID | int
+          - ansible_facts.getent_passwd[host_admin_user][2] | int == host_samba_instance.media.defaults.runtimeGID | int
+        fail_msg: The Samba filesystem account must match the declared Media Stack UID and GID.
 
     - name: Install the Production library preflight
       ansible.builtin.copy:
@@ -81,12 +82,13 @@
         group: root
         mode: '0755'
 
-    - name: Verify the mounted Production library and its read access
+    - name: Verify the mounted Production library and its read and write access
       ansible.builtin.command:
         argv:
           - /usr/local/sbin/check-samba-library
           - '{{ host_storage_mount }}'
           - '{{ host_samba_library }}'
+          - '{{ host_admin_user }}'
       changed_when: false
 
     - name: Create the Samba systemd override directory
@@ -120,7 +122,7 @@
         state: stopped
         enabled: false
 
-    - name: Validate and install the single read-only media share
+    - name: Validate and install the read-write media share
       ansible.builtin.template:
         src: smb.conf.j2
         dest: /etc/samba/smb.conf

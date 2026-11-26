@@ -1,7 +1,8 @@
 # Production media over SMB
 
 Household clients can open `smb://homelab.home/media` with an individual SMB
-login. The share contains `movies` and `series` from the Production Environment.
+login. The share provides read and write access to `movies` and `series` from
+the Production Environment.
 On Windows, enter `\\homelab.home\media` in File Explorer. Use the Host's LAN
 address if the client lacks home DNS. Connections use direct SMB on TCP 445.
 
@@ -21,11 +22,12 @@ ansible-playbook -i inventory.yml playbook.yml --tags samba --ask-become-pass
 
 The second run should report `changed=0`. The full Host playbook also applies
 this setting. Check mode defers enablement. A normal run checks that the existing
-media filesystem is mounted and checks library access as `smb-media` before
-installing the share. If the check fails, inspect directory traversal and file
-read permissions with `namei -l`, `getfacl`, and `sudo -u smb-media`, when the
-account exists. Agree on any permission fix after reviewing its effect on torrent
-downloads and hardlinks. The playbook leaves library ownership, modes and ACLs in place.
+media filesystem is mounted and checks read and write access as the Host
+account that matches the Media Stack UID and GID. If the check fails, inspect
+ownership and permissions with `namei -l` and `getfacl`. Samba uses this identity
+for library file operations and systemd limits its writes on the media disk to
+the library. Editing a hardlinked file in place also changes the corresponding
+torrent download.
 
 Check `systemctl is-active smbd.service` and, privately on the Host, run
 `sudo nft list table inet homelab_smb`. Confirm that TCP 445 accepts the approved
@@ -51,7 +53,7 @@ if needed and applies the declared SMB password. To rotate the password, edit
 the file with `sops edit`, rerun the `samba` tag, and update saved credentials on
 the client. The same playbook recreates the declared account after a Host rebuild.
 
-Create additional readers on `homelab` after enabling Samba. Choose one new,
+Create additional logins on `homelab` after enabling Samba. Choose one new,
 dedicated Unix username per person and set their password at the interactive prompt.
 
 ```bash
@@ -60,7 +62,7 @@ sudo useradd --no-create-home --shell /usr/sbin/nologin --gid smb-media-readers 
 sudo smbpasswd -a "$reader"
 ```
 
-To revoke an additional reader, first remove their Samba password entry with
+To revoke an additional login, first remove their Samba password entry with
 `sudo smbpasswd -x "$reader"`. Use `sudo smbstatus --processes` to find remaining
 client processes for that username, and run `sudo smbcontrol PID shutdown` for
 each matching PID. If a client connection is shared by multiple logins,
@@ -68,7 +70,7 @@ disconnecting it also interrupts the other logins on that connection. Then delet
 the dedicated Unix account with `sudo userdel "$reader"` and verify the revoked
 credentials fail in a fresh connection.
 
-Keep the roster of additional readers in the operator's private records. After
+Keep the roster of additional logins in the operator's private records. After
 a Host rebuild, recreate each still-approved additional login with the commands
 above and issue a fresh password. Store additional passwords privately.
 
@@ -76,12 +78,12 @@ above and issue a fresh password. Store additional passwords privately.
 
 On the first household client, sign in with its individual SMB login, browse
 `movies` and `series`, and play a file. On a LAN machine with `smbclient`, try a
-guest listing and an authenticated write. Expect access or logon denied for the
-guest and an access or media-write-protected error for the write.
+guest listing and an authenticated write. The guest should be denied and the
+authenticated user should be able to create and remove a test directory.
 
 ```bash
 smbclient //homelab.home/media -N -U '%' -c ls
-smbclient //homelab.home/media -U smb-alex -c 'mkdir smb-write-check'
+smbclient //homelab.home/media -U smb-alex -c 'mkdir smb-write-check; rmdir smb-write-check'
 ```
 
 After enabling SMB, manually start one authorized torrent using the normal
