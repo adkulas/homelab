@@ -2,6 +2,7 @@ package acceptance_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -527,6 +528,56 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 		}
 	}))
 	defer jellyfinAPI.Close()
+	audioInitialized := false
+	audioLibrary := false
+	audioAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /status":
+			json.NewEncoder(w).Encode(map[string]any{"app": "audiobookshelf", "isInit": audioInitialized})
+		case "POST /init":
+			var payload struct {
+				NewRoot struct{ Username, Password string }
+			}
+			json.NewDecoder(r.Body).Decode(&payload)
+			if audioInitialized || payload.NewRoot.Username != "household" || payload.NewRoot.Password != "fixture-jellyfin-password" {
+				http.Error(w, "invalid first login", 400)
+				return
+			}
+			audioInitialized = true
+		case "POST /login":
+			var payload struct{ Username, Password string }
+			json.NewDecoder(r.Body).Decode(&payload)
+			if !audioInitialized || payload.Username != "household" || payload.Password != "fixture-jellyfin-password" {
+				w.WriteHeader(401)
+				return
+			}
+			fmt.Fprint(w, `{"user":{"accessToken":"fixture-audio-token"}}`)
+		case "GET /api/libraries":
+			if r.Header.Get("Authorization") != "Bearer fixture-audio-token" {
+				w.WriteHeader(401)
+				return
+			}
+			if audioLibrary {
+				fmt.Fprint(w, `{"libraries":[{"id":"books","name":"Audiobooks","mediaType":"book","folders":[{"fullPath":"/audiobooks"}]}]}`)
+			} else {
+				fmt.Fprint(w, `{"libraries":[]}`)
+			}
+		case "POST /api/libraries":
+			var payload struct {
+				Name, MediaType string
+				Folders         []struct{ FullPath string }
+			}
+			json.NewDecoder(r.Body).Decode(&payload)
+			if audioLibrary || r.Header.Get("Authorization") != "Bearer fixture-audio-token" || payload.Name != "Audiobooks" || payload.MediaType != "book" || len(payload.Folders) != 1 || payload.Folders[0].FullPath != "/audiobooks" {
+				w.WriteHeader(400)
+				return
+			}
+			audioLibrary = true
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer audioAPI.Close()
 	seerrInitialized := false
 	seerrLocalPassword := ""
 	seerrMain := map[string]any{"localLogin": false, "mediaServerLogin": false, "newPlexLogin": false, "defaultPermissions": float64(0), "mediaServerType": float64(4)}
@@ -674,7 +725,7 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 	declared = strings.Replace(declared, "prowlarr: 19696", "prowlarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "profilarr: 16868", "profilarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "jellyfin: 18096", "jellyfin: "+jellyfinURL.Port(), 1)
-	declared = strings.Replace(declared, "seerr: 15055", "seerr: "+seerrURL.Port(), 1)
+	declared = strings.Replace(declared, "seerr: 15055", "audiobookshelf: "+strconv.Itoa(fixturePort(t, audioAPI.URL))+"\n                seerr: "+seerrURL.Port(), 1)
 	sonarrURL, err := url.Parse(sonarrAPI.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -762,7 +813,8 @@ EOF
 	  "compose -f - config --hash *")
 	    cat >/dev/null
 	    printf '%s\n' \
-	      'houndarr hash-houndarr' \
+	      'audiobookshelf hash-audiobookshelf' \
+          'houndarr hash-houndarr' \
           'cleanuparr hash-cleanuparr' \
           'gluetun hash-gluetun' \
 	      'jellyfin hash-jellyfin' \
@@ -777,7 +829,8 @@ EOF
 	    printf '%s\n' '{"Labels":"com.docker.compose.project=media-staging,com.docker.compose.service=debug-shell","Names":"media-staging-debug-shell-1","State":"running"}'
 	    [ -f "$APPLY_TOPOLOGY_READY" ] || exit 0
 	    printf '%s\n' \
-	      '{"Labels":"com.docker.compose.service=houndarr,com.docker.compose.config-hash=hash-houndarr","State":"running"}' \
+	      '{"Labels":"com.docker.compose.service=audiobookshelf,com.docker.compose.config-hash=hash-audiobookshelf","State":"running"}' \
+          '{"Labels":"com.docker.compose.service=houndarr,com.docker.compose.config-hash=hash-houndarr","State":"running"}' \
           '{"Labels":"com.docker.compose.service=cleanuparr,com.docker.compose.config-hash=hash-cleanuparr","State":"running"}' \
           '{"Labels":"com.docker.compose.service=gluetun,com.docker.compose.config-hash=hash-gluetun","State":"running"}' \
 	      '{"Labels":"com.docker.compose.service=jellyfin,com.docker.compose.config-hash=hash-jellyfin","State":"running"}' \
@@ -795,7 +848,9 @@ EOF
 	  "volume ls --filter label=com.docker.compose.project=media-staging --format {{json .}}")
 	    printf '%s\n' '{"Labels":"com.docker.compose.project=media-staging,com.docker.compose.volume=scratch","Name":"media-staging_scratch"}'
 	    [ -f "$APPLY_TOPOLOGY_READY" ] && printf '%s\n' \
-	      '{"Labels":"com.docker.compose.volume=houndarr-config","Name":"media-staging_houndarr-config"}' \
+	      '{"Labels":"com.docker.compose.volume=audiobookshelf-config","Name":"media-staging_audiobookshelf-config"}' \
+          '{"Labels":"com.docker.compose.volume=audiobookshelf-metadata","Name":"media-staging_audiobookshelf-metadata"}' \
+          '{"Labels":"com.docker.compose.volume=houndarr-config","Name":"media-staging_houndarr-config"}' \
           '{"Labels":"com.docker.compose.volume=cleanuparr-config","Name":"media-staging_cleanuparr-config"}' \
           '{"Labels":"com.docker.compose.volume=gluetun-config","Name":"media-staging_gluetun-config"}' \
 	      '{"Labels":"com.docker.compose.volume=jellyfin-config","Name":"media-staging_jellyfin-config"}' \
@@ -831,7 +886,11 @@ EOF
 	  "compose -f - exec -T --user "*" media-stack-library-markers create")
 	    touch "$APPLY_LIBRARY_MARKERS"
 	    exit $? ;;
-	  "compose -f - up -d seerr") touch "$APPLY_TOPOLOGY_READY"; exit 0 ;;
+	  "network ls -q --filter label=com.docker.compose.project=media-staging --filter label=com.docker.compose.network=audiobookshelf-setup") exit 0 ;;
+   "compose -f - ps -q audiobookshelf") [ ! -f "$APPLY_TOPOLOGY_READY.audio" ] || echo fixture-abs; exit 0 ;;
+   "compose -f - up -d audiobookshelf") touch "$APPLY_TOPOLOGY_READY.audio"; exit 0 ;;
+   "compose -f - port audiobookshelf 80") echo "$AUDIO_LISTENER"; exit 0 ;;
+   "compose -f - up -d seerr") touch "$APPLY_TOPOLOGY_READY"; exit 0 ;;
 	  "compose -f - ps --format json gluetun")
 	    count=0
 	    [ -f "$APPLY_HEALTH_COUNT" ] && count=$(cat "$APPLY_HEALTH_COUNT")
@@ -852,6 +911,7 @@ EOF
 		"APPLY_COMPOSE_CAPTURE="+composeCapture,
 		"APPLY_HEALTH_COUNT="+healthCount,
 		"APPLY_TOPOLOGY_READY="+topologyReady,
+		"AUDIO_LISTENER="+strings.TrimPrefix(audioAPI.URL, "http://"),
 		"APPLY_LIBRARY_MARKERS="+libraryMarkers,
 		"APPLY_PROFILARR_READY="+profilarrReady,
 		"APPLY_REAL_PROFILARR="+profilarrID,
@@ -989,7 +1049,7 @@ EOF
 
 	dockerLines := strings.Split(strings.TrimSpace(string(readFile(t, dockerLog))), "\n")
 	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - ps -q qbittorrent\ninspect --format {{.State.StartedAt}} fixture-qbittorrent-id\ncompose -f - logs --no-color --since 2026-08-28T12:34:56.123456789Z qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr\ncompose -f - up -d jellyfin\ncompose -f - restart jellyfin\ncompose -f - up -d seerr"
-	wantDocker += "\ncompose -f - up -d houndarr cleanuparr"
+	wantDocker += "\ncompose -f - ps -q audiobookshelf\ncompose -f - up -d audiobookshelf\ncompose -f - port audiobookshelf 80\ncompose -f - up -d audiobookshelf\ncompose -f - port audiobookshelf 80\nnetwork ls -q --filter label=com.docker.compose.project=media-staging --filter label=com.docker.compose.network=audiobookshelf-setup\ncompose -f - up -d houndarr cleanuparr"
 	if !slices.ContainsFunc(dockerLines, func(line string) bool {
 		return strings.Contains(line, "exec -T --user ") && strings.Contains(line, "media-stack-library.keep")
 	}) {
@@ -1092,6 +1152,9 @@ EOF
 	}
 	if jellyfinPolicy["EnableContentDeletion"] != false || jellyfinPolicyWrites != 1 {
 		t.Errorf("apply did not disable destructive Jellyfin deletion: policy=%v writes=%d", jellyfinPolicy, jellyfinPolicyWrites)
+	}
+	if !audioInitialized || !audioLibrary {
+		t.Error("apply did not initialize the Audiobookshelf household account and library")
 	}
 	if !seerrInitialized || seerrMain["localLogin"] != true || seerrMain["mediaServerLogin"] != true || seerrMain["newPlexLogin"] != true || seerrMain["defaultPermissions"] != float64(8224) {
 		t.Errorf("apply did not reconcile Seerr authentication: initialized=%t main=%v", seerrInitialized, seerrMain)

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -132,6 +133,7 @@ func (localEngine) Doctor(ctx context.Context, request DoctorRequest) (DoctorRep
 		qbittorrentDiagnostic.Retryable = true
 	}
 	report.Diagnostics = append(report.Diagnostics, qbittorrentDiagnostic)
+	add("PREFLIGHT_AUDIOBOOK_LIBRARY", "readable Audiobookshelf library", "Run init for this Environment and grant read and directory traversal access to books/audiobooks.", runDockerProbeQuiet(ctx, "--mount", "type=bind,source="+filepath.Join(environment.DataRoot, "books", "audiobooks")+",target=/audiobooks,readonly", "--entrypoint", "/bin/sh", versions.Images["audiobookshelf"], "-ec", "test -r /audiobooks && test -x /audiobooks"))
 	report.Diagnostics = append(report.Diagnostics, storageDiagnostics(ctx, request.environment, environment.DataRoot,
 		declared.Spec.Defaults.RuntimeUID, declared.Spec.Defaults.RuntimeGID, versions.Images)...)
 	return report, nil

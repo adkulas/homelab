@@ -125,7 +125,7 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 
 	services := make([]BackupService, 0, len(sources))
 	for _, source := range sources {
-		relativeArchivePath := filepath.ToSlash(filepath.Join("archives", source.serviceName+".tar"))
+		relativeArchivePath := filepath.ToSlash(filepath.Join("archives", source.volumeName+".tar"))
 		archivePath := filepath.Join(incompletePath, filepath.FromSlash(relativeArchivePath))
 		size, digest, err := archiveDockerVolume(ctx, source, archivePath)
 		if err != nil {
@@ -271,7 +271,7 @@ func backupSources(compose []byte, projectName string) ([]backupSource, error) {
 			return nil, fmt.Errorf("rendered mutable volume %q has no service owner", volumeName)
 		}
 	}
-	sort.Slice(sources, func(i, j int) bool { return sources[i].serviceName < sources[j].serviceName })
+	sort.Slice(sources, func(i, j int) bool { return sources[i].volumeName < sources[j].volumeName })
 	return sources, nil
 }
 

@@ -21,16 +21,17 @@ func TestPlanRendersCheckedInImagesForSelectedEnvironment(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"houndarr":    "ghcr.io/av1155/houndarr@sha256:b2e4ff8b550d385a56ea3380bddf88253eac00d750a811a8f97090ff77dcc79e",
-		"cleanuparr":  "ghcr.io/cleanuparr/cleanuparr@sha256:923c2fe435e22fc58d261bacd2d6bbd8eb1ba3f95358803a8e4d3287ffd919d3",
-		"gluetun":     "ghcr.io/qdm12/gluetun@sha256:e3272b29a4bc177b389fbdcb54cf9716ccbfc30f04d8b7a35b0a5be9cdb58461",
-		"jellyfin":    "jellyfin/jellyfin@sha256:fea863d0cd9ec445985d9c75fc6ed64e38a1d2766cf0c250a33d553f4fc1b771",
-		"profilarr":   "ghcr.io/dictionarry-hub/profilarr@sha256:352e42dec74ecfd68d13bb198fbc6d9346e3a8c55003026e1814e59319a2176d",
-		"prowlarr":    "lscr.io/linuxserver/prowlarr@sha256:2806c9b763810589c42157730d547c293639e55c7610e9f5069314854639ec48",
-		"qbittorrent": "lscr.io/linuxserver/qbittorrent@sha256:a8083a3337a175e84374e3c8cf34ab76566c54502a2e8580e53b6deaa5b2f619",
-		"radarr":      "lscr.io/linuxserver/radarr@sha256:044788f5508b7f67a3e0368cdd142c77c4d4cd5aec2efaba53e1a68b6b6231e7",
-		"seerr":       "ghcr.io/seerr-team/seerr@sha256:aadee014b40e28cf9aa4928bc9d1183a6eb08f8c44d543cddc9efdcb16549be2",
-		"sonarr":      "lscr.io/linuxserver/sonarr@sha256:339814bbf50599ac3b59077c252f29833d0138b59a062d0e82ce37bdc7f04f86",
+		"audiobookshelf": "ghcr.io/advplyr/audiobookshelf@sha256:60064c23f32fd9099fd39e82c5132c51701d1221135bbca04cd099b589e1edc3",
+		"houndarr":       "ghcr.io/av1155/houndarr@sha256:b2e4ff8b550d385a56ea3380bddf88253eac00d750a811a8f97090ff77dcc79e",
+		"cleanuparr":     "ghcr.io/cleanuparr/cleanuparr@sha256:923c2fe435e22fc58d261bacd2d6bbd8eb1ba3f95358803a8e4d3287ffd919d3",
+		"gluetun":        "ghcr.io/qdm12/gluetun@sha256:e3272b29a4bc177b389fbdcb54cf9716ccbfc30f04d8b7a35b0a5be9cdb58461",
+		"jellyfin":       "jellyfin/jellyfin@sha256:fea863d0cd9ec445985d9c75fc6ed64e38a1d2766cf0c250a33d553f4fc1b771",
+		"profilarr":      "ghcr.io/dictionarry-hub/profilarr@sha256:352e42dec74ecfd68d13bb198fbc6d9346e3a8c55003026e1814e59319a2176d",
+		"prowlarr":       "lscr.io/linuxserver/prowlarr@sha256:2806c9b763810589c42157730d547c293639e55c7610e9f5069314854639ec48",
+		"qbittorrent":    "lscr.io/linuxserver/qbittorrent@sha256:a8083a3337a175e84374e3c8cf34ab76566c54502a2e8580e53b6deaa5b2f619",
+		"radarr":         "lscr.io/linuxserver/radarr@sha256:044788f5508b7f67a3e0368cdd142c77c4d4cd5aec2efaba53e1a68b6b6231e7",
+		"seerr":          "ghcr.io/seerr-team/seerr@sha256:aadee014b40e28cf9aa4928bc9d1183a6eb08f8c44d543cddc9efdcb16549be2",
+		"sonarr":         "lscr.io/linuxserver/sonarr@sha256:339814bbf50599ac3b59077c252f29833d0138b59a062d0e82ce37bdc7f04f86",
 	}
 	if got := renderedImages(output); !reflect.DeepEqual(got, want) {
 		t.Fatalf("rendered images = %#v, want %#v\nrendered Compose:\n%s", got, want, output)

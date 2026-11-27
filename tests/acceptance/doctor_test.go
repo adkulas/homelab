@@ -64,6 +64,7 @@ func TestDoctorProbesTheApplicationStorageMountsAsTheDeclaredRuntimeIdentity(t *
 	want := []string{
 		identity + " --mount type=bind,source=/srv/media/staging/torrents,target=/data/torrents",
 		identity + " --mount type=bind,source=/srv/media/staging,target=/data",
+		"type=bind,source=/srv/media/staging/books/audiobooks,target=/audiobooks,readonly",
 		"__storage-probe --source /data/torrents/movies --destination /data/media/movies",
 		"__storage-probe --source /data/torrents/series --destination /data/media/series",
 	}

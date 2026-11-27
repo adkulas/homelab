@@ -37,6 +37,11 @@ http:
       entryPoints:
         - web
       service: laptop-seerr-production
+    laptop-audiobookshelf-production:
+      rule: Host(`audiobookshelf.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-audiobookshelf-production
     laptop-qbittorrent-staging:
       rule: Host(`qbittorrent.staging.laptop.home`)
       entryPoints:
@@ -72,6 +77,11 @@ http:
       entryPoints:
         - web
       service: laptop-seerr-staging
+    laptop-audiobookshelf-staging:
+      rule: Host(`audiobookshelf.staging.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-audiobookshelf-staging
   services:
     laptop-qbittorrent-production:
       loadBalancer:
@@ -101,6 +111,10 @@ http:
       loadBalancer:
         servers:
           - url: http://laptop.home:5055
+    laptop-audiobookshelf-production:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:13378
     laptop-qbittorrent-staging:
       loadBalancer:
         servers:
@@ -129,3 +143,7 @@ http:
       loadBalancer:
         servers:
           - url: http://laptop.home:15055
+    laptop-audiobookshelf-staging:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:23378

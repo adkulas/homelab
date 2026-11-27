@@ -37,6 +37,11 @@ http:
       entryPoints:
         - web
       service: seerr-production
+    audiobookshelf-production:
+      rule: Host(`audiobookshelf.home`)
+      entryPoints:
+        - web
+      service: audiobookshelf-production
     qbittorrent-staging:
       rule: Host(`qbittorrent-staging.home`)
       entryPoints:
@@ -72,6 +77,11 @@ http:
       entryPoints:
         - web
       service: seerr-staging
+    audiobookshelf-staging:
+      rule: Host(`audiobookshelf-staging.home`)
+      entryPoints:
+        - web
+      service: audiobookshelf-staging
   services:
     qbittorrent-production:
       loadBalancer:
@@ -101,6 +111,10 @@ http:
       loadBalancer:
         servers:
           - url: http://homelab.home:5055
+    audiobookshelf-production:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:13378
     qbittorrent-staging:
       loadBalancer:
         servers:
@@ -129,3 +143,7 @@ http:
       loadBalancer:
         servers:
           - url: http://homelab.home:15055
+    audiobookshelf-staging:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:23378

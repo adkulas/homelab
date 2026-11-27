@@ -50,7 +50,7 @@ func (e localEngine) protectDestroy(ctx context.Context, r DestroyRequest, j *de
 		if !exists {
 			continue
 		}
-		relative := filepath.ToSlash(filepath.Join("archives", source.serviceName+".tar"))
+		relative := filepath.ToSlash(filepath.Join("archives", source.volumeName+".tar"))
 		size, digest, err := archiveDestroyVolume(ctx, source, resource, filepath.Join(incomplete, filepath.FromSlash(relative)), j, journalPath)
 		if err != nil {
 			return fmt.Errorf("cannot independently protect %s volume: %w", source.serviceName, err)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/adkulas/homelab/internal/audiobookshelf"
 	"github.com/adkulas/homelab/internal/config"
 	"github.com/adkulas/homelab/internal/jellyfin"
 	"github.com/adkulas/homelab/internal/profilarr"
@@ -34,7 +35,7 @@ func (transport readOnlyTransport) RoundTrip(request *http.Request) (*http.Respo
 }
 
 func observationPost(path string) bool {
-	return path == "/api/v2/auth/login" ||
+	return path == "/login" || path == "/api/v2/auth/login" ||
 		path == "/Users/AuthenticateByName" ||
 		path == "/api/v1/auth/jellyfin" ||
 		path == "/api/v1/auth/local" ||
@@ -139,6 +140,16 @@ func observeApplications(ctx context.Context, request PlanRequest, plan Plan) []
 	jellyfinClient := jellyfin.New("http://"+environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Jellyfin), observationHTTPClient())
 	actions = append(actions, applicationPlanAction("jellyfin", jellyfinClient.ReconcileLibraries(ctx, secrets.Jellyfin))...)
 
+	audio := audiobookshelf.Client{URL: "http://" + environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Audiobookshelf), HTTP: observationHTTPClient()}
+	initialized, audioErr := audio.Initialized(ctx)
+	if audioErr == nil {
+		if initialized {
+			audioErr = audio.ReconcileLibrary(ctx, audiobookshelf.Credentials{Username: secrets.Jellyfin.Username, Password: secrets.Jellyfin.Password})
+		} else {
+			audioErr = errPlannedMutation
+		}
+	}
+	actions = append(actions, applicationPlanAction("audiobookshelf", audioErr)...)
 	seerrClient, err := seerr.New("http://"+environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Seerr), observationHTTPClient())
 	if err != nil {
 		actions = append(actions, deferredApplication("seerr", err)...)

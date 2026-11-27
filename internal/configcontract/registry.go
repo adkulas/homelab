@@ -1,6 +1,7 @@
 package configcontract
 
 import (
+	"github.com/adkulas/homelab/internal/audiobookshelf"
 	"github.com/adkulas/homelab/internal/companions"
 	"github.com/adkulas/homelab/internal/contractmodel"
 	"github.com/adkulas/homelab/internal/engine"
@@ -18,16 +19,17 @@ type serviceRegistration struct {
 }
 
 var serviceRegistry = map[string]serviceRegistration{
-	"houndarr":    {title: "Houndarr", settings: companions.HoundarrConfigurationContract},
-	"cleanuparr":  {title: "Cleanuparr", settings: companions.CleanuparrConfigurationContract},
-	"gluetun":     {title: "Gluetun"},
-	"jellyfin":    {title: "Jellyfin", settings: jellyfin.ConfigurationContract},
-	"profilarr":   {title: "Profilarr", settings: engine.ProfilarrConfigurationContract},
-	"prowlarr":    {title: "Prowlarr", settings: prowlarr.ConfigurationContract},
-	"qbittorrent": {title: "qBittorrent", settings: qbittorrent.ConfigurationContract},
-	"radarr":      {title: "Radarr", settings: radarrSettings},
-	"seerr":       {title: "Seerr", settings: seerr.ConfigurationContract},
-	"sonarr":      {title: "Sonarr", settings: sonarrSettings},
+	"audiobookshelf": {title: "Audiobookshelf", settings: audiobookshelf.ConfigurationContract},
+	"houndarr":       {title: "Houndarr", settings: companions.HoundarrConfigurationContract},
+	"cleanuparr":     {title: "Cleanuparr", settings: companions.CleanuparrConfigurationContract},
+	"gluetun":        {title: "Gluetun"},
+	"jellyfin":       {title: "Jellyfin", settings: jellyfin.ConfigurationContract},
+	"profilarr":      {title: "Profilarr", settings: engine.ProfilarrConfigurationContract},
+	"prowlarr":       {title: "Prowlarr", settings: prowlarr.ConfigurationContract},
+	"qbittorrent":    {title: "qBittorrent", settings: qbittorrent.ConfigurationContract},
+	"radarr":         {title: "Radarr", settings: radarrSettings},
+	"seerr":          {title: "Seerr", settings: seerr.ConfigurationContract},
+	"sonarr":         {title: "Sonarr", settings: sonarrSettings},
 }
 
 func radarrSettings() []contractmodel.Setting {

@@ -56,10 +56,10 @@ func TestDisposableStagingRestoreDrillRestoresProductionBackupSafely(t *testing.
 	copyFile(t, filepath.Join(productionData, "media", "series", "The Lucy Show", "Season 01", "The Lucy Show - S01E01.mp4"), filepath.Join(stagingData, "media", "series", "The Lucy Show", "Season 01", "The Lucy Show - S01E01.mp4"), 0o600)
 
 	for _, project := range []string{productionProject, stagingProject} {
-		for _, service := range backupFixtureServiceNames {
-			volume := project + "_" + service + "-config"
+		for _, service := range backupFixtureVolumes {
+			volume := project + "_" + service
 			liveDocker(t, "volume", "create", volume)
-			liveWriteVolumeFile(t, jellyfinImage, volume, project+"-"+service+"\n")
+			liveWriteVolumeFile(t, jellyfinImage, volume, project+"-"+strings.TrimSuffix(service, "-config")+"\n")
 			t.Cleanup(func() { _ = exec.Command("docker", "volume", "rm", "--force", volume).Run() })
 		}
 	}

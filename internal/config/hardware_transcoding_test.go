@@ -24,7 +24,7 @@ func TestValidateEnvironmentHardwareTranscodingPreference(t *testing.T) {
 
 func hardwarePreferenceFixture(preference HardwareTranscodingPreference) MediaStack {
 	return MediaStack{Spec: MediaStackSpec{Environments: map[string]Environment{
-		"production": {DataRoot: "/srv/media/production", HardwareTranscoding: preference},
-		"staging":    {DataRoot: "/srv/media/staging", HardwareTranscoding: preference},
+		"production": {ProjectName: "media-production", SecretsFile: "production.sops.yaml", DataRoot: "/srv/media/production", HardwareTranscoding: preference},
+		"staging":    {ProjectName: "media-staging", SecretsFile: "staging.sops.yaml", DataRoot: "/srv/media/staging", HardwareTranscoding: preference},
 	}}}
 }

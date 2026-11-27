@@ -61,35 +61,6 @@ func (policy SeriesAutomation) Validate() error {
 	return nil
 }
 
-func validateCompanionPortIsolation(environments map[string]Environment) error {
-	type publication struct {
-		environment, service string
-		port                 int
-		companion            bool
-	}
-	var publications []publication
-	for name, environment := range environments {
-		ports := environment.Ports
-		for service, port := range map[string]int{"qbittorrent": ports.QBittorrent, "prowlarr": ports.Prowlarr, "sonarr": ports.Sonarr, "radarr": ports.Radarr, "profilarr": ports.Profilarr, "jellyfin": ports.Jellyfin, "seerr": ports.Seerr, "houndarr": ports.Houndarr, "cleanuparr": ports.Cleanuparr} {
-			companion := IsSeriesCompanion(service)
-			if companion && environment.SeriesAutomation == nil {
-				continue
-			}
-			if port > 0 {
-				publications = append(publications, publication{name, service, port, companion})
-			}
-		}
-	}
-	for index, left := range publications {
-		for _, right := range publications[index+1:] {
-			if left.port == right.port && (left.companion || right.companion) {
-				return fmt.Errorf("companion port collision between %s/%s and %s/%s", left.environment, left.service, right.environment, right.service)
-			}
-		}
-	}
-	return nil
-}
-
 // IsSeriesCompanion identifies services governed by Environment-local series
 // automation, including loopback management and optional legacy inclusion.
 func IsSeriesCompanion(service string) bool { return service == "houndarr" || service == "cleanuparr" }

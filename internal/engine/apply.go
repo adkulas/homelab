@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/adkulas/homelab/internal/audiobookshelf"
 	"github.com/adkulas/homelab/internal/companions"
 	"github.com/adkulas/homelab/internal/config"
 	"github.com/adkulas/homelab/internal/jellyfin"
@@ -246,6 +247,18 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	}
 	if err := seerrClient.ReconcileSonarr(ctx, sonarrAPIKey, seriesPolicy.Profile.Name, seriesAutomationEnabled(environment)); err != nil {
 		return ApplyReport{}, fmt.Errorf("reconcile Seerr Series Library requests: %w", err)
+	}
+	audioCredentials := secrets.Jellyfin
+	if restoreDrillConfirmed {
+		// Cross-Environment drills retain the Staging Audiobookshelf accounts.
+		selected, err := decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment)
+		if err != nil {
+			return ApplyReport{}, err
+		}
+		audioCredentials = selected.Jellyfin
+	}
+	if err := startAudiobookshelf(ctx, plan, environment.ProjectName, audiobookshelf.Credentials{Username: audioCredentials.Username, Password: audioCredentials.Password}); err != nil {
+		return ApplyReport{}, err
 	}
 	if environment.SeriesAutomation != nil {
 		if output, err := runDockerCompose(ctx, plan, "up", "-d", "houndarr", "cleanuparr"); err != nil {

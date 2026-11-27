@@ -390,12 +390,12 @@ func validateHostConflicts(instances []StackInstance, report *Report) {
 				report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_PROJECT_CONFLICT", Explanation: fmt.Sprintf("%s and %s/%s share a Compose project on Host %s", first, instance.Metadata.Name, environmentName, host), Remedy: "Use distinct Compose project names on one Host."})
 			}
 			projects[host][environment.ProjectName] = string(instance.Metadata.Name) + "/" + environmentName
-			for _, port := range orderedPorts(environment.Ports) {
-				owner := string(instance.Metadata.Name) + "/" + environmentName + "/" + port.name
-				if first, exists := ports[host][port.value]; port.value > 0 && exists {
-					report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_PORT_CONFLICT", Explanation: fmt.Sprintf("%s and %s both publish port %d on Host %q.", first, owner, port.value, host), Remedy: "Assign distinct published ports to resources placed on the same Host."})
-				} else if port.value > 0 {
-					ports[host][port.value] = owner
+			for _, port := range environment.PublishedPorts() {
+				owner := string(instance.Metadata.Name) + "/" + environmentName + "/" + port.Service
+				if first, exists := ports[host][port.Port]; port.Port > 0 && exists {
+					report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_PORT_CONFLICT", Explanation: fmt.Sprintf("%s and %s both publish port %d on Host %q.", first, owner, port.Port, host), Remedy: "Assign distinct published ports to resources placed on the same Host."})
+				} else if port.Port > 0 {
+					ports[host][port.Port] = owner
 				}
 			}
 			references := instance.Spec.Media.SensitiveReferences.Environments[environmentName]
@@ -453,23 +453,6 @@ func encryptedDocumentHasRecipients(path string, recipients ...string) bool {
 		}
 	}
 	return true
-}
-
-type namedPort struct {
-	name  string
-	value int
-}
-
-func orderedPorts(ports config.Ports) []namedPort {
-	return []namedPort{
-		{name: "qbittorrent", value: ports.QBittorrent},
-		{name: "prowlarr", value: ports.Prowlarr},
-		{name: "sonarr", value: ports.Sonarr},
-		{name: "radarr", value: ports.Radarr},
-		{name: "profilarr", value: ports.Profilarr},
-		{name: "jellyfin", value: ports.Jellyfin},
-		{name: "seerr", value: ports.Seerr},
-	}
 }
 
 func pathsOverlap(first, second string) bool {
@@ -593,6 +576,9 @@ func loadInventoryStructure(siteDirectory string, site Site, report *Report) (ma
 			report.Diagnostics = append(report.Diagnostics, Diagnostic{Code: "SITE_IDENTIFIER_DUPLICATE", Explanation: fmt.Sprintf("Stack Instance identifier %q is declared by both %q and %q.", instance.Metadata.Name, first, reference), Remedy: "Give every Stack Instance within the Site a unique name."})
 		} else {
 			instanceNames[instance.Metadata.Name] = reference
+			if instance.Spec.Media != nil {
+				config.ApplyPortDefaults(instance.Spec.Media.Environments)
+			}
 			instances = append(instances, instance)
 		}
 	}
