@@ -105,6 +105,6 @@ func imageFixtures() map[string]string {
 	const image = "example.invalid/image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	return map[string]string{
 		"gluetun": image, "qbittorrent": image, "prowlarr": image, "sonarr": image,
-		"radarr": image, "profilarr": image, "jellyfin": image, "seerr": image, "audiobookshelf": image,
+		"calibre-web": image, "radarr": image, "profilarr": image, "jellyfin": image, "seerr": image, "audiobookshelf": image,
 	}
 }

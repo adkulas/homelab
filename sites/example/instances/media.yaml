@@ -49,6 +49,7 @@ spec:
                     houndarr: 8877
                     cleanuparr: 11011
                     seerr: 5055
+                    calibre-web: 8083
             staging:
                 projectName: media-staging
                 dataRoot: /srv/media/staging
@@ -80,3 +81,4 @@ spec:
                     houndarr: 18877
                     cleanuparr: 21011
                     seerr: 15055
+                    calibre-web: 18083

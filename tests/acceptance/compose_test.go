@@ -288,7 +288,7 @@ func TestPlanRendersCoexistingEnvironmentResources(t *testing.T) {
 				"gluetun": {Published: "8080", Target: 8080}, "prowlarr": {Published: "9696", Target: 9696},
 				"sonarr": {Published: "8989", Target: 8989}, "radarr": {Published: "7878", Target: 7878},
 				"profilarr": {Published: "6868", Target: 6868}, "jellyfin": {Published: "8096", Target: 8096},
-				"seerr": {Published: "5055", Target: 5055}, "audiobookshelf": {Published: "13378", Target: 80},
+				"seerr": {Published: "5055", Target: 5055}, "calibre-web": {Published: "8083", Target: 8083}, "audiobookshelf": {Published: "13378", Target: 80},
 			},
 		},
 		"staging": {
@@ -299,7 +299,7 @@ func TestPlanRendersCoexistingEnvironmentResources(t *testing.T) {
 				"gluetun": {Published: "18080", Target: 18080}, "prowlarr": {Published: "19696", Target: 9696},
 				"sonarr": {Published: "18989", Target: 8989}, "radarr": {Published: "17878", Target: 7878},
 				"profilarr": {Published: "16868", Target: 6868}, "jellyfin": {Published: "18096", Target: 8096},
-				"seerr": {Published: "15055", Target: 5055}, "audiobookshelf": {Published: "23378", Target: 80},
+				"seerr": {Published: "15055", Target: 5055}, "calibre-web": {Published: "18083", Target: 8083}, "audiobookshelf": {Published: "23378", Target: 80},
 			},
 		},
 	}
@@ -328,6 +328,16 @@ func TestPlanRendersCoexistingEnvironmentResources(t *testing.T) {
 				"radarr":      {Type: "bind", Source: expected.dataRoot, Target: "/data"},
 				"sonarr":      {Type: "bind", Source: expected.dataRoot, Target: "/data"},
 				"jellyfin":    {Type: "bind", Source: expected.dataRoot + "/media", Target: "/data/media", ReadOnly: true},
+			}
+			calibre := project.Services["calibre-web"]
+			for _, mount := range []composeMount{
+				{Type: "bind", Source: expected.dataRoot + "/books/calibre", Target: "/calibre-library"},
+				{Type: "bind", Source: expected.dataRoot + "/books/ebooks/inbox", Target: "/cwa-book-ingest"},
+				{Type: "volume", Source: "calibre-web-config", Target: "/config"},
+			} {
+				if !containsMount(calibre.Volumes, mount) {
+					t.Errorf("Calibre-Web missing mount %+v", mount)
+				}
 			}
 			wantDataMounts["audiobookshelf"] = composeMount{Type: "bind", Source: expected.dataRoot + "/books/audiobooks", Target: "/audiobooks", ReadOnly: true}
 			for name, target := range map[string]string{"audiobookshelf-config": "/config", "audiobookshelf-metadata": "/metadata"} {

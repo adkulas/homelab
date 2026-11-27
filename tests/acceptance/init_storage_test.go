@@ -33,6 +33,7 @@ func TestInitProvisionsOnlyTheSelectedEnvironmentDataLayout(t *testing.T) {
 
 	for _, relative := range []string{
 		".",
+		"books/calibre", "books/ebooks/ready", "books/ebooks/inbox",
 		"torrents",
 		"media",
 		"books",

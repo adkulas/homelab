@@ -82,7 +82,7 @@ func observeApplications(ctx context.Context, request PlanRequest, plan Plan) []
 		return deferredApplication("sonarr", err)
 	}
 
-	actions := make([]PlanAction, 0)
+	actions := applicationPlanAction("calibre-web", observeCalibrePolicy(ctx, plan))
 	qbitAddress := environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.QBittorrent)
 	qbitClient := qbittorrent.New("http://"+qbitAddress, observationHTTPClient())
 	if err := qbitClient.Login(ctx, secrets.QBittorrent.Username, secrets.QBittorrent.Password); err != nil {

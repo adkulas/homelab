@@ -11,6 +11,7 @@ const dataDirectoryMode = 0o750
 var dataLayout = []string{
 	"books",
 	filepath.Join("books", "audiobooks"),
+	"books/calibre", "books/ebooks", "books/ebooks/ready", "books/ebooks/inbox",
 	"torrents",
 	filepath.Join("torrents", "movies"),
 	filepath.Join("torrents", "series"),

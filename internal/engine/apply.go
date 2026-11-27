@@ -248,16 +248,16 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if err := seerrClient.ReconcileSonarr(ctx, sonarrAPIKey, seriesPolicy.Profile.Name, seriesAutomationEnabled(environment)); err != nil {
 		return ApplyReport{}, fmt.Errorf("reconcile Seerr Series Library requests: %w", err)
 	}
-	audioCredentials := secrets.Jellyfin
+	bookCredentials := secrets.Jellyfin
 	if restoreDrillConfirmed {
-		// Cross-Environment drills retain the Staging Audiobookshelf accounts.
+		// Cross-Environment drills retain the Staging book-service accounts.
 		selected, err := decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment)
 		if err != nil {
 			return ApplyReport{}, err
 		}
-		audioCredentials = selected.Jellyfin
+		bookCredentials = selected.Jellyfin
 	}
-	if err := startAudiobookshelf(ctx, plan, environment.ProjectName, audiobookshelf.Credentials{Username: audioCredentials.Username, Password: audioCredentials.Password}); err != nil {
+	if err := startAudiobookshelf(ctx, plan, environment.ProjectName, audiobookshelf.Credentials{Username: bookCredentials.Username, Password: bookCredentials.Password}); err != nil {
 		return ApplyReport{}, err
 	}
 	if environment.SeriesAutomation != nil {
@@ -274,6 +274,9 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 		}); err != nil {
 			return ApplyReport{}, fmt.Errorf("reconcile series companions: %w", err)
 		}
+	}
+	if err := prepareCalibreWeb(ctx, plan, environment, declared.Spec.Defaults, bookCredentials.Password); err != nil {
+		return ApplyReport{}, err
 	}
 	if restoreDrillConfirmed {
 		if err := completeRestoreDrillGate(environment.BackupRoot); err != nil {

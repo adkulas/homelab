@@ -38,7 +38,7 @@ func topologySettings(definition serviceDefinition) []contractmodel.Setting {
 	if definition.port != nil && !config.IsSeriesCompanion(service) {
 		settings = append(settings, contractmodel.Declared("lanBindAddress", "LAN bind address", "StackInstance#spec.media.defaults.lanBindAddress", "IP address", nil, "Change spec.media.defaults.lanBindAddress in the selected Stack Instance.", "render", "reconcile", "verify"))
 	}
-	if definition.dataMount != nil {
+	if definition.dataMount != nil || service == "calibre-web" {
 		settings = append(settings, contractmodel.Declared("dataRoot", "Environment data root", "StackInstance#spec.media.environments.<environment>.dataRoot", "absolute path", nil, "Change the selected Environment dataRoot in the selected Stack Instance.", "render", "initialize", "verify", "preserve"))
 	}
 	if service == "gluetun" {

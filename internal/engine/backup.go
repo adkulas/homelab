@@ -14,11 +14,17 @@ import (
 const backupSchemaVersion = "homelab.media-stack/backup/v1alpha1"
 
 type BackupRequest struct {
-	plan          PlanRequest
-	label         string
-	protect       bool
-	generatedAt   time.Time
-	skipRetention bool
+	plan                  PlanRequest
+	label                 string
+	protect               bool
+	generatedAt           time.Time
+	includeCalibreLibrary bool
+	skipRetention         bool
+}
+
+func (request BackupRequest) WithCalibreLibrary(include bool) BackupRequest {
+	request.includeCalibreLibrary = include
+	return request
 }
 
 type BackupArchive struct {
@@ -33,22 +39,23 @@ type RetentionDecision struct {
 }
 
 type BackupReport struct {
-	MissingVolumes     []string            `json:"missingVolumes,omitempty"`
-	RecoveryDocuments  []string            `json:"recoveryDocuments,omitempty"`
-	Scope              *config.SecretScope `json:"scope,omitempty"`
-	SchemaVersion      string              `json:"schemaVersion"`
-	CLIContractVersion string              `json:"cliContractVersion"`
-	ID                 string              `json:"id"`
-	ManifestPath       string              `json:"manifestPath"`
-	Environment        string              `json:"environment"`
-	ProjectName        string              `json:"projectName"`
-	Label              string              `json:"label,omitempty"`
-	Protected          bool                `json:"protected"`
-	ConfigDigest       string              `json:"configDigest"`
-	VersionDigest      string              `json:"versionDigest"`
-	GeneratedAt        time.Time           `json:"generatedAt"`
-	Complete           bool                `json:"complete"`
-	Services           []BackupService     `json:"services"`
+	CalibreLibrarySHA256 string              `json:"calibreLibrarySHA256,omitempty"`
+	MissingVolumes       []string            `json:"missingVolumes,omitempty"`
+	RecoveryDocuments    []string            `json:"recoveryDocuments,omitempty"`
+	Scope                *config.SecretScope `json:"scope,omitempty"`
+	SchemaVersion        string              `json:"schemaVersion"`
+	CLIContractVersion   string              `json:"cliContractVersion"`
+	ID                   string              `json:"id"`
+	ManifestPath         string              `json:"manifestPath"`
+	Environment          string              `json:"environment"`
+	ProjectName          string              `json:"projectName"`
+	Label                string              `json:"label,omitempty"`
+	Protected            bool                `json:"protected"`
+	ConfigDigest         string              `json:"configDigest"`
+	VersionDigest        string              `json:"versionDigest"`
+	GeneratedAt          time.Time           `json:"generatedAt"`
+	Complete             bool                `json:"complete"`
+	Services             []BackupService     `json:"services"`
 }
 
 type backupConsistencyMethod string

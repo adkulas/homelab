@@ -718,6 +718,9 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 		t.Fatal(err)
 	}
 	declared := strings.Replace(string(readFile(t, filepath.Join(repositoryRoot(t), "tests", "fixtures", "media-stack.yaml"))), "qbittorrent: 18080", "qbittorrent: "+apiURL.Port(), 1)
+	declared = strings.Replace(declared, "runtimeUID: 1000", fmt.Sprintf("runtimeUID: %d", os.Getuid()), 1)
+	declared = strings.Replace(declared, "runtimeGID: 1000", fmt.Sprintf("runtimeGID: %d", os.Getgid()), 1)
+	declared = strings.Replace(declared, "/srv/media/staging", filepath.Join(temporary, "staging"), 1)
 	if freshProfilarr {
 		declared = strings.Replace(declared, "/mnt/backups/media/staging", filepath.Join(temporary, "backups"), 1)
 	}
@@ -782,6 +785,10 @@ EOF
 	topologyReady := filepath.Join(temporary, "topology-ready")
 	libraryMarkers := filepath.Join(temporary, "jellyfin-library-markers")
 	writeFile(t, filepath.Join(binDirectory, "docker"), []byte(`#!/bin/sh
+  case "$*" in
+    "compose -f - exec -T calibre-web /lsiopy/bin/python -c "*" observe") cat >/dev/null; echo "${CALIBRE_POLICY:-calibre-ready}"; exit 0 ;;
+    "compose -f "*"/calibre-compose-"*" run --rm --no-deps -T --entrypoint "*) test "$(cat)" = fixture-jellyfin-password || exit 1; printf 'calibre-ready\n'; exit 0 ;;
+  esac
   if [ -n "$APPLY_REAL_PROFILARR" ]; then
     if [ "$1" = start ] && [ "$APPLY_PROFILARR_FAULT" = restart ]; then exit 1; fi
     if [ "$1" = start ] && [ "$APPLY_PROFILARR_FAULT" = interrupted ]; then printf '%s\n' "$PPID" > "$APPLY_PROFILARR_PID"; fi
@@ -822,6 +829,7 @@ EOF
 	      'prowlarr hash-prowlarr' \
 	      'qbittorrent hash-qbittorrent' \
 	      'radarr hash-radarr' \
+	      'calibre-web hash-calibre-web' \
 	      'seerr hash-seerr' \
 	      'sonarr hash-sonarr'
 	    exit 0 ;;
@@ -838,6 +846,7 @@ EOF
 	      '{"Labels":"com.docker.compose.service=prowlarr,com.docker.compose.config-hash=hash-prowlarr","State":"running"}' \
 	      '{"Labels":"com.docker.compose.service=qbittorrent,com.docker.compose.config-hash=hash-qbittorrent","State":"running"}' \
 	      '{"Labels":"com.docker.compose.service=radarr,com.docker.compose.config-hash=hash-radarr","State":"running"}' \
+	      '{"Labels":"com.docker.compose.service=calibre-web,com.docker.compose.config-hash=hash-calibre-web","State":"running"}' \
 	      '{"Labels":"com.docker.compose.service=seerr,com.docker.compose.config-hash=hash-seerr","State":"running"}' \
 	      '{"Labels":"com.docker.compose.service=sonarr,com.docker.compose.config-hash=hash-sonarr","State":"running"}'
 	    exit 0 ;;
@@ -858,6 +867,7 @@ EOF
 	      '{"Labels":"com.docker.compose.volume=prowlarr-config","Name":"media-staging_prowlarr-config"}' \
 	      '{"Labels":"com.docker.compose.volume=qbittorrent-config","Name":"media-staging_qbittorrent-config"}' \
 	      '{"Labels":"com.docker.compose.volume=radarr-config","Name":"media-staging_radarr-config"}' \
+	      '{"Labels":"com.docker.compose.volume=calibre-web-config","Name":"media-staging_calibre-web-config"}' \
 	      '{"Labels":"com.docker.compose.volume=seerr-config","Name":"media-staging_seerr-config"}' \
 	      '{"Labels":"com.docker.compose.volume=sonarr-config","Name":"media-staging_sonarr-config"}'
 	    exit 0 ;;
@@ -886,6 +896,7 @@ EOF
 	  "compose -f - exec -T --user "*" media-stack-library-markers create")
 	    touch "$APPLY_LIBRARY_MARKERS"
 	    exit $? ;;
+	  "compose -f - up -d --wait calibre-web") exit 0 ;;
 	  "network ls -q --filter label=com.docker.compose.project=media-staging --filter label=com.docker.compose.network=audiobookshelf-setup") exit 0 ;;
    "compose -f - ps -q audiobookshelf") [ ! -f "$APPLY_TOPOLOGY_READY.audio" ] || echo fixture-abs; exit 0 ;;
    "compose -f - up -d audiobookshelf") touch "$APPLY_TOPOLOGY_READY.audio"; exit 0 ;;
@@ -1050,6 +1061,7 @@ EOF
 	dockerLines := strings.Split(strings.TrimSpace(string(readFile(t, dockerLog))), "\n")
 	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - ps -q qbittorrent\ninspect --format {{.State.StartedAt}} fixture-qbittorrent-id\ncompose -f - logs --no-color --since 2026-08-28T12:34:56.123456789Z qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr\ncompose -f - up -d jellyfin\ncompose -f - restart jellyfin\ncompose -f - up -d seerr"
 	wantDocker += "\ncompose -f - ps -q audiobookshelf\ncompose -f - up -d audiobookshelf\ncompose -f - port audiobookshelf 80\ncompose -f - up -d audiobookshelf\ncompose -f - port audiobookshelf 80\nnetwork ls -q --filter label=com.docker.compose.project=media-staging --filter label=com.docker.compose.network=audiobookshelf-setup\ncompose -f - up -d houndarr cleanuparr"
+	wantDocker += "\ncompose -f - up -d --wait calibre-web"
 	if !slices.ContainsFunc(dockerLines, func(line string) bool {
 		return strings.Contains(line, "exec -T --user ") && strings.Contains(line, "media-stack-library.keep")
 	}) {
@@ -1216,13 +1228,16 @@ EOF
 	preferences["save_path"] = "/data/torrents/drifted"
 	driftPlan := exec.Command("go", "run", "./cmd/media-stack", "plan", "--environment", "staging", "--config", configPath)
 	driftPlan.Dir = command.Dir
-	driftPlan.Env = command.Env
+	driftPlan.Env = append(slices.Clone(command.Env), "CALIBRE_POLICY=drift")
 	driftPlanOutput, err := driftPlan.CombinedOutput()
 	if err != nil {
 		t.Fatalf("media-stack drift plan failed: %v\n%s", err, driftPlanOutput)
 	}
 	if !strings.Contains(string(driftPlanOutput), "# update qbittorrent: application settings differ from Declared Configuration") {
 		t.Errorf("plan did not report qBittorrent application drift:\n%s", driftPlanOutput)
+	}
+	if !strings.Contains(string(driftPlanOutput), "# update calibre-web: application settings differ") {
+		t.Error("plan missed Calibre conversion settings drift")
 	}
 	if preferences["save_path"] != "/data/torrents/drifted" {
 		t.Errorf("plan mutated qBittorrent preferences: %v", preferences)

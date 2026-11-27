@@ -19,6 +19,7 @@ type serviceRegistration struct {
 }
 
 var serviceRegistry = map[string]serviceRegistration{
+	"calibre-web":    {title: "Calibre-Web Automated", settings: engine.CalibreWebConfigurationContract},
 	"audiobookshelf": {title: "Audiobookshelf", settings: audiobookshelf.ConfigurationContract},
 	"houndarr":       {title: "Houndarr", settings: companions.HoundarrConfigurationContract},
 	"cleanuparr":     {title: "Cleanuparr", settings: companions.CleanuparrConfigurationContract},

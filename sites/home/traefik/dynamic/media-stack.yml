@@ -42,6 +42,11 @@ http:
       entryPoints:
         - web
       service: audiobookshelf-production
+    calibre-web-production:
+      rule: Host(`calibre-web.home`)
+      entryPoints:
+        - web
+      service: calibre-web-production
     qbittorrent-staging:
       rule: Host(`qbittorrent-staging.home`)
       entryPoints:
@@ -82,6 +87,11 @@ http:
       entryPoints:
         - web
       service: audiobookshelf-staging
+    calibre-web-staging:
+      rule: Host(`calibre-web-staging.home`)
+      entryPoints:
+        - web
+      service: calibre-web-staging
   services:
     qbittorrent-production:
       loadBalancer:
@@ -115,6 +125,10 @@ http:
       loadBalancer:
         servers:
           - url: http://homelab.home:13378
+    calibre-web-production:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:8083
     qbittorrent-staging:
       loadBalancer:
         servers:
@@ -147,3 +161,7 @@ http:
       loadBalancer:
         servers:
           - url: http://homelab.home:23378
+    calibre-web-staging:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:18083

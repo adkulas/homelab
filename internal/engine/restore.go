@@ -181,7 +181,7 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	}
 	excludedServices := []string(nil)
 	if request.asRestoreDrill {
-		excludedServices = []string{"audiobookshelf", "profilarr"}
+		excludedServices = []string{"audiobookshelf", "calibre-web", "profilarr"}
 		sources = excludeRestoreSources(sources, excludedServices)
 	}
 	for _, source := range sources {
@@ -189,7 +189,7 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	}
 	preview := fmt.Sprintf("replace %s Environment state from %s backup", request.plan.environment, backup.Environment)
 	if request.asRestoreDrill {
-		preview = fmt.Sprintf("restore drill: replace %s Environment state from %s backup with acquisition disabled, integrations gated, rotated credentials, and Production Audiobookshelf and Profilarr excluded", request.plan.environment, backup.Environment)
+		preview = fmt.Sprintf("restore drill: replace %s Environment state from %s backup with acquisition disabled, integrations gated, rotated credentials, and Production services excluded (%s)", request.plan.environment, backup.Environment, strings.Join(excludedServices, ", "))
 	}
 	report := RestoreReport{
 		SchemaVersion:       backupSchemaVersion,

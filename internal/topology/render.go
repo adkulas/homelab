@@ -30,6 +30,7 @@ type serviceDefinition struct {
 }
 
 var mandatoryServices = []serviceDefinition{
+	{name: "calibre-web", identity: puidIdentity, configTarget: "/config", port: func(ports config.Ports) int { return ports.CalibreWeb }, targetPort: 8083},
 	{name: "gluetun", identity: inheritedIdentity, configTarget: "/gluetun", port: func(ports config.Ports) int { return ports.QBittorrent }, targetPort: 8080},
 	{name: "qbittorrent", identity: puidIdentity, configTarget: "/config", dataMount: func(root string) string { return path.Join(root, "torrents") + ":/data/torrents" }},
 	{name: "prowlarr", identity: puidIdentity, configTarget: "/config", port: func(ports config.Ports) int { return ports.Prowlarr }, targetPort: 9696},
@@ -52,6 +53,7 @@ type composeProject struct {
 }
 
 type composeService struct {
+	Tmpfs       []string                         `yaml:"tmpfs,omitempty"`
 	Image       string                           `yaml:"image"`
 	User        string                           `yaml:"user,omitempty"`
 	Environment map[string]string                `yaml:"environment"`
@@ -138,6 +140,9 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 			mounts = append(mounts, "audiobookshelf-metadata:/metadata")
 			project.Volumes["audiobookshelf-metadata"] = composeVolume{}
 		}
+		if definition.name == "calibre-web" {
+			mounts = append(mounts, path.Join(environment.DataRoot, "books/calibre")+":/calibre-library", path.Join(environment.DataRoot, "books/ebooks/inbox")+":/cwa-book-ingest")
+		}
 		if definition.dataMount != nil {
 			mounts = append(mounts, definition.dataMount(environment.DataRoot))
 		}
@@ -197,7 +202,12 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 		if bootRecovery && (definition.name == "gluetun" || definition.name == "qbittorrent") {
 			restart = "on-failure"
 		}
+		var maskedPaths []string
+		if definition.name == "sonarr" || definition.name == "radarr" {
+			maskedPaths = []string{"/data/books:ro,noexec,nosuid,nodev"}
+		}
 		project.Services[definition.name] = composeService{
+			Tmpfs:       maskedPaths,
 			Image:       reference,
 			User:        user,
 			Environment: serviceEnvironment,
