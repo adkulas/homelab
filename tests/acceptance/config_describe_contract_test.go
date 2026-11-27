@@ -203,7 +203,7 @@ func TestConfigDescribeReportsStableUsageForUnknownService(t *testing.T) {
 	if err == nil {
 		t.Fatalf("unknown service succeeded:\n%s", output)
 	}
-	want := "unknown service \"lidarr\"; supported services: audiobookshelf, cleanuparr, gluetun, houndarr, jellyfin, profilarr, prowlarr, qbittorrent, radarr, seerr, sonarr"
+	want := "unknown service \"lidarr\"; supported services: audiobookshelf, calibre-web, cleanuparr, gluetun, houndarr, jellyfin, profilarr, prowlarr, qbittorrent, radarr, seerr, sonarr"
 	if !strings.Contains(string(output), want) {
 		t.Fatalf("unknown-service error = %s", output)
 	}

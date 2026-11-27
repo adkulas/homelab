@@ -45,6 +45,11 @@ The Media Stack upgrade runbook acceptance check uses Git, Bash, and `jq`. It ru
 against disposable Site Inventory and Git history on the development Host. Install `jq` to include this check in
 `go test ./...`.
 
+The pinned Calibre-Web rehearsal runs on Docker with
+`MEDIA_STACK_LIVE_CALIBRE=1 go test ./internal/engine -run '^TestCalibreOwnedEPUBDownloadsBothFormats$' -count=1`.
+It generates an owned EPUB and downloads both formats from one catalog record.
+The [Kindle runbook](services/media/README.md#import-an-owned-ebook-and-read-it-on-kindle) covers physical Staging verification.
+
 ## Notes
 
 - Use the local build for day-to-day development and debugging.

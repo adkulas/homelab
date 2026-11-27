@@ -97,6 +97,7 @@ type Server struct {
 }
 
 type Ports struct {
+	CalibreWeb     int `yaml:"calibre-web,omitempty"`
 	Audiobookshelf int `yaml:"audiobookshelf,omitempty"`
 	QBittorrent    int `yaml:"qbittorrent"`
 	Prowlarr       int `yaml:"prowlarr"`
@@ -116,7 +117,7 @@ type PublishedPort struct {
 
 func (env Environment) PublishedPorts() []PublishedPort {
 	p := env.Ports
-	ports := []PublishedPort{{"qbittorrent", p.QBittorrent}, {"prowlarr", p.Prowlarr}, {"sonarr", p.Sonarr}, {"radarr", p.Radarr}, {"profilarr", p.Profilarr}, {"jellyfin", p.Jellyfin}, {"seerr", p.Seerr}, {"audiobookshelf", p.Audiobookshelf}}
+	ports := []PublishedPort{{"qbittorrent", p.QBittorrent}, {"prowlarr", p.Prowlarr}, {"sonarr", p.Sonarr}, {"radarr", p.Radarr}, {"profilarr", p.Profilarr}, {"jellyfin", p.Jellyfin}, {"seerr", p.Seerr}, {"audiobookshelf", p.Audiobookshelf}, {"calibre-web", p.CalibreWeb}}
 	if env.SeriesAutomation != nil {
 		ports = append(ports, PublishedPort{"houndarr", p.Houndarr}, PublishedPort{"cleanuparr", p.Cleanuparr})
 	}
@@ -144,7 +145,7 @@ func validatePortIsolation(environments map[string]Environment) error {
 			if IsSeriesCompanion(left.Service) || IsSeriesCompanion(right.Service) {
 				return fmt.Errorf("companion port collision between %s/%s and %s/%s", left.environment, left.Service, right.environment, right.Service)
 			}
-			if left.Service == "audiobookshelf" || right.Service == "audiobookshelf" {
+			if left.Service == "calibre-web" || right.Service == "calibre-web" || left.Service == "audiobookshelf" || right.Service == "audiobookshelf" {
 				return fmt.Errorf("port collision between %s/%s and %s/%s", left.environment, left.Service, right.environment, right.Service)
 			}
 		}
@@ -197,8 +198,14 @@ func ApplyPortDefaults(environments map[string]Environment) {
 			if name == "staging" {
 				env.Ports.Audiobookshelf = 23378
 			}
-			environments[name] = env
 		}
+		if env.Ports.CalibreWeb == 0 {
+			env.Ports.CalibreWeb = 8083
+			if name == "staging" {
+				env.Ports.CalibreWeb = 18083
+			}
+		}
+		environments[name] = env
 	}
 }
 
@@ -229,6 +236,9 @@ func (declared MediaStack) validateEnvironment(name string, allowMissingHardware
 		return err
 	}
 	for environmentName, environment := range declared.Spec.Environments {
+		if p := environment.Ports.CalibreWeb; p < 0 || p > 65535 {
+			return fmt.Errorf("environment %s calibre-web port must be 1..65535", environmentName)
+		}
 		if environment.ProjectName != "" && !composeProjectName.MatchString(environment.ProjectName) {
 			return fmt.Errorf("environment %s requires a valid Compose project name", environmentName)
 		}

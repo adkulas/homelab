@@ -42,6 +42,11 @@ http:
       entryPoints:
         - web
       service: laptop-audiobookshelf-production
+    laptop-calibre-web-production:
+      rule: Host(`calibre-web.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-calibre-web-production
     laptop-qbittorrent-staging:
       rule: Host(`qbittorrent.staging.laptop.home`)
       entryPoints:
@@ -82,6 +87,11 @@ http:
       entryPoints:
         - web
       service: laptop-audiobookshelf-staging
+    laptop-calibre-web-staging:
+      rule: Host(`calibre-web.staging.laptop.home`)
+      entryPoints:
+        - web
+      service: laptop-calibre-web-staging
   services:
     laptop-qbittorrent-production:
       loadBalancer:
@@ -115,6 +125,10 @@ http:
       loadBalancer:
         servers:
           - url: http://laptop.home:13378
+    laptop-calibre-web-production:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:8083
     laptop-qbittorrent-staging:
       loadBalancer:
         servers:
@@ -147,3 +161,7 @@ http:
       loadBalancer:
         servers:
           - url: http://laptop.home:23378
+    laptop-calibre-web-staging:
+      loadBalancer:
+        servers:
+          - url: http://laptop.home:18083

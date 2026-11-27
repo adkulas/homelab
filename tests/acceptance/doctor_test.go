@@ -46,6 +46,7 @@ func TestDoctorProbesTheApplicationStorageMountsAsTheDeclaredRuntimeIdentity(t *
 	}
 	for _, code := range []string{
 		"PREFLIGHT_STORAGE_RUNTIME_IDENTITY",
+		"PREFLIGHT_CALIBRE_INTAKE",
 		"PREFLIGHT_STORAGE_PERMISSIONS",
 		"PREFLIGHT_STORAGE_SAME_DEVICE",
 		"PREFLIGHT_STORAGE_HARDLINK",

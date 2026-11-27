@@ -180,6 +180,7 @@ func runBackup(ctx context.Context, arguments []string) error {
 	configPath := flags.String("config", "", "Explicit standalone Declared Configuration path")
 	selection := deploymentFlags(flags)
 	label := flags.String("label", "", "optional backup label")
+	calibreLibrary := flags.Bool("include-calibre-library", false, "capture the complete Calibre library for storage recovery")
 	protect := flags.Bool("protect", false, "protect backup from retention")
 	nowValue := flags.String("now", "", "backup and retention time in RFC3339")
 	output := flags.String("output", "human", "human or json")
@@ -213,7 +214,7 @@ func runBackup(ctx context.Context, arguments []string) error {
 		return err
 	}
 	request = request.WithDeployment(deployment)
-	report, err := engine.New().Backup(ctx, request)
+	report, err := engine.New().Backup(ctx, request.WithCalibreLibrary(*calibreLibrary))
 	if err != nil {
 		return operationalFailure{cause: err}
 	}

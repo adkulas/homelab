@@ -148,6 +148,13 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 		})
 	}
 
+	var libraryDigest string
+	if request.includeCalibreLibrary {
+		libraryDigest, err = archiveCalibreLibrary(ctx, environment.DataRoot, incompletePath)
+		if err != nil {
+			return BackupReport{}, fmt.Errorf("capture Calibre library for storage backup: %w", err)
+		}
+	}
 	if resumePending {
 		resumePending = false
 		if err := resumeBackupServices(ctx, plan, composePath, environment.ProjectName, runningNames); err != nil {
@@ -159,20 +166,21 @@ func (engine localEngine) executeBackup(ctx context.Context, request BackupReque
 	}
 
 	report = BackupReport{
-		Scope:              environment.SecretScope,
-		SchemaVersion:      backupSchemaVersion,
-		CLIContractVersion: backupCLIContractVersion,
-		ID:                 id,
-		ManifestPath:       filepath.Join(finalPath, "manifest.json"),
-		Environment:        request.plan.environment,
-		ProjectName:        environment.ProjectName,
-		Label:              request.label,
-		Protected:          request.protect,
-		ConfigDigest:       checksum(configContents),
-		VersionDigest:      checksum(versionContents),
-		GeneratedAt:        generatedAt,
-		Complete:           true,
-		Services:           services,
+		CalibreLibrarySHA256: libraryDigest,
+		Scope:                environment.SecretScope,
+		SchemaVersion:        backupSchemaVersion,
+		CLIContractVersion:   backupCLIContractVersion,
+		ID:                   id,
+		ManifestPath:         filepath.Join(finalPath, "manifest.json"),
+		Environment:          request.plan.environment,
+		ProjectName:          environment.ProjectName,
+		Label:                request.label,
+		Protected:            request.protect,
+		ConfigDigest:         checksum(configContents),
+		VersionDigest:        checksum(versionContents),
+		GeneratedAt:          generatedAt,
+		Complete:             true,
+		Services:             services,
 	}
 	if err := publishCapturedBackup(incompletePath, finalPath, report); err != nil {
 		return BackupReport{}, err
@@ -428,6 +436,15 @@ func verifyPublishedBackup(report BackupReport) error {
 	expected = append(expected, '\n')
 	if !bytes.Equal(manifest, expected) {
 		return fmt.Errorf("verify published manifest: document differs from completed backup report")
+	}
+	if published.CalibreLibrarySHA256 != "" {
+		_, digest, err := checksumFile(filepath.Join(filepath.Dir(report.ManifestPath), calibreLibraryArchive))
+		if err != nil {
+			return err
+		}
+		if digest != published.CalibreLibrarySHA256 {
+			return fmt.Errorf("published Calibre library archive checksum mismatch")
+		}
 	}
 	return verifyBackupArchives(filepath.Dir(report.ManifestPath), published.Services)
 }

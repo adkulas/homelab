@@ -322,7 +322,7 @@ func TestRestoreDrillRestoresSafeStagingStateWithRotatedCredentials(t *testing.T
 		`"sourceEnvironment":"production"`,
 		`"acquisitionDisabled":true`,
 		`"integrationsGated":true`,
-		`"excludedServices":["audiobookshelf","profilarr"]`,
+		`"excludedServices":["audiobookshelf","calibre-web","profilarr"]`,
 		`"startedServices":["jellyfin"]`,
 		`"completed":true`,
 	} {
@@ -342,7 +342,7 @@ func TestRestoreDrillRestoresSafeStagingStateWithRotatedCredentials(t *testing.T
 			t.Fatalf("read post-drill %s state: %v", volume, err)
 		}
 		want := volume + "\n"
-		if volume == "profilarr-config" || strings.HasPrefix(volume, "audiobookshelf-") {
+		if volume == "calibre-web-config" || volume == "profilarr-config" || strings.HasPrefix(volume, "audiobookshelf-") {
 			want = "staging-" + volume + "\n"
 		}
 		if string(contents) != want {

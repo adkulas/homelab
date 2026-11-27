@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-var backupFixtureVolumes = []string{"audiobookshelf-config", "audiobookshelf-metadata", "gluetun-config", "qbittorrent-config", "prowlarr-config", "sonarr-config", "radarr-config", "profilarr-config", "jellyfin-config", "seerr-config", "houndarr-config", "cleanuparr-config"}
+var backupFixtureVolumes = []string{"calibre-web-config", "audiobookshelf-config", "audiobookshelf-metadata", "gluetun-config", "qbittorrent-config", "prowlarr-config", "sonarr-config", "radarr-config", "profilarr-config", "jellyfin-config", "seerr-config", "houndarr-config", "cleanuparr-config"}
 
 func TestBackupAppliesConfiguredRetentionToPublishedEnvironmentArchives(t *testing.T) {
 	repository := repositoryRoot(t)
@@ -179,11 +179,21 @@ func TestBackupPublishesVerifiedArchivesForEveryMutableServiceVolume(t *testing.
 	backupRoot := filepath.Join(temporary, "backups", "staging")
 	configPath := backupConfig(t, repository, temporary)
 	fixtureRoot := filepath.Join(temporary, "volumes")
+	library := filepath.Join(temporary, "library-data", "books", "calibre")
+	configBytes := string(readFile(t, configPath))
+	writeFile(t, configPath, []byte(strings.Replace(configBytes, "/srv/media/staging", filepath.Join(temporary, "library-data"), 1)), 0600)
+	for _, name := range []string{"metadata.db", "Author/Book (1)/Book.epub", "Author/Book (1)/Book.azw3"} {
+		path := filepath.Join(library, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, path, []byte(name), 0640)
+	}
 	volumes := backupFixtureVolumes
 	createBackupVolumeFixtures(t, fixtureRoot, "media-staging")
 
 	dockerLog := filepath.Join(temporary, "docker.log")
-	command := backupCommand(t, "--environment", "staging", "--config", configPath, "--output", "json", "--label", "before-upgrade", "--protect")
+	command := backupCommand(t, "--environment", "staging", "--config", configPath, "--output", "json", "--label", "before-upgrade", "--protect", "--include-calibre-library")
 	command.Env = append(os.Environ(),
 		"PATH="+fakeDockerPath(t, temporary)+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"FAKE_DOCKER_FIXTURE_ROOT="+fixtureRoot,
@@ -232,6 +242,15 @@ func TestBackupPublishesVerifiedArchivesForEveryMutableServiceVolume(t *testing.
 	}
 	if len(report.ConfigDigest) != 64 || len(report.VersionDigest) != 64 {
 		t.Fatalf("backup input digests are incomplete: %#v", report)
+	}
+	restored := t.TempDir()
+	if msg, err := exec.Command("tar", "-xf", filepath.Join(backupRoot, report.ID, "calibre-library.tar"), "-C", restored).CombinedOutput(); err != nil {
+		t.Fatalf("recover Calibre library: %v %s", err, msg)
+	}
+	for _, name := range []string{"metadata.db", "Author/Book (1)/Book.epub", "Author/Book (1)/Book.azw3"} {
+		if got := string(readFile(t, filepath.Join(restored, name))); got != name {
+			t.Fatalf("recovered %s = %q", name, got)
+		}
 	}
 	wantManifestPath := filepath.Join(backupRoot, report.ID, "manifest.json")
 	if report.ManifestPath != wantManifestPath {
@@ -515,7 +534,7 @@ case "$1" in
 		fi
 		;;
       *" ps --status running --services "*)
-        printf '%s\n' gluetun qbittorrent prowlarr sonarr radarr profilarr jellyfin seerr houndarr cleanuparr audiobookshelf
+        printf '%s\n' gluetun qbittorrent prowlarr sonarr radarr profilarr jellyfin seerr houndarr cleanuparr audiobookshelf calibre-web
         ;;
     esac
     ;;

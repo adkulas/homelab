@@ -11,6 +11,9 @@ func topologySupplement(definition serviceDefinition) []contractmodel.Setting {
 	settings := []contractmodel.Setting{
 		contractmodel.Derived("configMount", "Mutable configuration mount", "configVolume + "+definition.configTarget, "The Environment-scoped configuration volume is mounted at the service's required configuration path.", "render"),
 	}
+	if definition.name == "sonarr" || definition.name == "radarr" {
+		settings = append(settings, contractmodel.Fixed("books.mask", "Book library isolation", "/data/books", "A read-only tmpfs hides the book intake and Calibre library from this service.", "render"))
+	}
 	if definition.identity == puidIdentity {
 		settings = append(settings, contractmodel.Fixed("runtime.mode", "Runtime identity mechanism", "PUID and PGID environment", "The image receives the declared numeric identity through LinuxServer-compatible variables.", "render"))
 	}

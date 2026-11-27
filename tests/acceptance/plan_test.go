@@ -21,6 +21,7 @@ func TestPlanRendersCheckedInImagesForSelectedEnvironment(t *testing.T) {
 	}
 
 	want := map[string]string{
+		"calibre-web":    "ghcr.io/crocodilestick/calibre-web-automated@sha256:5e00373854247750cc3e4479b492ae09293ff5e06ed10177f226634d97888679",
 		"audiobookshelf": "ghcr.io/advplyr/audiobookshelf@sha256:60064c23f32fd9099fd39e82c5132c51701d1221135bbca04cd099b589e1edc3",
 		"houndarr":       "ghcr.io/av1155/houndarr@sha256:b2e4ff8b550d385a56ea3380bddf88253eac00d750a811a8f97090ff77dcc79e",
 		"cleanuparr":     "ghcr.io/cleanuparr/cleanuparr@sha256:923c2fe435e22fc58d261bacd2d6bbd8eb1ba3f95358803a8e4d3287ffd919d3",

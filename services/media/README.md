@@ -38,11 +38,45 @@ intentionally exposed to the public internet.
 ## Local Traefik names
 
 The [home Site network guide](../../sites/home/README.md) describes the Site-owned Traefik instance and the DNS names for
-all eight web interfaces in both Environments. Production uses `service.home` and Staging uses `service-staging.home`, where
-`service` is one of `qbittorrent`, `prowlarr`, `sonarr`, `radarr`, `profilarr`, `jellyfin`, `seerr`, or `audiobookshelf`. The routes use the
+the household web interfaces in both Environments. Production uses `service.home` and Staging uses `service-staging.home`, where
+`service` is one of `qbittorrent`, `prowlarr`, `sonarr`, `radarr`, `profilarr`, `jellyfin`, `seerr`, `audiobookshelf`, or `calibre-web`. The routes use the
 published Host ports; qBittorrent uses Gluetun's published Web UI ports. Traefik remains separate from generated Media Stack
 Compose and does not change `media-stack apply`. Houndarr and Cleanuparr have no Traefik routes or local DNS names;
 see [installation and automatic first run](#installation-and-automatic-first-run) for their loopback ports and SSH tunnel.
+
+## Import an owned ebook and read it on Kindle
+
+Run `media-stack init`, `doctor`, then `apply` for the selected Site, Stack Instance and Environment. Apply prepares Calibre-Web Automated's local account and AZW3 conversion before publishing the web port. Existing inventories default to host port 8083 in Production and 18083 in Staging. Set `ports.calibre-web` to override the default and update the Site's Traefik route to match.
+
+1. As the declared media owner on the primary Staging Host, place a completed DRM-free EPUB in `/srv/media/staging/books/ebooks/ready/`. Run the following from the repository root, substituting your filename.
+
+   ```bash
+   services/media/import-ebook "/srv/media/staging/books/ebooks/ready/My Book.epub"
+   ```
+
+2. Open `http://calibre-web-staging.home` and sign in as `admin` with Staging's existing Jellyfin household password. Additional local accounts can have download permission. The primary Production hostname is `calibre-web.home`. Laptop routes are `calibre-web.staging.laptop.home` and `calibre-web.laptop.home`.
+3. Find the title and check that its **one book record offers both EPUB and AZW3**. The publisher deposits a complete copy in the watched inbox. If either format is missing, keep the ready source, inspect the CWA processing status and failed imports, and correct the reported error. Check the existing record before publishing again. Remove the ready source only after verifying both formats. Calibre owns `books/calibre` alongside the media share.
+4. On the **11th-generation 2024 base Kindle**, join home Wi-Fi, open the primary Staging hostname in the stock browser, sign in and download AZW3 from that record. Disconnect Wi-Fi, open the local download, and turn a page. Record date, device/firmware, Staging revision, hostname, title and each result on #151 for Promotion. **Physical Kindle result pending.** The repeatable Docker rehearsal exercises authenticated local downloads with `MEDIA_STACK_LIVE_CALIBRE=1 go test ./internal/engine -run '^TestCalibreOwnedEPUBDownloadsBothFormats$' -count=1`.
+
+### Back up and recover the Calibre library
+
+Ordinary Media Stack backups cover the Calibre-Web configuration volume. For a storage backup, add `--include-calibre-library` to the selected Environment's backup command in the Home Site backup hook. While Calibre is stopped, the command archives the entire library (including `metadata.db`, book files and covers) into `calibre-library.tar` beside the application manifest. The Host's existing Restic backup picks up this directory.
+
+```bash
+media-stack backup --site home --instance media-homelab --environment staging --include-calibre-library
+```
+
+For recovery, recover the matching backup directory from storage, set `backup` to its absolute path, and run the following as the declared media owner. The example extracts into a fresh directory on the Staging filesystem.
+
+```bash
+books=/srv/media/staging/books
+recovered=$(mktemp -d "$books/recovered-calibre.XXXXXXXX")
+(cd "$backup" && jq -er '.calibreLibrarySHA256 + "  calibre-library.tar"' manifest.json | sha256sum --check --strict) &&
+  tar -xf "$backup/calibre-library.tar" -C "$recovered" &&
+  test -f "$recovered/metadata.db"
+```
+
+After verification, stop Staging Calibre-Web, move its current `books/calibre` aside and move the recovered directory into that location. Start the selected service and verify both formats by downloading from the recovered record. Keep the previous directory until verification passes. Use same-Environment `media-stack restore` for the matching application state. A cross-Environment Restore Drill preserves the Staging Calibre library and credentials.
 
 ## Discovering service configuration
 
@@ -1309,9 +1343,10 @@ Media and torrent payloads are bind-mounted data and are never replaced by resto
 A Restore Drill is the only cross-Environment restore: it accepts a complete Production backup only when the target is
 Staging and a separate SOPS credential document is supplied. The preview is bound to the encrypted credential document
 without recording its path or values. Confirmation creates the same protected safety backup and operation journal as an
-ordinary restore, then restores every Production mutable volume except Profilarr and Audiobookshelf into the isolated Staging namespace.
+ordinary restore, then restores every Production mutable volume except Profilarr, Calibre-Web and Audiobookshelf into the isolated Staging namespace.
 Production Profilarr state embeds Production-specific connections, so the drill preserves Staging Profilarr and records
-both exclusions in its report. The Staging Audiobookshelf configuration and metadata stay together so its local accounts and listening positions retain their Environment ownership.
+the exclusions in its report. The Staging Audiobookshelf configuration and metadata stay together so its local accounts and listening positions retain their Environment ownership.
+The drill preserves Staging Calibre-Web accounts, sessions, and application state alongside its Staging catalog.
 
 Before any recovered service starts, the command decrypts and validates the drill credentials and materializes the rotated
 OpenVPN and Profilarr runtime values. It starts only Jellyfin with no dependencies, authenticates with the Production

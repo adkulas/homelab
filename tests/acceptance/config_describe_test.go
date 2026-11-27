@@ -33,7 +33,7 @@ func TestConfigDescribeReturnsEveryServiceInStableOrder(t *testing.T) {
 	for _, service := range document.Services {
 		names = append(names, service.Name)
 	}
-	want := []string{"audiobookshelf", "cleanuparr", "gluetun", "houndarr", "jellyfin", "profilarr", "prowlarr", "qbittorrent", "radarr", "seerr", "sonarr"}
+	want := []string{"audiobookshelf", "calibre-web", "cleanuparr", "gluetun", "houndarr", "jellyfin", "profilarr", "prowlarr", "qbittorrent", "radarr", "seerr", "sonarr"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("services = %#v, want %#v", names, want)
 	}

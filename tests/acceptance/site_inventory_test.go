@@ -678,6 +678,8 @@ func secondMediaInstance(source string, distinctPorts, distinctStorage, distinct
 		result = strings.Replace(result, "/mnt/backups/media/", "/mnt/backups/media-two/", -1)
 	}
 	if distinctPorts {
+		result = strings.Replace(result, "calibre-web: 8083", "calibre-web: 38083", 1)
+		result = strings.Replace(result, "calibre-web: 18083", "calibre-web: 48083", 1)
 		result = strings.Replace(result, "seerr: 5055", "seerr: 5055\n                    audiobookshelf: 33378", 1)
 		result = strings.Replace(result, "seerr: 15055", "seerr: 15055\n                    audiobookshelf: 43378", 1)
 		replacements := map[string]string{

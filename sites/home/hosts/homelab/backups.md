@@ -34,6 +34,8 @@ run before the local snapshot, and any hook failure stops that snapshot. Use
 `run-parts`-compatible filenames without a dot, such as `20-media-production`.
 Do not substitute a raw copy of running databases or Docker volumes.
 
+For deployed Calibre libraries, add `--include-calibre-library` to each Environment hook. Restic then captures the quiesced library archive, including its catalog and ebooks. Follow the [Calibre library recovery procedure](../../../../services/media/README.md#back-up-and-recover-the-calibre-library) to verify and recover one Environment.
+
 Both repositories are on devices attached to the same machine. This provides
 disk failure recovery, but an additional disconnected or remote copy is needed
 for loss of the whole machine or writable-backup compromise.
