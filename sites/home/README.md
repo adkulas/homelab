@@ -21,9 +21,9 @@ Traefik and its clients use these local DNS records:
 | `homelab.home` | A | `homelab`'s LAN address |
 | `laptop.home` | A | Laptop's reserved LAN address |
 | `pc.home` | A | `pc`'s LAN address, once assigned |
-| `qbittorrent.home`, `prowlarr.home`, `sonarr.home`, `radarr.home`, `profilarr.home`, `jellyfin.home`, `seerr.home`, `audiobookshelf.home`, `calibre-web.home` | CNAME | `homelab.home` |
-| The same nine names with `-staging` before `.home` | CNAME | `homelab.home` |
-| The same nine services as `<service>.laptop.home` and `<service>.staging.laptop.home` | CNAME | `homelab.home` |
+| `qbittorrent.home`, `prowlarr.home`, `sonarr.home`, `radarr.home`, `profilarr.home`, `jellyfin.home`, `seerr.home`, `audiobookshelf.home`, `calibre-web.home`, `shelfarr.home` | CNAME | `homelab.home` |
+| The same service names with `-staging` before `.home` | CNAME | `homelab.home` |
+| The same services as `<service>.laptop.home` and `<service>.staging.laptop.home` | CNAME | `homelab.home` |
 | `minecraft.home` | CNAME | `homelab.home` |
 | `homepage.home` | CNAME | `homelab.home` |
 | `technitium.home`, `technitium-pi.home` | CNAME | `homelab.home` |

@@ -19,6 +19,7 @@ independent Production and Staging Environments so changes can be proven before 
 
 ## What the stack provides
 
+- Shelfarr title and author search and household ebook and audiobook requests.
 - Audiobookshelf playback and offline downloads for owned audiobooks, with a listening position per account.
 - Jellyfin playback for the Movie Library and Series Library.
 - Seerr requests with Jellyfin household authentication and approval by default.
@@ -31,7 +32,7 @@ independent Production and Staging Environments so changes can be proven before 
 - A Go CLI for initialization, preflight checks, reconciliation, verification, backups, restoration, and safe Promotion.
 - Completely isolated Production and Staging Environments.
 
-The eight household web interfaces are available on the trusted LAN with authentication. Houndarr and Cleanuparr management
+The household web interfaces are available on the trusted LAN with authentication. Houndarr and Cleanuparr management
 interfaces require authentication and bind only to localhost; use an SSH tunnel for remote administration. Nothing is
 intentionally exposed to the public internet.
 
@@ -39,10 +40,51 @@ intentionally exposed to the public internet.
 
 The [home Site network guide](../../sites/home/README.md) describes the Site-owned Traefik instance and the DNS names for
 the household web interfaces in both Environments. Production uses `service.home` and Staging uses `service-staging.home`, where
-`service` is one of `qbittorrent`, `prowlarr`, `sonarr`, `radarr`, `profilarr`, `jellyfin`, `seerr`, `audiobookshelf`, or `calibre-web`. The routes use the
+`service` is one of `qbittorrent`, `prowlarr`, `sonarr`, `radarr`, `profilarr`, `jellyfin`, `seerr`, `shelfarr`, `audiobookshelf`, or `calibre-web`. The routes use the
 published Host ports; qBittorrent uses Gluetun's published Web UI ports. Traefik remains separate from generated Media Stack
 Compose and does not change `media-stack apply`. Houndarr and Cleanuparr have no Traefik routes or local DNS names;
 see [installation and automatic first run](#installation-and-automatic-first-run) for their loopback ports and SSH tunnel.
+
+## Find and request ebooks and audiobooks
+
+After `media-stack apply`, open `http://shelfarr.home` for Production or
+`http://shelfarr-staging.home` for Staging. The laptop routes are
+`http://shelfarr.laptop.home` and `http://shelfarr.staging.laptop.home`.
+Sign in as `household` with the selected Environment's Jellyfin password. Apply
+sets the initial display name to **Household**. The
+initial password must satisfy Shelfarr's password rules (at least 12 characters,
+at most 72 bytes, with uppercase and lowercase letters and a digit). If
+`media-stack doctor` reports an incompatible password, change the Jellyfin
+household password in Jellyfin and update the already-initialized Audiobookshelf
+administrator to match if present. Update `jellyfin.password` in the selected
+Environment's SOPS document before the first Shelfarr apply. Create additional
+Shelfarr accounts under **Admin → Users**.
+
+Search by title or author and select **Ebook** or **Audiobook**. Open Library
+search and submitting a request work without Hardcover. Requests enter the
+queue immediately. Download client and library delivery setup are separate
+steps in the book workflow.
+
+For shared **Discover** browsing, use `sops edit` to add `hardcover.apiToken` to
+the selected Environment's application SOPS document. Run `media-stack apply`
+for that Environment after adding or rotating the token. Apply enables Hardcover
+so Shelfarr accounts can browse public lists, trending titles, and new releases.
+With this key omitted, apply preserves the enable setting and token. To stop
+using a previously configured token, remove the SOPS key and disable Hardcover
+in Shelfarr.
+`media-stack plan` checks visible Shelfarr settings and defers comparison of
+the masked token to the authenticated apply.
+
+Existing inventories default to ports `5056` (Production) and `15056`
+(Staging). Update the Site's Traefik route when overriding `ports.shelfarr`.
+Matching-Environment backups and restores cover the Shelfarr application
+volume, including requests and accounts. A Restore Drill keeps the Staging
+Shelfarr state and credentials. Backups made before Shelfarr was added restore
+the earlier service set and preserve the current Shelfarr state.
+
+Run the pinned-image rehearsal with
+`MEDIA_STACK_LIVE_SHELFARR=1 go test ./internal/engine -run '^TestDisposableShelfarrRequestsAndSettings$' -count=1`.
+It uses a disposable Docker project and the public Open Library search.
 
 ## Import an owned ebook and read it on Kindle
 
@@ -809,6 +851,7 @@ rerunning similar commands in Production.
 | Radarr | Movie Library management | 7878 / 17878 |
 | Sonarr | Series Library management | 8989 / 18989 |
 | Profilarr | Pinned TRaSH-derived quality, naming, and media policy | 6868 / 16868 |
+| Shelfarr | Book search and requests | 5056 / 15056 |
 | Audiobookshelf | Audiobook playback and offline downloads | 13378 / 23378 |
 | Jellyfin | Household media playback | 8096 / 18096 |
 | Seerr | Household requests and approvals | 5055 / 15055 |
@@ -858,6 +901,7 @@ from silently becoming ineffective configuration.
 | `spec.media.environments.<name>.ports.radarr` | `plan` | Host port for Radarr target `7878`. |
 | `spec.media.environments.<name>.ports.profilarr` | `plan` | Host port for Profilarr target `6868`. |
 | `spec.media.environments.<name>.ports.jellyfin` | `plan` | Host port for Jellyfin target `8096`. |
+| `spec.media.environments.<name>.ports.shelfarr` | `plan`, `apply` | Optional Shelfarr Host port. The default is 5056 in Production and 15056 in Staging. |
 | `spec.media.environments.<name>.ports.audiobookshelf` | `plan`, `apply` | Optional Host port for Audiobookshelf target `80`. Existing declarations default to Production `13378` and Staging `23378`. Update the Site route if overriding a port. |
 | `spec.media.environments.<name>.ports.seerr` | `plan` | Host port for Seerr target `5055`. |
 | `spec.acquisition.vpn.provider` / `protocol` | `init`, `doctor`, `plan`, `apply` | Currently fixed to `nordvpn` and `openvpn`; rendered as Gluetun's explicit `VPN_SERVICE_PROVIDER` and `VPN_TYPE`. The CLI never requests a Nord access token or calls a Nord API. |
@@ -1343,7 +1387,7 @@ Media and torrent payloads are bind-mounted data and are never replaced by resto
 A Restore Drill is the only cross-Environment restore: it accepts a complete Production backup only when the target is
 Staging and a separate SOPS credential document is supplied. The preview is bound to the encrypted credential document
 without recording its path or values. Confirmation creates the same protected safety backup and operation journal as an
-ordinary restore, then restores every Production mutable volume except Profilarr, Calibre-Web and Audiobookshelf into the isolated Staging namespace.
+ordinary restore, then restores every Production mutable volume except Profilarr, Calibre-Web, Audiobookshelf, and Shelfarr into the isolated Staging namespace.
 Production Profilarr state embeds Production-specific connections, so the drill preserves Staging Profilarr and records
 the exclusions in its report. The Staging Audiobookshelf configuration and metadata stay together so its local accounts and listening positions retain their Environment ownership.
 The drill preserves Staging Calibre-Web accounts, sessions, and application state alongside its Staging catalog.
@@ -1371,7 +1415,7 @@ then removes the gate and encrypted copy; a failed apply remains safely gated fo
 | `media-stack plan --site home --instance media-homelab --environment production|staging` | Available, configuration observation | Reports ordered create, update, restart, guide, and retained-unknown observations as YAML comments, followed by rendered Compose YAML. It compares complete Compose service hashes; inventories project containers, networks, and volumes; and reuses the application reconciliation contracts behind a mutation-blocking HTTP boundary. If an observation dependency is unavailable, that subject is explicitly deferred. Use it before `apply` to inspect Declared Configuration drift or pipe the complete output to `docker compose config`. Saved Plan Artifacts remain a later planner phase. |
 | `media-stack apply --site home --instance media-homelab --environment production|staging` | Available through series automation | Uses the selected Environment's OpenVPN, Profilarr, Jellyfin, and stable qBittorrent credentials without printing them; reconciles qBittorrent, Radarr, Sonarr, Prowlarr, Profilarr, and Jellyfin, then starts Seerr, enables new Jellyfin users with request and Advanced Requests default permissions, preserves the Jellyfin administrator as an emergency local Seerr administrator, and converges the default non-4K Radarr and Sonarr destinations by resolving the selected Environment's pinned profile identities. When `seriesAutomation` is declared, it also bootstraps Houndarr and Cleanuparr accounts, persists the Cleanuparr API key encrypted, verifies Houndarr policy, and reconciles Cleanuparr recovery. Enabled automation disables Seerr grouped series searches. See the [companion setup flow](#installation-and-automatic-first-run). A pending Restore Drill gate refuses apply; after confirmation, the next successful apply uses those credentials and clears the gate. Fresh compatible Profilarr state is bootstrapped automatically; partial or unsupported state exits `1` with a stable recovery diagnostic. |
 | `media-stack backup --site home --instance media-homelab --environment production|staging [--label text] [--protect] [--now RFC3339] [--output human|json]` | Available | Stops only running services with mutable named volumes, archives each volume through a read-only Docker mount, resumes those services, independently verifies every checksum, atomically publishes the selected Environment manifest last, then expires unprotected archives according to `backupRetention`. Use `--protect` for an archive that retention must preserve and `--now` only to fix the clock for deterministic verification. |
-| `media-stack restore --site home --instance media-homelab --environment production|staging --backup manifest.json [--confirm] [--as-restore-drill --credentials path] [--output human|json]` | Available | Validates complete compatible application-state coverage and checksums and persists the exact preview. Matching-Environment confirmation performs transactional replacement and restart. Restore Drill confirmation restores Production into Staging while preserving Staging Profilarr and Audiobookshelf, applying rotated runtime credentials, leaving acquisition and integrations stopped, and starting only Jellyfin. Both modes create a protected safety backup and operation journal and roll back on failure. |
+| `media-stack restore --site home --instance media-homelab --environment production|staging --backup manifest.json [--confirm] [--as-restore-drill --credentials path] [--output human|json]` | Available | Validates complete compatible application-state coverage and checksums and persists the exact preview. Matching-Environment confirmation performs transactional replacement and restart. Restore Drill confirmation restores Production into Staging while preserving Staging Profilarr, Audiobookshelf, Calibre-Web, and Shelfarr, applying rotated runtime credentials, leaving acquisition and integrations stopped, and starting only Jellyfin. Both modes create a protected safety backup and operation journal and roll back on failure. |
 | `media-stack restore --site home --instance media-homelab --environment staging --as-restore-drill --credentials path --confirm-integrations [--output human|json]` | Available | Confirms reconnection only when the encrypted credential document matches the completed Restore Drill. The next successful `apply` uses those credentials, including qBittorrent authentication, and clears the durable gate; failures remain gated and retryable. |
 | `media-stack verify --site home --instance media-homelab --environment production|staging --suite companions [--output human|json]` | Available | Observes Houndarr/Cleanuparr policy, search ownership, and recent queue activity without mutating applications. See [verification and troubleshooting](#verification-and-troubleshooting) for controlled recovery evidence in disposable Staging. |
 | `media-stack verify --site home --instance media-homelab --environment staging --suite full [--output human|json]` | Available, VPN verification phase | Proves TUN availability, healthy tunneled qBittorrent egress distinct from host egress, fail-closed behavior during a controlled Gluetun stop, recovery, and stable declared authentication from an application-network peer after qBittorrent recreation. Use it after `apply` in Staging; it is deliberately rejected for Production. |

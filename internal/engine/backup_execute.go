@@ -22,7 +22,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const backupCLIContractVersion = "homelab.media-stack/cli/v1alpha1"
+const (
+	legacyBackupCLIContractVersion = "homelab.media-stack/cli/v1alpha1"
+	backupCLIContractVersion       = "homelab.media-stack/cli/v1alpha2"
+)
 
 type renderedBackupProject struct {
 	Services map[string]renderedBackupService

@@ -47,6 +47,11 @@ http:
       entryPoints:
         - web
       service: calibre-web-production
+    shelfarr-production:
+      rule: Host(`shelfarr.home`)
+      entryPoints:
+        - web
+      service: shelfarr-production
     qbittorrent-staging:
       rule: Host(`qbittorrent-staging.home`)
       entryPoints:
@@ -92,6 +97,11 @@ http:
       entryPoints:
         - web
       service: calibre-web-staging
+    shelfarr-staging:
+      rule: Host(`shelfarr-staging.home`)
+      entryPoints:
+        - web
+      service: shelfarr-staging
   services:
     qbittorrent-production:
       loadBalancer:
@@ -129,6 +139,10 @@ http:
       loadBalancer:
         servers:
           - url: http://homelab.home:8083
+    shelfarr-production:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:5056
     qbittorrent-staging:
       loadBalancer:
         servers:
@@ -165,3 +179,7 @@ http:
       loadBalancer:
         servers:
           - url: http://homelab.home:18083
+    shelfarr-staging:
+      loadBalancer:
+        servers:
+          - url: http://homelab.home:15056

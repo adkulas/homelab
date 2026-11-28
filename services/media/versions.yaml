@@ -1,6 +1,8 @@
 apiVersion: homelab.media-stack/v1alpha1
 kind: MediaStackVersions
 images:
+  # Shelfarr v2026.11.16.1
+  shelfarr: ghcr.io/pedro-revez-silva/shelfarr@sha256:97270513a75354d1b8cf2fa68f22cd31f021d03c3695186437e448f2a9255d9e
   # Audiobookshelf v2.38.0, multi-platform manifest.
   audiobookshelf: ghcr.io/advplyr/audiobookshelf@sha256:60064c23f32fd9099fd39e82c5132c51701d1221135bbca04cd099b589e1edc3
   # Calibre-Web Automated v4.0.8

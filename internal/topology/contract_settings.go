@@ -30,6 +30,9 @@ func topologySettings(definition serviceDefinition) []contractmodel.Setting {
 	}
 	if definition.port != nil || service == "qbittorrent" {
 		port := contractmodel.Declared("port", "Environment LAN port", servicePortSource(service), "TCP port", nil, "Change the selected Environment service port in the selected Stack Instance.", "render", "reconcile")
+		if service == "shelfarr" {
+			port.Description = "The optional Host port defaults to 5056 in Production and 15056 in Staging."
+		}
 		if service == "audiobookshelf" {
 			port.Description = "The optional Host port defaults to 13378 in Production and 23378 in Staging."
 		}

@@ -165,8 +165,3 @@ func environmentRuntimeSecretDirectory(environment config.Environment) string {
 	}
 	return runtimeSecretDirectory(scope)
 }
-
-func selectedSecretsAvailable(ctx context.Context, configPath string, environment config.Environment) bool {
-	_, err := decryptSelectedEnvironmentSecrets(ctx, configPath, environment)
-	return err == nil
-}

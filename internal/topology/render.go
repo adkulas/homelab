@@ -30,6 +30,7 @@ type serviceDefinition struct {
 }
 
 var mandatoryServices = []serviceDefinition{
+	{name: "shelfarr", identity: puidIdentity, configTarget: "/rails/storage", port: func(ports config.Ports) int { return ports.Shelfarr }, targetPort: 80},
 	{name: "calibre-web", identity: puidIdentity, configTarget: "/config", port: func(ports config.Ports) int { return ports.CalibreWeb }, targetPort: 8083},
 	{name: "gluetun", identity: inheritedIdentity, configTarget: "/gluetun", port: func(ports config.Ports) int { return ports.QBittorrent }, targetPort: 8080},
 	{name: "qbittorrent", identity: puidIdentity, configTarget: "/config", dataMount: func(root string) string { return path.Join(root, "torrents") + ":/data/torrents" }},
@@ -191,6 +192,9 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 			networks = nil
 			dependsOn = map[string]composeDependency{"gluetun": {Condition: "service_healthy"}}
 		}
+		if definition.name == "shelfarr" {
+			serviceEnvironment["SOLID_QUEUE_IN_PUMA"] = "1"
+		}
 		if definition.name == "profilarr" {
 			envFiles = []composeEnvFile{{Path: filepath.Join(runtimeSecretDirectory, "profilarr.env"), Required: false}}
 		}
@@ -235,19 +239,30 @@ func Render(defaults config.Defaults, environment config.Environment, vpn config
 	return yaml.Marshal(project)
 }
 
-const AudiobookshelfSetupNetwork = "audiobookshelf-setup"
+const (
+	AudiobookshelfSetupNetwork = "audiobookshelf-setup"
+	ShelfarrSetupNetwork       = "shelfarr-setup"
+)
 
-// AudiobookshelfSetup restricts the unauthenticated first-run endpoint to a
-// temporary loopback port. Compose reuses the same project and application volumes.
 func AudiobookshelfSetup(compose []byte) ([]byte, error) {
+	return loopbackSetup(compose, "audiobookshelf", AudiobookshelfSetupNetwork)
+}
+
+func ShelfarrSetup(compose []byte) ([]byte, error) {
+	return loopbackSetup(compose, "shelfarr", ShelfarrSetupNetwork)
+}
+
+// loopbackSetup keeps the unauthenticated first-run endpoint on a temporary
+// loopback port while reusing the project and application volumes.
+func loopbackSetup(compose []byte, name, network string) ([]byte, error) {
 	var project composeProject
 	if err := yaml.Unmarshal(compose, &project); err != nil {
 		return nil, err
 	}
-	service := project.Services["audiobookshelf"]
-	project.Networks[AudiobookshelfSetupNetwork] = composeNetwork{}
-	service.Networks = map[string]composeServiceNetwork{AudiobookshelfSetupNetwork: {}}
+	service := project.Services[name]
+	project.Networks[network] = composeNetwork{}
+	service.Networks = map[string]composeServiceNetwork{network: {}}
 	service.Ports = []string{"127.0.0.1::80"}
-	project.Services["audiobookshelf"] = service
+	project.Services[name] = service
 	return yaml.Marshal(project)
 }

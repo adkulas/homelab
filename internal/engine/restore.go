@@ -122,7 +122,8 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	if backup.SchemaVersion != backupSchemaVersion {
 		return RestoreReport{}, fmt.Errorf("backup manifest schema version %q is unsupported", backup.SchemaVersion)
 	}
-	if backup.CLIContractVersion != backupCLIContractVersion || !backup.Complete || len(backup.MissingVolumes) > 0 {
+	legacyCoverage := backup.CLIContractVersion == legacyBackupCLIContractVersion
+	if (!legacyCoverage && backup.CLIContractVersion != backupCLIContractVersion) || !backup.Complete || len(backup.MissingVolumes) > 0 {
 		return RestoreReport{}, fmt.Errorf("backup is not a complete compatible %s archive", request.plan.environment)
 	}
 	if backup.Scope != nil {
@@ -172,6 +173,11 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 			return RestoreReport{}, fmt.Errorf("validate production Environment credentials: %w", err)
 		}
 	}
+	var excludedServices []string
+	if legacyCoverage {
+		excludedServices = []string{"shelfarr"}
+		sources = excludeRestoreSources(sources, excludedServices)
+	}
 	serviceNames := make([]string, 0, len(backup.Services))
 	if err := validateRestoreCoverage(backup.Services, sources, request.asRestoreDrill); err != nil {
 		return RestoreReport{}, err
@@ -179,9 +185,8 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	if err := verifyBackupArchives(filepath.Dir(request.backupPath), backup.Services); err != nil {
 		return RestoreReport{}, fmt.Errorf("verify backup checksums: %w", err)
 	}
-	excludedServices := []string(nil)
 	if request.asRestoreDrill {
-		excludedServices = []string{"audiobookshelf", "calibre-web", "profilarr"}
+		excludedServices = []string{"audiobookshelf", "calibre-web", "profilarr", "shelfarr"}
 		sources = excludeRestoreSources(sources, excludedServices)
 	}
 	for _, source := range sources {
@@ -190,6 +195,8 @@ func (engine localEngine) Restore(ctx context.Context, request RestoreRequest) (
 	preview := fmt.Sprintf("replace %s Environment state from %s backup", request.plan.environment, backup.Environment)
 	if request.asRestoreDrill {
 		preview = fmt.Sprintf("restore drill: replace %s Environment state from %s backup with acquisition disabled, integrations gated, rotated credentials, and Production services excluded (%s)", request.plan.environment, backup.Environment, strings.Join(excludedServices, ", "))
+	} else if legacyCoverage {
+		preview += " while preserving Shelfarr state"
 	}
 	report := RestoreReport{
 		SchemaVersion:       backupSchemaVersion,

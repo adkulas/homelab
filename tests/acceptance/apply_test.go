@@ -528,6 +528,57 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 		}
 	}))
 	defer jellyfinAPI.Close()
+	shelfarrInitialized := false
+	var shelfarrToken string
+	shelfarrAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /session/new":
+			if !shelfarrInitialized {
+				http.Redirect(w, r, "/sign_up", http.StatusFound)
+				return
+			}
+			fmt.Fprint(w, "<meta name=\"csrf-token\" content=\"login\">")
+		case "GET /sign_up":
+			fmt.Fprint(w, "<meta name=\"csrf-token\" content=\"signup\">")
+		case "POST /sign_up":
+			if shelfarrInitialized || r.FormValue("user[password]") != "fixture-jellyfin-password" || r.Header.Get("X-CSRF-Token") != "signup" {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				return
+			}
+			shelfarrInitialized = true
+			http.Redirect(w, r, "/admin/setup_wizard", http.StatusFound)
+		case "POST /session":
+			if !shelfarrInitialized || r.FormValue("password") != "fixture-jellyfin-password" || r.Header.Get("X-CSRF-Token") != "login" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			http.SetCookie(w, &http.Cookie{Name: "session_id", Value: "fixture", Path: "/"})
+			http.Redirect(w, r, "/", http.StatusFound)
+		case "GET /admin/settings":
+			if _, err := r.Cookie("session_id"); err != nil {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			fmt.Fprint(w, "<meta name=\"csrf-token\" content=\"settings\">")
+			fmt.Fprint(w, `<input id="settings_open_library_enabled" type="checkbox" checked>
+				<input id="settings_immediate_search_enabled" type="checkbox" checked>
+				<select id="settings_metadata_source"><option value="auto" selected>Auto</option></select>`)
+			if shelfarrToken != "" {
+				fmt.Fprint(w, `<input id="settings_hardcover_enabled" type="checkbox" checked>
+					<input id="settings_hardcover_api_token" type="password" placeholder="********">`)
+			}
+		case "PATCH /admin/settings/bulk_update":
+			if _, err := r.Cookie("session_id"); err != nil || r.Header.Get("X-CSRF-Token") != "settings" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			shelfarrToken = r.FormValue("settings[hardcover_api_token]")
+			fmt.Fprint(w, "<turbo-stream>Settings updated successfully.</turbo-stream>")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer shelfarrAPI.Close()
 	audioInitialized := false
 	audioLibrary := false
 	audioAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -728,7 +779,7 @@ func testApplyFlow(t *testing.T, bootstrap bool, scenarios ...string) {
 	declared = strings.Replace(declared, "prowlarr: 19696", "prowlarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "profilarr: 16868", "profilarr: "+apiURL.Port(), 1)
 	declared = strings.Replace(declared, "jellyfin: 18096", "jellyfin: "+jellyfinURL.Port(), 1)
-	declared = strings.Replace(declared, "seerr: 15055", "audiobookshelf: "+strconv.Itoa(fixturePort(t, audioAPI.URL))+"\n                seerr: "+seerrURL.Port(), 1)
+	declared = strings.Replace(declared, "seerr: 15055", "audiobookshelf: "+strconv.Itoa(fixturePort(t, audioAPI.URL))+"\n                shelfarr: "+strconv.Itoa(fixturePort(t, shelfarrAPI.URL))+"\n                seerr: "+seerrURL.Port(), 1)
 	sonarrURL, err := url.Parse(sonarrAPI.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -820,6 +871,7 @@ EOF
 	  "compose -f - config --hash *")
 	    cat >/dev/null
 	    printf '%s\n' \
+	      'shelfarr hash-shelfarr' \
 	      'audiobookshelf hash-audiobookshelf' \
           'houndarr hash-houndarr' \
           'cleanuparr hash-cleanuparr' \
@@ -837,6 +889,7 @@ EOF
 	    printf '%s\n' '{"Labels":"com.docker.compose.project=media-staging,com.docker.compose.service=debug-shell","Names":"media-staging-debug-shell-1","State":"running"}'
 	    [ -f "$APPLY_TOPOLOGY_READY" ] || exit 0
 	    printf '%s\n' \
+	      '{"Labels":"com.docker.compose.service=shelfarr,com.docker.compose.config-hash=hash-shelfarr","State":"running"}' \
 	      '{"Labels":"com.docker.compose.service=audiobookshelf,com.docker.compose.config-hash=hash-audiobookshelf","State":"running"}' \
           '{"Labels":"com.docker.compose.service=houndarr,com.docker.compose.config-hash=hash-houndarr","State":"running"}' \
           '{"Labels":"com.docker.compose.service=cleanuparr,com.docker.compose.config-hash=hash-cleanuparr","State":"running"}' \
@@ -857,6 +910,7 @@ EOF
 	  "volume ls --filter label=com.docker.compose.project=media-staging --format {{json .}}")
 	    printf '%s\n' '{"Labels":"com.docker.compose.project=media-staging,com.docker.compose.volume=scratch","Name":"media-staging_scratch"}'
 	    [ -f "$APPLY_TOPOLOGY_READY" ] && printf '%s\n' \
+	      '{"Labels":"com.docker.compose.volume=shelfarr-config","Name":"media-staging_shelfarr-config"}' \
 	      '{"Labels":"com.docker.compose.volume=audiobookshelf-config","Name":"media-staging_audiobookshelf-config"}' \
           '{"Labels":"com.docker.compose.volume=audiobookshelf-metadata","Name":"media-staging_audiobookshelf-metadata"}' \
           '{"Labels":"com.docker.compose.volume=houndarr-config","Name":"media-staging_houndarr-config"}' \
@@ -898,6 +952,10 @@ EOF
 	    exit $? ;;
 	  "compose -f - up -d --wait calibre-web") exit 0 ;;
 	  "network ls -q --filter label=com.docker.compose.project=media-staging --filter label=com.docker.compose.network=audiobookshelf-setup") exit 0 ;;
+   "network ls -q --filter label=com.docker.compose.project=media-staging --filter label=com.docker.compose.network=shelfarr-setup") exit 0 ;;
+   "compose -f - ps -q shelfarr") [ ! -f "$APPLY_TOPOLOGY_READY.shelfarr" ] || echo fixture-shelfarr; exit 0 ;;
+   "compose -f - up -d shelfarr") touch "$APPLY_TOPOLOGY_READY.shelfarr"; exit 0 ;;
+   "compose -f - port shelfarr 80") echo "$SHELFARR_LISTENER"; exit 0 ;;
    "compose -f - ps -q audiobookshelf") [ ! -f "$APPLY_TOPOLOGY_READY.audio" ] || echo fixture-abs; exit 0 ;;
    "compose -f - up -d audiobookshelf") touch "$APPLY_TOPOLOGY_READY.audio"; exit 0 ;;
    "compose -f - port audiobookshelf 80") echo "$AUDIO_LISTENER"; exit 0 ;;
@@ -922,6 +980,7 @@ EOF
 		"APPLY_COMPOSE_CAPTURE="+composeCapture,
 		"APPLY_HEALTH_COUNT="+healthCount,
 		"APPLY_TOPOLOGY_READY="+topologyReady,
+		"SHELFARR_LISTENER="+strings.TrimPrefix(shelfarrAPI.URL, "http://"),
 		"AUDIO_LISTENER="+strings.TrimPrefix(audioAPI.URL, "http://"),
 		"APPLY_LIBRARY_MARKERS="+libraryMarkers,
 		"APPLY_PROFILARR_READY="+profilarrReady,
@@ -1060,6 +1119,7 @@ EOF
 
 	dockerLines := strings.Split(strings.TrimSpace(string(readFile(t, dockerLog))), "\n")
 	wantDocker := "compose -f - up -d gluetun\ncompose -f - ps --format json gluetun\ncompose -f - ps --format json gluetun\ncompose -f - up -d qbittorrent\ncompose -f - ps -q qbittorrent\ninspect --format {{.State.StartedAt}} fixture-qbittorrent-id\ncompose -f - logs --no-color --since 2026-08-28T12:34:56.123456789Z qbittorrent\ncompose -f - up -d radarr\ncompose -f - exec -T radarr cat /config/config.xml\ncompose -f - up -d sonarr\ncompose -f - exec -T sonarr cat /config/config.xml\ncompose -f - up -d prowlarr\ncompose -f - exec -T prowlarr cat /config/config.xml\ncompose -f - up -d profilarr\ncompose -f - up -d jellyfin\ncompose -f - restart jellyfin\ncompose -f - up -d seerr"
+	wantDocker += "\ncompose -f - ps -q shelfarr\ncompose -f - up -d shelfarr\ncompose -f - port shelfarr 80\ncompose -f - up -d shelfarr\ncompose -f - port shelfarr 80\nnetwork ls -q --filter label=com.docker.compose.project=media-staging --filter label=com.docker.compose.network=shelfarr-setup"
 	wantDocker += "\ncompose -f - ps -q audiobookshelf\ncompose -f - up -d audiobookshelf\ncompose -f - port audiobookshelf 80\ncompose -f - up -d audiobookshelf\ncompose -f - port audiobookshelf 80\nnetwork ls -q --filter label=com.docker.compose.project=media-staging --filter label=com.docker.compose.network=audiobookshelf-setup\ncompose -f - up -d houndarr cleanuparr"
 	wantDocker += "\ncompose -f - up -d --wait calibre-web"
 	if !slices.ContainsFunc(dockerLines, func(line string) bool {
@@ -1168,6 +1228,9 @@ EOF
 	if !audioInitialized || !audioLibrary {
 		t.Error("apply did not initialize the Audiobookshelf household account and library")
 	}
+	if !shelfarrInitialized || shelfarrToken != "" {
+		t.Error("apply did not initialize Shelfarr without a Hardcover token")
+	}
 	if !seerrInitialized || seerrMain["localLogin"] != true || seerrMain["mediaServerLogin"] != true || seerrMain["newPlexLogin"] != true || seerrMain["defaultPermissions"] != float64(8224) {
 		t.Errorf("apply did not reconcile Seerr authentication: initialized=%t main=%v", seerrInitialized, seerrMain)
 	}
@@ -1244,16 +1307,31 @@ EOF
 	}
 
 	secondCommand := exec.Command("go", "run", "./cmd/media-stack", "apply", "--environment", "staging", "--config", configPath)
+	const hardcoverToken = "fixture-staging-hardcover-token"
 	if !bootstrap && scenario == "" {
 		if err := os.Remove(libraryMarkers); err != nil {
 			t.Fatal(err)
 		}
+		secretPath := filepath.Join(temporary, "secrets/staging.sops.yaml")
+		var document map[string]json.RawMessage
+		if err := json.Unmarshal(readFile(t, secretPath), &document); err != nil {
+			t.Fatal(err)
+		}
+		document["hardcover"] = json.RawMessage(`{"apiToken":"` + hardcoverToken + `"}`)
+		updated, err := json.Marshal(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, secretPath, updated, 0o600)
 	}
 	secondCommand.Dir = command.Dir
 	secondCommand.Env = command.Env
 	secondOutput, err := secondCommand.CombinedOutput()
 	if err != nil {
 		t.Fatalf("repeated media-stack apply failed: %v\n%s", err, secondOutput)
+	}
+	if !bootstrap && scenario == "" && (shelfarrToken != hardcoverToken || strings.Contains(string(secondOutput), hardcoverToken)) {
+		t.Error("apply did not configure the selected Environment's Hardcover token privately")
 	}
 	if len(rootFolders) != 1 || len(downloadClients) != 1 || len(seriesRootFolders) != 1 || len(seriesDownloadClients) != 1 || len(indexers) != 1 || len(applications) != 2 || len(jellyfinLibraries) != 2 || jellyfinPolicyWrites != 1 {
 		t.Errorf("repeated apply did not converge: movieRoots=%v movieDownloadClients=%v seriesRoots=%v seriesDownloadClients=%v indexers=%v applications=%v", rootFolders, downloadClients, seriesRootFolders, seriesDownloadClients, indexers, applications)
@@ -1287,7 +1365,14 @@ EOF
 	if err != nil {
 		t.Fatalf("media-stack plan after apply failed: %v\n%s", err, planOutput)
 	}
-	if !strings.Contains(string(planOutput), "# plan: no changes") {
+	if strings.Contains(string(planOutput), hardcoverToken) {
+		t.Error("plan exposed the Hardcover token")
+	}
+	wantPlan := "# plan: no changes"
+	if !bootstrap && scenario == "" {
+		wantPlan = "# deferred shelfarr: Shelfarr masks the Hardcover token."
+	}
+	if !strings.Contains(string(planOutput), wantPlan) {
 		t.Errorf("plan after apply is not empty:\n%s", planOutput)
 	}
 	for _, unexpected := range []string{"# create ", "# update ", "# restart "} {

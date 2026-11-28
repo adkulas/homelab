@@ -37,6 +37,7 @@ type ApplyReport struct {
 }
 
 type environmentSecrets struct {
+	HardcoverToken     string
 	Scope              *config.SecretScope
 	Houndarr           companions.AdminCredentials
 	CleanuparrKey      string
@@ -248,16 +249,19 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 	if err := seerrClient.ReconcileSonarr(ctx, sonarrAPIKey, seriesPolicy.Profile.Name, seriesAutomationEnabled(environment)); err != nil {
 		return ApplyReport{}, fmt.Errorf("reconcile Seerr Series Library requests: %w", err)
 	}
-	bookCredentials := secrets.Jellyfin
+	bookSecrets := secrets
 	if restoreDrillConfirmed {
 		// Cross-Environment drills retain the Staging book-service accounts.
 		selected, err := decryptSelectedEnvironmentSecrets(ctx, request.plan.configPath, environment)
 		if err != nil {
 			return ApplyReport{}, err
 		}
-		bookCredentials = selected.Jellyfin
+		bookSecrets = selected
 	}
-	if err := startAudiobookshelf(ctx, plan, environment.ProjectName, audiobookshelf.Credentials{Username: bookCredentials.Username, Password: bookCredentials.Password}); err != nil {
+	if err := startShelfarr(ctx, plan, environment.ProjectName, bookSecrets.Jellyfin.Password, bookSecrets.HardcoverToken); err != nil {
+		return ApplyReport{}, err
+	}
+	if err := startAudiobookshelf(ctx, plan, environment.ProjectName, audiobookshelf.Credentials{Username: bookSecrets.Jellyfin.Username, Password: bookSecrets.Jellyfin.Password}); err != nil {
 		return ApplyReport{}, err
 	}
 	if environment.SeriesAutomation != nil {
@@ -275,7 +279,7 @@ func (engine localEngine) Apply(ctx context.Context, request ApplyRequest) (Appl
 			return ApplyReport{}, fmt.Errorf("reconcile series companions: %w", err)
 		}
 	}
-	if err := prepareCalibreWeb(ctx, plan, environment, declared.Spec.Defaults, bookCredentials.Password); err != nil {
+	if err := prepareCalibreWeb(ctx, plan, environment, declared.Spec.Defaults, bookSecrets.Jellyfin.Password); err != nil {
 		return ApplyReport{}, err
 	}
 	if restoreDrillConfirmed {
@@ -604,7 +608,7 @@ func environmentSecretsFromDocument(document environmentSecretDocument) (environ
 	if document.QBittorrent.Username == "" || document.QBittorrent.Password == "" {
 		return environmentSecrets{}, fmt.Errorf("selected Environment secrets require qbittorrent.username and qbittorrent.password; run media-stack init with the new keys to migrate this SOPS document without overwriting existing values")
 	}
-	return environmentSecrets{Scope: document.Scope, Houndarr: companions.AdminCredentials{Username: document.Houndarr.Username, Password: document.Houndarr.Password}, CleanuparrKey: document.Cleanuparr.APIKey, CleanuparrAdmin: companions.AdminCredentials{Username: document.Cleanuparr.Username, Password: document.Cleanuparr.Password}, OpenVPN: credentials, ProfilarrKey: document.Profilarr.APIKey, Jellyfin: jellyfin.Credentials{Username: document.Jellyfin.Username, Password: document.Jellyfin.Password}, JellyfinRefreshKey: document.JellyfinRefresh.APIKey, QBittorrent: qbittorrent.Credentials{Username: document.QBittorrent.Username, Password: document.QBittorrent.Password}}, nil
+	return environmentSecrets{Scope: document.Scope, HardcoverToken: document.Hardcover.APIToken, Houndarr: companions.AdminCredentials{Username: document.Houndarr.Username, Password: document.Houndarr.Password}, CleanuparrKey: document.Cleanuparr.APIKey, CleanuparrAdmin: companions.AdminCredentials{Username: document.Cleanuparr.Username, Password: document.Cleanuparr.Password}, OpenVPN: credentials, ProfilarrKey: document.Profilarr.APIKey, Jellyfin: jellyfin.Credentials{Username: document.Jellyfin.Username, Password: document.Jellyfin.Password}, JellyfinRefreshKey: document.JellyfinRefresh.APIKey, QBittorrent: qbittorrent.Credentials{Username: document.QBittorrent.Username, Password: document.QBittorrent.Password}}, nil
 }
 
 func decryptSelectedEnvironmentSecrets(ctx context.Context, configPath string, environment config.Environment) (environmentSecrets, error) {

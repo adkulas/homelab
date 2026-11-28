@@ -20,6 +20,13 @@ func topologySupplement(definition serviceDefinition) []contractmodel.Setting {
 	if definition.identity == composeUserIdentity {
 		settings = append(settings, contractmodel.Derived("runtime.mode", "Runtime identity mechanism", "spec.defaults.runtimeUID + spec.defaults.runtimeGID", "Compose runs the service directly as the declared numeric user and group.", "render"))
 	}
+	if definition.name == "shelfarr" {
+		settings = append(settings,
+			contractmodel.Fixed("setup.network", "First-run network", ShelfarrSetupNetwork, "Apply creates the local account on a separate project network.", "initialize"),
+			contractmodel.Fixed("setup.port.publication", "First-run port publication", "127.0.0.1::80", "Apply publishes the Environment LAN port after first-run setup.", "initialize"),
+			contractmodel.Fixed("jobs.embedded", "Embedded request worker", true, "Shelfarr runs the Solid Queue worker with the web server.", "render"),
+		)
+	}
 	if definition.name == "audiobookshelf" {
 		settings = append(settings,
 			contractmodel.Fixed("setup.network", "First-run network", AudiobookshelfSetupNetwork, "The uninitialized service uses a separate project network until apply creates the household account.", "initialize"),

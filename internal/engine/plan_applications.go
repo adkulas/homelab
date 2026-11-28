@@ -18,6 +18,7 @@ import (
 	"github.com/adkulas/homelab/internal/qbittorrent"
 	"github.com/adkulas/homelab/internal/radarr"
 	"github.com/adkulas/homelab/internal/seerr"
+	"github.com/adkulas/homelab/internal/shelfarr"
 	"github.com/adkulas/homelab/internal/sonarr"
 )
 
@@ -35,7 +36,7 @@ func (transport readOnlyTransport) RoundTrip(request *http.Request) (*http.Respo
 }
 
 func observationPost(path string) bool {
-	return path == "/login" || path == "/api/v2/auth/login" ||
+	return path == "/login" || path == "/session" || path == "/api/v2/auth/login" ||
 		path == "/Users/AuthenticateByName" ||
 		path == "/api/v1/auth/jellyfin" ||
 		path == "/api/v1/auth/local" ||
@@ -150,6 +151,26 @@ func observeApplications(ctx context.Context, request PlanRequest, plan Plan) []
 		}
 	}
 	actions = append(actions, applicationPlanAction("audiobookshelf", audioErr)...)
+
+	shelf := shelfarr.New("http://"+environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Shelfarr), observationHTTPClient())
+	needsSetup, shelfErr := shelf.NeedsSetup(ctx)
+	hasToken := strings.TrimSpace(secrets.HardcoverToken) != ""
+	if shelfErr == nil {
+		if needsSetup {
+			shelfErr = errPlannedMutation
+		} else {
+			var matches bool
+			matches, shelfErr = shelf.SettingsMatch(ctx, secrets.Jellyfin.Password, hasToken)
+			if shelfErr == nil && !matches {
+				shelfErr = errPlannedMutation
+			}
+		}
+	}
+	actions = append(actions, applicationPlanAction("shelfarr", shelfErr)...)
+	if shelfErr == nil && hasToken {
+		actions = append(actions, PlanAction{Kind: planActionDeferred, Subject: "shelfarr", Explanation: "Shelfarr masks the Hardcover token. Apply compares the selected Environment token through authenticated settings."})
+	}
+
 	seerrClient, err := seerr.New("http://"+environmentAddress(declared.Spec.Defaults.LANBindAddress, environment.Ports.Seerr), observationHTTPClient())
 	if err != nil {
 		actions = append(actions, deferredApplication("seerr", err)...)
