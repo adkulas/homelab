@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-var backupFixtureVolumes = []string{"calibre-web-config", "audiobookshelf-config", "audiobookshelf-metadata", "gluetun-config", "qbittorrent-config", "prowlarr-config", "sonarr-config", "radarr-config", "profilarr-config", "jellyfin-config", "seerr-config", "houndarr-config", "cleanuparr-config"}
+var backupFixtureVolumes = []string{"shelfarr-config", "calibre-web-config", "audiobookshelf-config", "audiobookshelf-metadata", "gluetun-config", "qbittorrent-config", "prowlarr-config", "sonarr-config", "radarr-config", "profilarr-config", "jellyfin-config", "seerr-config", "houndarr-config", "cleanuparr-config"}
 
 func TestBackupAppliesConfiguredRetentionToPublishedEnvironmentArchives(t *testing.T) {
 	repository := repositoryRoot(t)
@@ -268,6 +268,9 @@ func TestBackupPublishesVerifiedArchivesForEveryMutableServiceVolume(t *testing.
 		seen[service.Volume] = true
 		if (service.Volume != service.Name+"-config" && !(service.Name == "audiobookshelf" && service.Volume == "audiobookshelf-metadata" && service.MountPath == "/metadata")) || service.DockerVolume != "media-staging_"+service.Volume {
 			t.Fatalf("unexpected volume identity for %s: %#v", service.Name, service)
+		}
+		if service.Name == "shelfarr" && service.MountPath != "/rails/storage" {
+			t.Fatal("backup must cover Shelfarr database and encryption keys in /rails/storage")
 		}
 		if service.MountPath == "" || !strings.Contains(service.Image, "@sha256:") {
 			t.Fatalf("missing mount or immutable image metadata for %s: %#v", service.Name, service)
@@ -534,7 +537,7 @@ case "$1" in
 		fi
 		;;
       *" ps --status running --services "*)
-        printf '%s\n' gluetun qbittorrent prowlarr sonarr radarr profilarr jellyfin seerr houndarr cleanuparr audiobookshelf calibre-web
+        printf '%s\n' gluetun qbittorrent prowlarr sonarr radarr profilarr jellyfin seerr houndarr cleanuparr audiobookshelf calibre-web shelfarr
         ;;
     esac
     ;;

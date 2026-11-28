@@ -650,7 +650,11 @@ func recoverInterruptedRestores(ctx context.Context, backupRoot, environment, pr
 		if err := writeRestoreOperation(journalPath, operation); err != nil {
 			return err
 		}
-		recoveryErr := rollbackRestore(context.WithoutCancel(ctx), composePath, projectName, safety, sources)
+		recoverySources := sources
+		if safety.CLIContractVersion == legacyBackupCLIContractVersion {
+			recoverySources = excludeRestoreSources(sources, []string{"shelfarr"})
+		}
+		recoveryErr := rollbackRestore(context.WithoutCancel(ctx), composePath, projectName, safety, recoverySources)
 		recoveryErr = errors.Join(recoveryErr, cleanupTemporaryRestoreVolumes(context.WithoutCancel(ctx), operation.TemporaryVolumes))
 		if recoveryErr != nil {
 			operation.Status = restoreRollbackFailed

@@ -14,6 +14,7 @@ import (
 
 	"github.com/adkulas/homelab/internal/config"
 	"github.com/adkulas/homelab/internal/qbittorrent"
+	"github.com/adkulas/homelab/internal/shelfarr"
 )
 
 const doctorSchemaVersion = "homelab.media-stack/doctor/v1alpha1"
@@ -90,7 +91,15 @@ func (localEngine) Doctor(ctx context.Context, request DoctorRequest) (DoctorRep
 	add("DEPENDENCY_SOPS_UNAVAILABLE", "SOPS", "Install SOPS and ensure it is on PATH.", runQuiet(ctx, "sops", "--version"))
 	add("DEPENDENCY_AGE_UNAVAILABLE", "age", "Install age and ensure it is on PATH.", runQuiet(ctx, "age", "--version"))
 	report.Diagnostics = append(report.Diagnostics, doctorHardwareTranscodingDiagnostic(ctx, request.environment, environment.HardwareTranscoding, versions.Images["jellyfin"]))
-	add("SECRET_DECRYPT_FAILED", "selected Environment secret decryption", "Install the matching age identity and verify the SOPS document can be decrypted.", selectedSecretsAvailable(ctx, request.configPath, environment))
+	secrets, secretErr := decryptSelectedEnvironmentSecrets(ctx, request.configPath, environment)
+	add("SECRET_DECRYPT_FAILED", "selected Environment secret decryption", "Install the matching age identity and verify the SOPS document can be decrypted.", secretErr == nil)
+	if secretErr == nil && !shelfarr.AcceptsInitialPassword(secrets.Jellyfin.Password) {
+		report.Diagnostics = append(report.Diagnostics, Diagnostic{
+			Code: "PREFLIGHT_SHELFARR_INITIAL_PASSWORD", Status: "warn", Severity: "warning",
+			Environment: request.environment, Subject: "Shelfarr first-run household password",
+			Explanation: shelfarr.PasswordRequirement, Remedy: shelfarr.PasswordRemedy,
+		})
+	}
 	books := filepath.Join(environment.DataRoot, "books")
 	add("PREFLIGHT_CALIBRE_INTAKE", "Calibre ebook intake, library and converter", "Run init for this Environment, check book directory permissions, and verify the pinned Calibre image.", runDockerProbeQuiet(ctx, "--user", fmt.Sprintf("%d:%d", declared.Spec.Defaults.RuntimeUID, declared.Spec.Defaults.RuntimeGID), "--mount", "type=bind,source="+books+",target=/books", "--entrypoint", "/bin/sh", versions.Images["calibre-web"], "-ec", "for d in /books/ebooks/ready /books/ebooks/inbox /books/calibre; do test -d \"$d\" && test -w \"$d\" && test -x \"$d\" || exit 1; done; command -v ebook-convert"))
 	image := versions.Images["gluetun"]

@@ -3,9 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -48,34 +46,18 @@ func startAudiobookshelf(ctx context.Context, plan Plan, projectName string, cre
 		return fmt.Errorf("Audiobookshelf is missing its initialized account after startup")
 	}
 	// A previous apply may have been interrupted after switching to the LAN port.
-	ids, err := exec.CommandContext(ctx, "docker", "network", "ls", "-q", "--filter", "label=com.docker.compose.project="+projectName, "--filter", "label=com.docker.compose.network="+topology.AudiobookshelfSetupNetwork).Output()
-	if err != nil {
-		return fmt.Errorf("inspect Audiobookshelf setup network: %w", err)
-	}
-	for _, id := range strings.Fields(string(ids)) {
-		if err := exec.CommandContext(ctx, "docker", "network", "rm", id).Run(); err != nil {
-			return fmt.Errorf("remove Audiobookshelf setup network: %w", err)
-		}
+	if err := removeSetupNetwork(ctx, projectName, topology.AudiobookshelfSetupNetwork); err != nil {
+		return err
 	}
 	return client.ReconcileLibrary(ctx, creds)
 }
 
 func audioPublishedClient(ctx context.Context, plan Plan, private bool) (audiobookshelf.Client, error) {
-	output, err := runDockerCompose(ctx, plan, "port", "audiobookshelf", "80")
+	address, err := publishedWebAddress(ctx, plan, "audiobookshelf", private)
 	if err != nil {
-		return audiobookshelf.Client{}, fmt.Errorf("resolve Audiobookshelf port: %w", err)
+		return audiobookshelf.Client{}, err
 	}
-	host, port, err := net.SplitHostPort(strings.TrimSpace(string(output)))
-	if err != nil {
-		return audiobookshelf.Client{}, fmt.Errorf("invalid Audiobookshelf published address: %w", err)
-	}
-	if private && host != "127.0.0.1" {
-		return audiobookshelf.Client{}, fmt.Errorf("Audiobookshelf setup requires a loopback port")
-	}
-	if host == "0.0.0.0" || host == "::" {
-		host = "127.0.0.1"
-	}
-	return audiobookshelf.Client{URL: "http://" + net.JoinHostPort(host, port), HTTP: &http.Client{Timeout: 10 * time.Second}}, nil
+	return audiobookshelf.Client{URL: address, HTTP: &http.Client{Timeout: 10 * time.Second}}, nil
 }
 
 func startAudioServer(ctx context.Context, plan Plan, private bool) (audiobookshelf.Client, bool, error) {
@@ -87,17 +69,6 @@ func startAudioServer(ctx context.Context, plan Plan, private bool) (audiobooksh
 	if err != nil {
 		return client, false, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	for {
-		initialized, err := client.Initialized(ctx)
-		if err == nil {
-			return client, initialized, nil
-		}
-		select {
-		case <-ctx.Done():
-			return client, false, fmt.Errorf("wait for Audiobookshelf status: %w", err)
-		case <-time.After(time.Second):
-		}
-	}
+	initialized, err := waitForBookService(ctx, "Audiobookshelf status", client.Initialized)
+	return client, initialized, err
 }

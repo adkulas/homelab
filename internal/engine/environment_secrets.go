@@ -15,6 +15,9 @@ type siteVPNSecretDocument struct {
 }
 
 type environmentSecretDocument struct {
+	Hardcover struct {
+		APIToken string `yaml:"apiToken,omitempty"`
+	} `yaml:"hardcover,omitempty"`
 	Houndarr struct {
 		Username string `yaml:"username"`
 		Password string `yaml:"password"`

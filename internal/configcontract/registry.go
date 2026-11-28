@@ -10,6 +10,7 @@ import (
 	"github.com/adkulas/homelab/internal/qbittorrent"
 	"github.com/adkulas/homelab/internal/radarr"
 	"github.com/adkulas/homelab/internal/seerr"
+	"github.com/adkulas/homelab/internal/shelfarr"
 	"github.com/adkulas/homelab/internal/sonarr"
 )
 
@@ -19,6 +20,7 @@ type serviceRegistration struct {
 }
 
 var serviceRegistry = map[string]serviceRegistration{
+	"shelfarr":       {title: "Shelfarr", settings: shelfarr.ConfigurationContract},
 	"calibre-web":    {title: "Calibre-Web Automated", settings: engine.CalibreWebConfigurationContract},
 	"audiobookshelf": {title: "Audiobookshelf", settings: audiobookshelf.ConfigurationContract},
 	"houndarr":       {title: "Houndarr", settings: companions.HoundarrConfigurationContract},

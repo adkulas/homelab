@@ -97,6 +97,7 @@ type Server struct {
 }
 
 type Ports struct {
+	Shelfarr       int `yaml:"shelfarr,omitempty"`
 	CalibreWeb     int `yaml:"calibre-web,omitempty"`
 	Audiobookshelf int `yaml:"audiobookshelf,omitempty"`
 	QBittorrent    int `yaml:"qbittorrent"`
@@ -117,7 +118,7 @@ type PublishedPort struct {
 
 func (env Environment) PublishedPorts() []PublishedPort {
 	p := env.Ports
-	ports := []PublishedPort{{"qbittorrent", p.QBittorrent}, {"prowlarr", p.Prowlarr}, {"sonarr", p.Sonarr}, {"radarr", p.Radarr}, {"profilarr", p.Profilarr}, {"jellyfin", p.Jellyfin}, {"seerr", p.Seerr}, {"audiobookshelf", p.Audiobookshelf}, {"calibre-web", p.CalibreWeb}}
+	ports := []PublishedPort{{"qbittorrent", p.QBittorrent}, {"prowlarr", p.Prowlarr}, {"sonarr", p.Sonarr}, {"radarr", p.Radarr}, {"profilarr", p.Profilarr}, {"jellyfin", p.Jellyfin}, {"seerr", p.Seerr}, {"audiobookshelf", p.Audiobookshelf}, {"calibre-web", p.CalibreWeb}, {"shelfarr", p.Shelfarr}}
 	if env.SeriesAutomation != nil {
 		ports = append(ports, PublishedPort{"houndarr", p.Houndarr}, PublishedPort{"cleanuparr", p.Cleanuparr})
 	}
@@ -145,7 +146,7 @@ func validatePortIsolation(environments map[string]Environment) error {
 			if IsSeriesCompanion(left.Service) || IsSeriesCompanion(right.Service) {
 				return fmt.Errorf("companion port collision between %s/%s and %s/%s", left.environment, left.Service, right.environment, right.Service)
 			}
-			if left.Service == "calibre-web" || right.Service == "calibre-web" || left.Service == "audiobookshelf" || right.Service == "audiobookshelf" {
+			if left.Service == "shelfarr" || right.Service == "shelfarr" || left.Service == "calibre-web" || right.Service == "calibre-web" || left.Service == "audiobookshelf" || right.Service == "audiobookshelf" {
 				return fmt.Errorf("port collision between %s/%s and %s/%s", left.environment, left.Service, right.environment, right.Service)
 			}
 		}
@@ -199,6 +200,12 @@ func ApplyPortDefaults(environments map[string]Environment) {
 				env.Ports.Audiobookshelf = 23378
 			}
 		}
+		if env.Ports.Shelfarr == 0 {
+			env.Ports.Shelfarr = 5056
+			if name == "staging" {
+				env.Ports.Shelfarr = 15056
+			}
+		}
 		if env.Ports.CalibreWeb == 0 {
 			env.Ports.CalibreWeb = 8083
 			if name == "staging" {
@@ -236,6 +243,9 @@ func (declared MediaStack) validateEnvironment(name string, allowMissingHardware
 		return err
 	}
 	for environmentName, environment := range declared.Spec.Environments {
+		if p := environment.Ports.Shelfarr; p < 0 || p > 65535 {
+			return fmt.Errorf("environment %s shelfarr port must be 1..65535", environmentName)
+		}
 		if p := environment.Ports.CalibreWeb; p < 0 || p > 65535 {
 			return fmt.Errorf("environment %s calibre-web port must be 1..65535", environmentName)
 		}

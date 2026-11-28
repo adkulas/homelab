@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -76,6 +77,52 @@ func TestRestoreRejectsIncompleteMutableServiceCoverage(t *testing.T) {
 	}
 	if !strings.Contains(string(output), "complete mutable service coverage") {
 		t.Fatalf("restore coverage error = %s", output)
+	}
+}
+
+func TestRestorePreservesShelfarrForBackupsFromBeforeItsAddition(t *testing.T) {
+	temporary := t.TempDir()
+	configPath, manifestPath, fixtureRoot := createRestorableBackup(t, temporary, "staging")
+	var manifest map[string]json.RawMessage
+	if err := json.Unmarshal(readFile(t, manifestPath), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	var services []json.RawMessage
+	if err := json.Unmarshal(manifest["services"], &services); err != nil {
+		t.Fatal(err)
+	}
+	services = slices.DeleteFunc(services, func(service json.RawMessage) bool {
+		var entry struct{ Volume string }
+		if err := json.Unmarshal(service, &entry); err != nil {
+			t.Fatal(err)
+		}
+		return entry.Volume == "shelfarr-config"
+	})
+	withoutShelfarr, err := json.Marshal(services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest["services"] = withoutShelfarr
+	preview := func() string {
+		contents, err := json.Marshal(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, manifestPath, contents, 0o600)
+		command := restoreCommand(t, "--environment", "staging", "--config", configPath, "--backup", manifestPath, "--output", "json")
+		command.Env = restoreEnvironment(t, temporary, fixtureRoot)
+		output, err := command.CombinedOutput()
+		if err == nil {
+			t.Fatalf("restore proceeded without confirmation: %s", output)
+		}
+		return string(output)
+	}
+	if output := preview(); !strings.Contains(output, "complete mutable service coverage") {
+		t.Fatalf("current manifest missing Shelfarr was accepted: %s", output)
+	}
+	manifest["cliContractVersion"] = json.RawMessage(`"homelab.media-stack/cli/v1alpha1"`)
+	if output := preview(); !strings.Contains(output, `"excludedServices":["shelfarr"]`) || !strings.Contains(output, "restore requires --confirm") {
+		t.Fatalf("restore did not preview preserving Shelfarr for the earlier manifest: %s", output)
 	}
 }
 
@@ -322,7 +369,7 @@ func TestRestoreDrillRestoresSafeStagingStateWithRotatedCredentials(t *testing.T
 		`"sourceEnvironment":"production"`,
 		`"acquisitionDisabled":true`,
 		`"integrationsGated":true`,
-		`"excludedServices":["audiobookshelf","calibre-web","profilarr"]`,
+		`"excludedServices":["audiobookshelf","calibre-web","profilarr","shelfarr"]`,
 		`"startedServices":["jellyfin"]`,
 		`"completed":true`,
 	} {
@@ -342,7 +389,7 @@ func TestRestoreDrillRestoresSafeStagingStateWithRotatedCredentials(t *testing.T
 			t.Fatalf("read post-drill %s state: %v", volume, err)
 		}
 		want := volume + "\n"
-		if volume == "calibre-web-config" || volume == "profilarr-config" || strings.HasPrefix(volume, "audiobookshelf-") {
+		if volume == "shelfarr-config" || volume == "calibre-web-config" || volume == "profilarr-config" || strings.HasPrefix(volume, "audiobookshelf-") {
 			want = "staging-" + volume + "\n"
 		}
 		if string(contents) != want {

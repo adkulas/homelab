@@ -288,7 +288,7 @@ func TestPlanRendersCoexistingEnvironmentResources(t *testing.T) {
 				"gluetun": {Published: "8080", Target: 8080}, "prowlarr": {Published: "9696", Target: 9696},
 				"sonarr": {Published: "8989", Target: 8989}, "radarr": {Published: "7878", Target: 7878},
 				"profilarr": {Published: "6868", Target: 6868}, "jellyfin": {Published: "8096", Target: 8096},
-				"seerr": {Published: "5055", Target: 5055}, "calibre-web": {Published: "8083", Target: 8083}, "audiobookshelf": {Published: "13378", Target: 80},
+				"seerr": {Published: "5055", Target: 5055}, "calibre-web": {Published: "8083", Target: 8083}, "audiobookshelf": {Published: "13378", Target: 80}, "shelfarr": {Published: "5056", Target: 80},
 			},
 		},
 		"staging": {
@@ -299,7 +299,7 @@ func TestPlanRendersCoexistingEnvironmentResources(t *testing.T) {
 				"gluetun": {Published: "18080", Target: 18080}, "prowlarr": {Published: "19696", Target: 9696},
 				"sonarr": {Published: "18989", Target: 8989}, "radarr": {Published: "17878", Target: 7878},
 				"profilarr": {Published: "16868", Target: 6868}, "jellyfin": {Published: "18096", Target: 8096},
-				"seerr": {Published: "15055", Target: 5055}, "calibre-web": {Published: "18083", Target: 8083}, "audiobookshelf": {Published: "23378", Target: 80},
+				"seerr": {Published: "15055", Target: 5055}, "calibre-web": {Published: "18083", Target: 8083}, "audiobookshelf": {Published: "23378", Target: 80}, "shelfarr": {Published: "15056", Target: 80},
 			},
 		},
 	}
